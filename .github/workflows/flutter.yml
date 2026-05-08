@@ -1,4 +1,4 @@
-name: Flutter CI (stable fix)
+name: Flutter CI Stable Fix
 
 on:
   push:
@@ -11,18 +11,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Flutter manually
+      - name: Install Flutter manually (stable)
         run: |
-          git clone https://github.com/flutter/flutter.git -b stable --depth 1
+          git clone https://github.com/flutter/flutter.git --depth 1 -b stable
           echo "$PWD/flutter/bin" >> $GITHUB_PATH
 
-      - name: Check Flutter
+      - name: Verify Flutter
         run: flutter --version
 
-      - name: Get dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      - name: Analyze
+      - name: Analyze project
         run: flutter analyze
 
       - name: Build APK

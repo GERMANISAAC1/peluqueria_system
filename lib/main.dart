@@ -3,7 +3,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -26,7 +25,6 @@ class AuthProvider extends ChangeNotifier {
   Usuario? get usuarioActual => _usuarioActual;
   
   Future<void> login(String email, String password, BuildContext context) async {
-    // Simulación de login
     final db = await DatabaseHelper.instance.database;
     final List<Map<String, dynamic>> maps = await db.query(
       'usuarios',
@@ -38,9 +36,11 @@ class AuthProvider extends ChangeNotifier {
       _usuarioActual = Usuario.fromMap(maps.first);
       notifyListeners();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario no encontrado')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuario no encontrado')),
+        );
+      }
     }
   }
   
@@ -49,9 +49,11 @@ class AuthProvider extends ChangeNotifier {
     usuario.id = await db.insert('usuarios', usuario.toMap());
     _usuarioActual = usuario;
     notifyListeners();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Registro exitoso')),
-    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registro exitoso')),
+      );
+    }
   }
   
   void logout() {
@@ -209,7 +211,7 @@ class Reserva {
   }
 }
 
-// ==================== BASE DE DATOS ====================
+// ==================== BASE DE DATOS (SINGLETON CORREGIDO) ====================
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -217,7 +219,11 @@ class DatabaseHelper {
 
   DatabaseHelper._internal();
 
-  factory DatabaseHelper() => _instance;
+  factory DatabaseHelper() {
+    return _instance;
+  }
+
+  static DatabaseHelper get instance => _instance;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -472,7 +478,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 24),
                       
                       ElevatedButton(
-                        onPressed: _handleAuth,
+                        onPressed: () => _handleAuth(context),
                         style: ElevatedButton.styleFrom(
                           minimumSize: const Size(double.infinity, 50),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -496,7 +502,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _handleAuth() async {
+  Future<void> _handleAuth(BuildContext context) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     
     if (_isRegistering) {
@@ -601,8 +607,13 @@ class ClienteDashboard extends StatelessWidget {
                 const SizedBox(height: 16),
                 FutureBuilder<List<Servicio>>(
                   future: _getServicios(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  builder: (BuildContext context, AsyncSnapshot<List<Servicio>> snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Center(child: Text('No hay servicios disponibles'));
+                    }
                     return Column(
                       children: snapshot.data!.map((servicio) => Card(
                         child: ListTile(
@@ -633,7 +644,7 @@ class ClienteDashboard extends StatelessWidget {
   void _reservarServicio(BuildContext context, Servicio servicio) {
     showDialog(
       context: context,
-      builder: (context) => Dialog(
+      builder: (BuildContext context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: ReservaDialog(servicio: servicio),
       ),
@@ -674,7 +685,7 @@ class _ReservaDialogState extends State<ReservaDialog> {
               initialDate: DateTime.now(),
               firstDate: DateTime.now(),
               lastDate: DateTime.now().add(const Duration(days: 30)),
-              onDateChanged: (date) => setState(() => _fechaSeleccionada = date),
+              onDateChanged: (DateTime date) => setState(() => _fechaSeleccionada = date),
             ),
           ),
           const SizedBox(height: 16),
@@ -683,12 +694,14 @@ class _ReservaDialogState extends State<ReservaDialog> {
             children: horarios.map((hora) => FilterChip(
               label: Text(hora),
               selected: _horaSeleccionada == hora,
-              onSelected: (selected) => setState(() => _horaSeleccionada = selected ? hora : null),
+              onSelected: (bool selected) => setState(() => _horaSeleccionada = selected ? hora : null),
             )).toList(),
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: _fechaSeleccionada != null && _horaSeleccionada != null ? () => _confirmarReserva(context) : null,
+            onPressed: _fechaSeleccionada != null && _horaSeleccionada != null 
+                ? () => _confirmarReserva(context) 
+                : null,
             child: const Text('Confirmar Reserva'),
           ),
         ],
@@ -696,7 +709,7 @@ class _ReservaDialogState extends State<ReservaDialog> {
     );
   }
 
-  void _confirmarReserva(BuildContext context) async {
+  Future<void> _confirmarReserva(BuildContext context) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final db = await DatabaseHelper.instance.database;
     
@@ -755,7 +768,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       body: _pages[_selectedIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+        onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard), label: 'Inicio'),
           NavigationDestination(icon: Icon(Icons.content_cut), label: 'Servicios'),
@@ -774,8 +787,13 @@ class AdminInicio extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, int>>(
       future: _getEstadisticas(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      builder: (BuildContext context, AsyncSnapshot<Map<String, int>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: Text('Error al cargar estadísticas'));
+        }
         final stats = snapshot.data!;
         return Padding(
           padding: const EdgeInsets.all(16),
@@ -848,9 +866,11 @@ class _AdminServiciosState extends State<AdminServicios> {
   Future<void> _cargarServicios() async {
     final db = await DatabaseHelper.instance.database;
     final maps = await db.query('servicios');
-    setState(() {
-      servicios = maps.map((m) => Servicio.fromMap(m)).toList();
-    });
+    if (mounted) {
+      setState(() {
+        servicios = maps.map((m) => Servicio.fromMap(m)).toList();
+      });
+    }
   }
   
   @override
@@ -858,7 +878,7 @@ class _AdminServiciosState extends State<AdminServicios> {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: servicios.length,
-      itemBuilder: (context, index) {
+      itemBuilder: (BuildContext context, int index) {
         final servicio = servicios[index];
         return Card(
           child: ListTile(
@@ -880,18 +900,22 @@ class AdminReservas extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _getReservasConDetalles(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      builder: (BuildContext context, AsyncSnapshot<List<Map<String, dynamic>>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('No hay reservas'));
+        }
         final reservas = snapshot.data!;
-        if (reservas.isEmpty) return const Center(child: Text('No hay reservas'));
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: reservas.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (BuildContext context, int index) {
             final r = reservas[index];
             return Card(
               child: ListTile(
-                leading: CircleAvatar(child: Text(r['cliente_nombre'][0])),
+                leading: CircleAvatar(child: Text((r['cliente_nombre'] as String)[0])),
                 title: Text(r['servicio_nombre']),
                 subtitle: Text('${DateFormat('dd/MM/yyyy').format(DateTime.parse(r['fecha']))} a las ${r['hora']}'),
                 trailing: Chip(
@@ -925,13 +949,18 @@ class AdminClientes extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<List<Usuario>>(
       future: _getClientes(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      builder: (BuildContext context, AsyncSnapshot<List<Usuario>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('No hay clientes'));
+        }
         final clientes = snapshot.data!;
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: clientes.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (BuildContext context, int index) {
             final cliente = clientes[index];
             return Card(
               child: ListTile(
@@ -965,7 +994,7 @@ class AdminClientes extends StatelessWidget {
   
   Color _getMembresiaColor(String membresia) {
     switch (membresia) {
-      case 'premium': return Colors.gold;
+      case 'premium': return Colors.amber; // CORREGIDO: Colors.amber en lugar de Colors.gold
       case 'vip': return Colors.deepPurple;
       default: return Colors.brown;
     }

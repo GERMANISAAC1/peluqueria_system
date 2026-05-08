@@ -9,17 +9,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Descargar tu proyecto
+      # 1. Descargar proyecto
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Instalar Flutter (estable, sin flutter-action)
+      # 2. Instalar Flutter (estable)
       - name: Install Flutter
         run: |
           git clone https://github.com/flutter/flutter.git --depth 1 -b stable
           echo "$PWD/flutter/bin" >> $GITHUB_PATH
 
-      # 3. Verificar instalación
+      # 3. Verificar Flutter
       - name: Check Flutter version
         run: flutter --version
 
@@ -27,10 +27,17 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # 5. Analizar SOLO tu código (evita errores del SDK)
+      # 5. Analizar SOLO tu código
       - name: Analyze project
         run: flutter analyze lib
 
       # 6. Compilar APK
       - name: Build APK
         run: flutter build apk --release
+
+      # 7. SUBIR APK PARA DESCARGA (IMPORTANTE)
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk

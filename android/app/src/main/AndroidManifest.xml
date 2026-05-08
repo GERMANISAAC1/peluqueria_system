@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
+<<<<<<< HEAD
         android:label="barberpro"
+=======
+        android:label="peluqueria_kety"
+>>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

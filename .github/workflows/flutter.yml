@@ -1,4 +1,4 @@
-name: Flutter CI
+name: Flutter CI (stable fix)
 
 on:
   push:
@@ -11,10 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.22.3"
+      - name: Install Flutter manually
+        run: |
+          git clone https://github.com/flutter/flutter.git -b stable --depth 1
+          echo "$PWD/flutter/bin" >> $GITHUB_PATH
+
+      - name: Check Flutter
+        run: flutter --version
 
       - name: Get dependencies
         run: flutter pub get

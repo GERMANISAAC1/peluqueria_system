@@ -17,7 +17,6 @@ class BarberProApp extends StatelessWidget {
         brightness: Brightness.dark,
         primaryColor: const Color(0xFFC9A84C),
         scaffoldBackgroundColor: const Color(0xFF0A0A0A),
-        fontFamily: 'Poppins',
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF111111),
           elevation: 0,
@@ -26,7 +25,6 @@ class BarberProApp extends StatelessWidget {
             color: Color(0xFFC9A84C),
             fontSize: 22,
             fontWeight: FontWeight.bold,
-            fontFamily: 'PlayfairDisplay',
           ),
         ),
         bottomNavigationBarTheme: const BottomNavigationBarThemeData(
@@ -89,7 +87,6 @@ class _SplashScreenState extends State<SplashScreen> {
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 4,
-                fontFamily: 'PlayfairDisplay',
               ),
             ),
           ],
@@ -113,10 +110,10 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: const Alignment(0, -0.3),
+          gradient: const RadialGradient(
+            center: Alignment(0, -0.3),
             radius: 1.2,
-            colors: const [
+            colors: [
               Color(0xFF1A1200),
               Color(0xFF0A0A0A),
             ],
@@ -146,7 +143,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Color(0xFFC9A84C),
                     fontSize: 38,
                     fontWeight: FontWeight.bold,
-                    fontFamily: 'PlayfairDisplay',
                   ),
                 ),
                 const Text(
@@ -256,14 +252,14 @@ class Cliente {
   };
 
   factory Cliente.fromJson(Map<String, dynamic> json) => Cliente(
-    id: json['id'],
-    nombre: json['nombre'],
-    telefono: json['telefono'],
-    email: json['email'],
-    membresia: json['membresia'],
-    puntos: json['puntos'],
+    id: json['id'] as String,
+    nombre: json['nombre'] as String,
+    telefono: json['telefono'] as String,
+    email: json['email'] as String,
+    membresia: json['membresia'] as String,
+    puntos: json['puntos'] as int,
     historialPuntos: (json['historialPuntos'] as List)
-        .map((e) => HistorialPunto.fromJson(e))
+        .map((e) => HistorialPunto.fromJson(e as Map<String, dynamic>))
         .toList(),
   );
 }
@@ -282,9 +278,9 @@ class HistorialPunto {
   };
 
   factory HistorialPunto.fromJson(Map<String, dynamic> json) => HistorialPunto(
-    fecha: json['fecha'],
-    concepto: json['concepto'],
-    puntos: json['puntos'],
+    fecha: json['fecha'] as String,
+    concepto: json['concepto'] as String,
+    puntos: json['puntos'] as int,
   );
 }
 
@@ -321,14 +317,14 @@ class Servicio {
   };
 
   factory Servicio.fromJson(Map<String, dynamic> json) => Servicio(
-    id: json['id'],
-    nombre: json['nombre'],
-    descripcion: json['descripcion'],
-    precio: json['precio'],
-    duracion: json['duracion'],
-    puntos: json['puntos'],
-    icono: json['icono'],
-    activo: json['activo'],
+    id: json['id'] as String,
+    nombre: json['nombre'] as String,
+    descripcion: json['descripcion'] as String,
+    precio: (json['precio'] as num).toDouble(),
+    duracion: json['duracion'] as int,
+    puntos: json['puntos'] as int,
+    icono: json['icono'] as String,
+    activo: json['activo'] as bool,
   );
 }
 
@@ -371,52 +367,16 @@ class Cita {
   };
 
   factory Cita.fromJson(Map<String, dynamic> json) => Cita(
-    id: json['id'],
-    clienteId: json['clienteId'],
-    clienteNombre: json['clienteNombre'],
-    servicioId: json['servicioId'],
-    servicioNombre: json['servicioNombre'],
-    fecha: json['fecha'],
-    hora: json['hora'],
-    estado: json['estado'],
-    precio: json['precio'],
-    notas: json['notas'],
-  );
-}
-
-class Promocion {
-  final String id;
-  final String titulo;
-  final String descripcion;
-  final int descuento;
-  final String hasta;
-  bool activa;
-
-  Promocion({
-    required this.id,
-    required this.titulo,
-    required this.descripcion,
-    required this.descuento,
-    required this.hasta,
-    this.activa = true,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'titulo': titulo,
-    'descripcion': descripcion,
-    'descuento': descuento,
-    'hasta': hasta,
-    'activa': activa,
-  };
-
-  factory Promocion.fromJson(Map<String, dynamic> json) => Promocion(
-    id: json['id'],
-    titulo: json['titulo'],
-    descripcion: json['descripcion'],
-    descuento: json['descuento'],
-    hasta: json['hasta'],
-    activa: json['activa'],
+    id: json['id'] as String,
+    clienteId: json['clienteId'] as String,
+    clienteNombre: json['clienteNombre'] as String,
+    servicioId: json['servicioId'] as String,
+    servicioNombre: json['servicioNombre'] as String,
+    fecha: json['fecha'] as String,
+    hora: json['hora'] as String,
+    estado: json['estado'] as String,
+    precio: (json['precio'] as num).toDouble(),
+    notas: json['notas'] as String,
   );
 }
 
@@ -542,7 +502,7 @@ class DatabaseService {
 
   Future<Map<String, dynamic>> getData() async {
     final dataStr = _prefs.getString(_dbKey);
-    return jsonDecode(dataStr!);
+    return jsonDecode(dataStr!) as Map<String, dynamic>;
   }
 
   Future<void> saveData(Map<String, dynamic> data) async {
@@ -583,7 +543,9 @@ class _ClienteMainScreenState extends State<ClienteMainScreen> {
 
   Future<void> _loadClienteActual() async {
     final data = await _db.getData();
-    final clientes = (data['clientes'] as List).map((c) => Cliente.fromJson(c)).toList();
+    final clientes = (data['clientes'] as List)
+        .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+        .toList();
     _clienteActual = clientes.firstWhere((c) => c.id == 'CLI001');
   }
 
@@ -679,9 +641,11 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
   Future<void> _loadData() async {
     final data = await widget.db.getData();
     setState(() {
-      _citas = (data['citas'] as List).map((c) => Cita.fromJson(c)).toList();
+      _citas = (data['citas'] as List)
+          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+          .toList();
       _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s))
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .where((s) => s.activo)
           .toList();
     });
@@ -954,7 +918,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
     final data = await widget.db.getData();
     setState(() {
       _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s))
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .where((s) => s.activo)
           .toList();
     });
@@ -963,7 +927,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
   Future<List<Cita>> _getCitasOcupadas() async {
     final data = await widget.db.getData();
     final citas = (data['citas'] as List)
-        .map((c) => Cita.fromJson(c))
+        .map((c) => Cita.fromJson(c as Map<String, dynamic>))
         .where((c) => c.fecha == _fechaSeleccionada.toIso8601String().split('T')[0])
         .toList();
     return citas;
@@ -1002,7 +966,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
       'precio': _servicioSeleccionado!.precio,
       'notas': _notas,
     };
-    data['citas'].add(nuevaCita);
+    (data['citas'] as List).add(nuevaCita);
     await widget.db.saveData(data);
 
     if (mounted) {
@@ -1267,7 +1231,7 @@ class _ClienteCitasScreenState extends State<ClienteCitasScreen> {
     final data = await widget.db.getData();
     setState(() {
       _citas = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c))
+          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
           .where((c) => c.clienteId == widget.cliente.id)
           .toList();
       _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
@@ -1299,7 +1263,7 @@ class _ClienteCitasScreenState extends State<ClienteCitasScreen> {
     final citas = data['citas'] as List;
     final index = citas.indexWhere((c) => c['id'] == cita.id);
     if (index != -1) {
-      citas[index]['estado'] = 'cancelada';
+      (citas[index] as Map<String, dynamic>)['estado'] = 'cancelada';
       await widget.db.saveData(data);
       await _loadCitas();
       widget.onRefresh();
@@ -1817,8 +1781,8 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
     final clientes = data['clientes'] as List;
     final index = clientes.indexWhere((c) => c['id'] == widget.cliente.id);
     if (index != -1) {
-      clientes[index]['nombre'] = _nombreController.text;
-      clientes[index]['telefono'] = _telefonoController.text;
+      (clientes[index] as Map<String, dynamic>)['nombre'] = _nombreController.text;
+      (clientes[index] as Map<String, dynamic>)['telefono'] = _telefonoController.text;
       await widget.db.saveData(data);
       widget.onRefresh();
       if (mounted) {
@@ -2011,15 +1975,19 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
         title: const Text('✂️ BarberPro Admin'),
         centerTitle: true,
       ),
-      body: _db == null
-          ? const Center(child: CircularProgressIndicator())
-          : [
+      body: Column(
+        children: [
+          Expanded(
+            child: [
               AdminDashboardScreen(db: _db),
               AdminCitasScreen(db: _db),
               AdminClientesScreen(db: _db),
               AdminServiciosScreen(db: _db),
               AdminReportesScreen(db: _db),
             ][_selectedIndex],
+          ),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
@@ -2061,11 +2029,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final hoy = DateTime.now().toIso8601String().split('T')[0];
     setState(() {
       _citasHoy = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c))
+          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
           .where((c) => c.fecha == hoy)
           .toList();
-      _clientes = (data['clientes'] as List).map((c) => Cliente.fromJson(c)).toList();
-      _servicios = (data['servicios'] as List).map((s) => Servicio.fromJson(s)).toList();
+      _clientes = (data['clientes'] as List)
+          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+          .toList();
+      _servicios = (data['servicios'] as List)
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+          .toList();
     });
   }
 
@@ -2074,14 +2046,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final citas = data['citas'] as List;
     final citaIndex = citas.indexWhere((c) => c['id'] == cita.id);
     if (citaIndex != -1) {
-      citas[citaIndex]['estado'] = 'completada';
+      (citas[citaIndex] as Map<String, dynamic>)['estado'] = 'completada';
       
       final servicio = _servicios.firstWhere((s) => s.id == cita.servicioId);
       final clientes = data['clientes'] as List;
       final clienteIndex = clientes.indexWhere((c) => c['id'] == cita.clienteId);
       if (clienteIndex != -1) {
-        clientes[clienteIndex]['puntos'] = (clientes[clienteIndex]['puntos'] as int) + (servicio.puntos);
-        final historial = clientes[clienteIndex]['historialPuntos'] as List;
+        (clientes[clienteIndex] as Map<String, dynamic>)['puntos'] = 
+            (clientes[clienteIndex]['puntos'] as int) + (servicio.puntos);
+        final historial = (clientes[clienteIndex] as Map<String, dynamic>)['historialPuntos'] as List;
         historial.add({
           'fecha': DateTime.now().toIso8601String().split('T')[0],
           'concepto': servicio.nombre,
@@ -2311,7 +2284,7 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
     final data = await _db.getData();
     setState(() {
       _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s))
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .where((s) => s.activo)
           .toList();
     });
@@ -2319,7 +2292,9 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
 
   void _buscarCliente() async {
     final data = await _db.getData();
-    final clientes = (data['clientes'] as List).map((c) => Cliente.fromJson(c)).toList();
+    final clientes = (data['clientes'] as List)
+        .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+        .toList();
     setState(() {
       _clienteEncontrado = clientes.firstWhere(
         (c) => c.id.toUpperCase() == _clienteId.toUpperCase(),
@@ -2346,8 +2321,9 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
     final clientes = data['clientes'] as List;
     final clienteIndex = clientes.indexWhere((c) => c['id'] == _clienteEncontrado!.id);
     if (clienteIndex != -1) {
-      clientes[clienteIndex]['puntos'] = (clientes[clienteIndex]['puntos'] as int) + _servicioSeleccionado!.puntos;
-      final historial = clientes[clienteIndex]['historialPuntos'] as List;
+      (clientes[clienteIndex] as Map<String, dynamic>)['puntos'] = 
+          (clientes[clienteIndex]['puntos'] as int) + _servicioSeleccionado!.puntos;
+      final historial = (clientes[clienteIndex] as Map<String, dynamic>)['historialPuntos'] as List;
       historial.add({
         'fecha': DateTime.now().toIso8601String().split('T')[0],
         'concepto': _servicioSeleccionado!.nombre,
@@ -2428,7 +2404,7 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _servicios.map((s) {
-                return DropdownMenuItem(
+                return DropdownMenuItem<Servicio>(
                   value: s,
                   child: Text('${s.nombre} · S/${s.precio} · +${s.puntos} pts'),
                 );
@@ -2489,9 +2465,11 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
   Future<void> _loadData() async {
     final data = await widget.db.getData();
     setState(() {
-      _clientes = (data['clientes'] as List).map((c) => Cliente.fromJson(c)).toList();
+      _clientes = (data['clientes'] as List)
+          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+          .toList();
       _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s))
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .where((s) => s.activo)
           .toList();
     });
@@ -2518,7 +2496,7 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
       'precio': _servicioSeleccionado!.precio,
       'notas': '',
     };
-    data['citas'].add(nuevaCita);
+    (data['citas'] as List).add(nuevaCita);
     await widget.db.saveData(data);
 
     if (mounted) {
@@ -2559,7 +2537,7 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _clientes.map((c) {
-                return DropdownMenuItem(value: c, child: Text(c.nombre));
+                return DropdownMenuItem<Cliente>(value: c, child: Text(c.nombre));
               }).toList(),
               onChanged: (value) => setState(() => _clienteSeleccionado = value),
             ),
@@ -2576,7 +2554,7 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _servicios.map((s) {
-                return DropdownMenuItem(value: s, child: Text('${s.nombre} · S/${s.precio}'));
+                return DropdownMenuItem<Servicio>(value: s, child: Text('${s.nombre} · S/${s.precio}'));
               }).toList(),
               onChanged: (value) => setState(() => _servicioSeleccionado = value),
             ),
@@ -2619,7 +2597,7 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _horas.map((h) {
-                return DropdownMenuItem(value: h, child: Text(h));
+                return DropdownMenuItem<String>(value: h, child: Text(h));
               }).toList(),
               onChanged: (value) => setState(() => _hora = value!),
             ),
@@ -2636,8 +2614,8 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: const [
-                DropdownMenuItem(value: 'pendiente', child: Text('Pendiente')),
-                DropdownMenuItem(value: 'confirmada', child: Text('Confirmada')),
+                DropdownMenuItem<String>(value: 'pendiente', child: Text('Pendiente')),
+                DropdownMenuItem<String>(value: 'confirmada', child: Text('Confirmada')),
               ],
               onChanged: (value) => setState(() => _estado = value!),
             ),
@@ -2684,7 +2662,9 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
   Future<void> _loadCitas() async {
     final data = await widget.db.getData();
     setState(() {
-      _citas = (data['citas'] as List).map((c) => Cita.fromJson(c)).toList();
+      _citas = (data['citas'] as List)
+          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+          .toList();
       _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
     });
   }
@@ -2709,16 +2689,19 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
     final citas = data['citas'] as List;
     final index = citas.indexWhere((c) => c['id'] == cita.id);
     if (index != -1) {
-      citas[index]['estado'] = nuevoEstado;
+      (citas[index] as Map<String, dynamic>)['estado'] = nuevoEstado;
       
       if (nuevoEstado == 'completada') {
-        final servicios = (data['servicios'] as List).map((s) => Servicio.fromJson(s)).toList();
+        final servicios = (data['servicios'] as List)
+            .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+            .toList();
         final servicio = servicios.firstWhere((s) => s.id == cita.servicioId);
         final clientes = data['clientes'] as List;
         final clienteIndex = clientes.indexWhere((c) => c['id'] == cita.clienteId);
         if (clienteIndex != -1) {
-          clientes[clienteIndex]['puntos'] = (clientes[clienteIndex]['puntos'] as int) + (servicio.puntos);
-          final historial = clientes[clienteIndex]['historialPuntos'] as List;
+          (clientes[clienteIndex] as Map<String, dynamic>)['puntos'] = 
+              (clientes[clienteIndex]['puntos'] as int) + (servicio.puntos);
+          final historial = (clientes[clienteIndex] as Map<String, dynamic>)['historialPuntos'] as List;
           historial.add({
             'fecha': DateTime.now().toIso8601String().split('T')[0],
             'concepto': servicio.nombre,
@@ -2731,7 +2714,7 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
       await _loadCitas();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Estado actualizado a ${nuevoEstado}'), backgroundColor: Colors.green),
+          SnackBar(content: Text('Estado actualizado a $nuevoEstado'), backgroundColor: Colors.green),
         );
       }
     }
@@ -2760,11 +2743,11 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
             ),
             items: const [
-              DropdownMenuItem(value: '', child: Text('Todas')),
-              DropdownMenuItem(value: 'pendiente', child: Text('Pendientes')),
-              DropdownMenuItem(value: 'confirmada', child: Text('Confirmadas')),
-              DropdownMenuItem(value: 'completada', child: Text('Completadas')),
-              DropdownMenuItem(value: 'cancelada', child: Text('Canceladas')),
+              DropdownMenuItem<String>(value: '', child: Text('Todas')),
+              DropdownMenuItem<String>(value: 'pendiente', child: Text('Pendientes')),
+              DropdownMenuItem<String>(value: 'confirmada', child: Text('Confirmadas')),
+              DropdownMenuItem<String>(value: 'completada', child: Text('Completadas')),
+              DropdownMenuItem<String>(value: 'cancelada', child: Text('Canceladas')),
             ],
             onChanged: (value) => setState(() => _filtro = value ?? ''),
           ),
@@ -2887,7 +2870,9 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
   Future<void> _loadClientes() async {
     final data = await widget.db.getData();
     setState(() {
-      _clientes = (data['clientes'] as List).map((c) => Cliente.fromJson(c)).toList();
+      _clientes = (data['clientes'] as List)
+          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+          .toList();
     });
   }
 
@@ -2915,7 +2900,7 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
     if (confirm != true) return;
 
     final data = await widget.db.getData();
-    data['clientes'] = (data['clientes'] as List).where((c) => c['id'] != id).toList();
+    data['clientes'] = (data['clientes'] as List).where((c) => (c as Map<String, dynamic>)['id'] != id).toList();
     await widget.db.saveData(data);
     await _loadClientes();
     if (mounted) {
@@ -3054,7 +3039,9 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
   Future<void> _loadServicios() async {
     final data = await widget.db.getData();
     setState(() {
-      _servicios = (data['servicios'] as List).map((s) => Servicio.fromJson(s)).toList();
+      _servicios = (data['servicios'] as List)
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+          .toList();
     });
   }
 
@@ -3074,7 +3061,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
     if (confirm != true) return;
 
     final data = await widget.db.getData();
-    data['servicios'] = (data['servicios'] as List).where((s) => s['id'] != id).toList();
+    data['servicios'] = (data['servicios'] as List).where((s) => (s as Map<String, dynamic>)['id'] != id).toList();
     await widget.db.saveData(data);
     await _loadServicios();
   }
@@ -3226,7 +3213,7 @@ class _NuevoServicioDialogState extends State<NuevoServicioDialog> {
     };
 
     final data = await widget.db.getData();
-    data['servicios'].add(nuevoServicio);
+    (data['servicios'] as List).add(nuevoServicio);
     await widget.db.saveData(data);
 
     if (mounted) {
@@ -3328,8 +3315,12 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
   Future<void> _loadData() async {
     final data = await widget.db.getData();
     setState(() {
-      _citas = (data['citas'] as List).map((c) => Cita.fromJson(c)).toList();
-      _servicios = (data['servicios'] as List).map((s) => Servicio.fromJson(s)).toList();
+      _citas = (data['citas'] as List)
+          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+          .toList();
+      _servicios = (data['servicios'] as List)
+          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+          .toList();
     });
   }
 

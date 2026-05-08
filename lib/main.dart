@@ -579,7 +579,7 @@ class _ClienteMainScreenState extends State<ClienteMainScreen> {
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFC9A84C).withOpacity(0.15),
+              color: const Color(0xFFC9A84C).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
@@ -657,6 +657,7 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
         .where((c) => c.clienteId == widget.cliente.id && c.estado != 'cancelada')
         .toList();
     citasCliente.sort((a, b) => '$a.fecha $a.hora'.compareTo('$b.fecha $b.hora'));
+    // CORRECCIÓN #1: orElse devuelve null pero el tipo es Cita? (nullable) - está bien
     return citasCliente.firstWhere(
       (c) => c.fecha.compareTo(hoy) >= 0,
       orElse: () => citasCliente.isNotEmpty ? citasCliente.first : null,
@@ -808,7 +809,7 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+          border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [
@@ -843,7 +844,7 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF222222),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+          border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1033,7 +1034,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
                         border: Border.all(
                           color: isSelected
                               ? const Color(0xFFC9A84C)
-                              : const Color(0xFFC9A84C).withOpacity(0.2),
+                              : const Color(0xFFC9A84C).withValues(alpha: 0.2),
                         ),
                       ),
                       child: Column(
@@ -1059,7 +1060,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
               decoration: BoxDecoration(
                 color: const Color(0xFF222222),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1137,8 +1138,8 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
                               color: isOcupada
-                                  ? Colors.red.withOpacity(0.3)
-                                  : const Color(0xFFC9A84C).withOpacity(0.2),
+                                  ? Colors.red.withValues(alpha: 0.3)
+                                  : const Color(0xFFC9A84C).withValues(alpha: 0.2),
                             ),
                           ),
                           child: Center(
@@ -1315,7 +1316,7 @@ class _ClienteCitasScreenState extends State<ClienteCitasScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF1A1A1A),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+              border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1343,7 +1344,7 @@ class _ClienteCitasScreenState extends State<ClienteCitasScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         color: Color(int.parse(_getEstadoColor(cita.estado).substring(1), radix: 16))
-                            .withOpacity(0.15),
+                            .withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -1435,7 +1436,7 @@ class ClienteQRScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Column(
                 children: [
@@ -1447,7 +1448,7 @@ class ClienteQRScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFC9A84C).withOpacity(0.15),
+                      color: const Color(0xFFC9A84C).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -1581,7 +1582,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFC9A84C).withOpacity(0.15),
+                      color: const Color(0xFFC9A84C).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(_getNivel(), style: const TextStyle(color: Color(0xFFC9A84C))),
@@ -1607,7 +1608,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1631,7 +1632,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1664,7 +1665,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1687,7 +1688,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
                             width: 40,
                             height: 40,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFC9A84C).withOpacity(0.12),
+                              color: const Color(0xFFC9A84C).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: const Center(child: Text('⭐', style: TextStyle(fontSize: 20))),
@@ -1705,7 +1706,7 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFC9A84C).withOpacity(0.15),
+                              color: const Color(0xFFC9A84C).withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text('+${h.puntos} pts', style: const TextStyle(color: Color(0xFFC9A84C), fontSize: 11)),
@@ -1815,7 +1816,7 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF1A1A1A),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+              border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
             ),
             child: Column(
               children: [
@@ -1845,11 +1846,11 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: widget.cliente.membresia != 'Ninguna'
-                        ? const Color(0xFFC9A84C).withOpacity(0.15)
+                        ? const Color(0xFFC9A84C).withValues(alpha: 0.15)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(20),
                     border: widget.cliente.membresia == 'Ninguna'
-                        ? Border.all(color: const Color(0xFF888888).withOpacity(0.3))
+                        ? Border.all(color: const Color(0xFF888888).withValues(alpha: 0.3))
                         : null,
                   ),
                   child: Text(
@@ -1869,7 +1870,7 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF1A1A1A),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+              border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2133,7 +2134,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1A1A1A),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                  border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [
@@ -2148,8 +2149,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(cita.clienteNombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          Text('${cita.servicioNombre} · S/${cita.precio.toInt()}', style: const TextStyle(color: Color(0xFF888888), fontSize: 12)),
+                          Text(
+                            cita.clienteNombre,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '${cita.servicioNombre} · S/${cita.precio.toInt()}',
+                            style: const TextStyle(color: Color(0xFF888888), fontSize: 12),
+                          ),
                         ],
                       ),
                     ),
@@ -2160,7 +2167,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
                             color: Color(int.parse(_getEstadoColor(cita.estado).substring(1), radix: 16))
-                                .withOpacity(0.15),
+                                .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
@@ -2212,7 +2219,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+          border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [
@@ -2296,6 +2303,7 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
         .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
         .toList();
     setState(() {
+      // CORRECCIÓN #2: orElse devuelve null pero el tipo es Cliente? (nullable) - está bien
       _clienteEncontrado = clientes.firstWhere(
         (c) => c.id.toUpperCase() == _clienteId.toUpperCase(),
         orElse: () => null,
@@ -2766,7 +2774,7 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1A1A1A),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                    border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2791,7 +2799,7 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
                               color: Color(int.parse(_getEstadoColor(cita.estado).substring(1), radix: 16))
-                                  .withOpacity(0.15),
+                                  .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -2943,7 +2951,7 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1A1A1A),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                    border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
                   ),
                   child: Row(
                     children: [
@@ -2975,11 +2983,11 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: cliente.membresia != 'Ninguna'
-                                        ? const Color(0xFFC9A84C).withOpacity(0.15)
+                                        ? const Color(0xFFC9A84C).withValues(alpha: 0.15)
                                         : Colors.transparent,
                                     borderRadius: BorderRadius.circular(20),
                                     border: cliente.membresia == 'Ninguna'
-                                        ? Border.all(color: const Color(0xFF888888).withOpacity(0.3))
+                                        ? Border.all(color: const Color(0xFF888888).withValues(alpha: 0.3))
                                         : null,
                                   ),
                                   child: Text(
@@ -2991,7 +2999,7 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF5A9CE0).withOpacity(0.15),
+                                    color: const Color(0xFF5A9CE0).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text('⭐ ${cliente.puntos} pts', style: const TextStyle(color: Color(0xFF5A9CE0), fontSize: 10)),
@@ -3106,7 +3114,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1A1A1A),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                    border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
                   ),
                   child: Row(
                     children: [
@@ -3125,7 +3133,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFC9A84C).withOpacity(0.15),
+                                    color: const Color(0xFFC9A84C).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text('S/${servicio.precio.toInt()}', style: const TextStyle(color: Color(0xFFC9A84C), fontSize: 11)),
@@ -3133,7 +3141,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF888888).withOpacity(0.15),
+                                    color: const Color(0xFF888888).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text('⏱ ${servicio.duracion}min', style: const TextStyle(color: Color(0xFF888888), fontSize: 11)),
@@ -3141,7 +3149,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF5A9CE0).withOpacity(0.15),
+                                    color: const Color(0xFF5A9CE0).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text('⭐ ${servicio.puntos}pts', style: const TextStyle(color: Color(0xFF5A9CE0), fontSize: 11)),
@@ -3368,7 +3376,7 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3419,7 +3427,7 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFC9A84C).withOpacity(0.2)),
+          border: Border.all(color: const Color(0xFFC9A84C).withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [

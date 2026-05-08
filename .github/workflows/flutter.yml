@@ -1,4 +1,4 @@
-name: Flutter CI Stable Fix
+name: Flutter CI
 
 on:
   push:
@@ -9,21 +9,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # 1. Descargar tu proyecto
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Flutter manually (stable)
+      # 2. Instalar Flutter (estable, sin flutter-action)
+      - name: Install Flutter
         run: |
           git clone https://github.com/flutter/flutter.git --depth 1 -b stable
           echo "$PWD/flutter/bin" >> $GITHUB_PATH
 
-      - name: Verify Flutter
+      # 3. Verificar instalación
+      - name: Check Flutter version
         run: flutter --version
 
-      - name: Install dependencies
+      # 4. Instalar dependencias
+      - name: Get dependencies
         run: flutter pub get
 
+      # 5. Analizar SOLO tu código (evita errores del SDK)
       - name: Analyze project
-        run: flutter analyze
+        run: flutter analyze lib
 
+      # 6. Compilar APK
       - name: Build APK
         run: flutter build apk --release

@@ -3,11 +3,12 @@ description: App de peluqueria Kety
 publish_to: "none"
 
 environment:
-  sdk: ^3.11.0
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
+
   sqflite: ^2.3.0
   path: ^1.9.0
   provider: ^6.1.2
@@ -16,9 +17,10 @@ dependencies:
   mobile_scanner: ^5.0.0
 
 dev_dependencies:
-  flutter_lints: ^3.0.0
   flutter_test:
     sdk: flutter
+
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true

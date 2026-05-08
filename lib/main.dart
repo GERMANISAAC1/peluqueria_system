@@ -630,7 +630,7 @@ class ClienteHomeScreen extends StatefulWidget {
 
 class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
   List<Cita> _citas = [];
-  List<Servicio> _servicios = [];
+  List<Servicio> _serviciosList = [];
 
   @override
   void initState() {
@@ -644,7 +644,7 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
       _citas = (data['citas'] as List)
           .map((c) => Cita.fromJson(c as Map<String, dynamic>))
           .toList();
-      _servicios = (data['servicios'] as List)
+      _serviciosList = (data['servicios'] as List)
           .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .where((s) => s.activo)
           .toList();
@@ -657,11 +657,11 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
         .where((c) => c.clienteId == widget.cliente.id && c.estado != 'cancelada')
         .toList();
     citasCliente.sort((a, b) => '$a.fecha $a.hora'.compareTo('$b.fecha $b.hora'));
-    // CORRECCIÓN #1: orElse devuelve null pero el tipo es Cita? (nullable) - está bien
-    return citasCliente.firstWhere(
-      (c) => c.fecha.compareTo(hoy) >= 0,
-      orElse: () => citasCliente.isNotEmpty ? citasCliente.first : null,
-    );
+    final futuras = citasCliente.where((c) => c.fecha.compareTo(hoy) >= 0).toList();
+    if (futuras.isNotEmpty) {
+      return futuras.first;
+    }
+    return citasCliente.isNotEmpty ? citasCliente.first : null;
   }
 
   @override
@@ -1192,7 +1192,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                child: const Text('✅ Confirmar reserva', fontWeight: FontWeight.bold),
+                child: const Text('✅ Confirmar reserva', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -1920,7 +1920,7 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('Guardar cambios', fontWeight: FontWeight.bold),
+                    child: const Text('Guardar cambios', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -2276,7 +2276,6 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
   String _clienteId = '';
   Cliente? _clienteEncontrado;
   List<Servicio> _servicios = [];
-  Servicio? _servicioSeleccionado;
 
   @override
   void initState() {
@@ -2302,12 +2301,12 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
     final clientes = (data['clientes'] as List)
         .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
         .toList();
+    final encontrado = clientes.firstWhere(
+      (c) => c.id.toUpperCase() == _clienteId.toUpperCase(),
+      orElse: () => null,
+    );
     setState(() {
-      // CORRECCIÓN #2: orElse devuelve null pero el tipo es Cliente? (nullable) - está bien
-      _clienteEncontrado = clientes.firstWhere(
-        (c) => c.id.toUpperCase() == _clienteId.toUpperCase(),
-        orElse: () => null,
-      );
+      _clienteEncontrado = encontrado;
     });
   }
 
@@ -2318,24 +2317,31 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
       );
       return;
     }
-    if (_servicioSeleccionado == null) {
+
+    final data = await _db.getData();
+    final servicios = (data['servicios'] as List)
+        .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+        .where((s) => s.activo)
+        .toList();
+    
+    if (servicios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona un servicio'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('No hay servicios disponibles'), backgroundColor: Colors.red),
       );
       return;
     }
 
-    final data = await _db.getData();
+    final servicio = servicios[0];
     final clientes = data['clientes'] as List;
     final clienteIndex = clientes.indexWhere((c) => c['id'] == _clienteEncontrado!.id);
     if (clienteIndex != -1) {
       (clientes[clienteIndex] as Map<String, dynamic>)['puntos'] = 
-          (clientes[clienteIndex]['puntos'] as int) + _servicioSeleccionado!.puntos;
+          (clientes[clienteIndex]['puntos'] as int) + (servicio.puntos);
       final historial = (clientes[clienteIndex] as Map<String, dynamic>)['historialPuntos'] as List;
       historial.add({
         'fecha': DateTime.now().toIso8601String().split('T')[0],
-        'concepto': _servicioSeleccionado!.nombre,
-        'puntos': _servicioSeleccionado!.puntos,
+        'concepto': servicio.nombre,
+        'puntos': servicio.puntos,
       });
       await _db.saveData(data);
       
@@ -2343,7 +2349,7 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ +${_servicioSeleccionado!.puntos} puntos a ${_clienteEncontrado!.nombre}'),
+            content: Text('✅ +${servicio.puntos} puntos a ${_clienteEncontrado!.nombre}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -2398,27 +2404,10 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              const Text('Se registrará automáticamente el primer servicio disponible',
+                  style: TextStyle(color: Color(0xFFC9A84C), fontSize: 12)),
             ],
-            const SizedBox(height: 16),
-            DropdownButtonFormField<Servicio>(
-              value: _servicioSeleccionado,
-              dropdownColor: const Color(0xFF222222),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Servicio realizado',
-                labelStyle: const TextStyle(color: Color(0xFF888888)),
-                filled: true,
-                fillColor: const Color(0xFF222222),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-              ),
-              items: _servicios.map((s) {
-                return DropdownMenuItem<Servicio>(
-                  value: s,
-                  child: Text('${s.nombre} · S/${s.precio} · +${s.puntos} pts'),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _servicioSeleccionado = value),
-            ),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -2429,7 +2418,7 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
                   foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Registrar y sumar puntos', fontWeight: FontWeight.bold),
+                child: const Text('Registrar y sumar puntos', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -2545,7 +2534,10 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _clientes.map((c) {
-                return DropdownMenuItem<Cliente>(value: c, child: Text(c.nombre));
+                return DropdownMenuItem<Cliente>(
+                  value: c,
+                  child: Text(c.nombre),
+                );
               }).toList(),
               onChanged: (value) => setState(() => _clienteSeleccionado = value),
             ),
@@ -2562,7 +2554,10 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _servicios.map((s) {
-                return DropdownMenuItem<Servicio>(value: s, child: Text('${s.nombre} · S/${s.precio}'));
+                return DropdownMenuItem<Servicio>(
+                  value: s,
+                  child: Text('${s.nombre} · S/${s.precio}'),
+                );
               }).toList(),
               onChanged: (value) => setState(() => _servicioSeleccionado = value),
             ),
@@ -2605,7 +2600,10 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
               items: _horas.map((h) {
-                return DropdownMenuItem<String>(value: h, child: Text(h));
+                return DropdownMenuItem<String>(
+                  value: h,
+                  child: Text(h),
+                );
               }).toList(),
               onChanged: (value) => setState(() => _hora = value!),
             ),
@@ -2637,7 +2635,7 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                   foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Crear cita', fontWeight: FontWeight.bold),
+                child: const Text('Crear cita', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -3096,7 +3094,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              child: const Text('+ Nuevo Servicio', fontWeight: FontWeight.bold),
+              child: const Text('+ Nuevo Servicio', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
         ),
@@ -3273,7 +3271,7 @@ class _NuevoServicioDialogState extends State<NuevoServicioDialog> {
                     foregroundColor: Colors.black,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Guardar servicio', fontWeight: FontWeight.bold),
+                  child: const Text('Guardar servicio', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -3312,7 +3310,6 @@ class AdminReportesScreen extends StatefulWidget {
 
 class _AdminReportesScreenState extends State<AdminReportesScreen> {
   List<Cita> _citas = [];
-  List<Servicio> _servicios = [];
 
   @override
   void initState() {
@@ -3325,9 +3322,6 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
     setState(() {
       _citas = (data['citas'] as List)
           .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .toList();
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
           .toList();
     });
   }

@@ -1,17 +1,4 @@
 import 'package:flutter/material.dart';
-<<<<<<< HEAD
-import 'routes/app_routes.dart';
-import 'features/auth/login_screen.dart';
-import 'features/cliente/cliente_home.dart';
-import 'features/admin/admin_home.dart';
-
-void main() {
-  runApp(const BarberApp());
-}
-
-class BarberApp extends StatelessWidget {
-  const BarberApp({super.key});
-=======
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
@@ -21,21 +8,10 @@ void main() {
 
 class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
->>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-<<<<<<< HEAD
-      debugShowCheckedModeBanner: false,
-      title: 'BarberPro',
-      routes: {
-        AppRoutes.login: (_) => const LoginScreen(),
-        AppRoutes.cliente: (_) => const ClienteHome(),
-        AppRoutes.admin: (_) => const AdminHome(),
-      },
-      initialRoute: AppRoutes.login,
-=======
       title: 'BarberPro',
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -140,9 +116,9 @@ class _LoginScreenState extends State<LoginScreen> {
           gradient: RadialGradient(
             center: const Alignment(0, -0.3),
             radius: 1.2,
-            colors: [
-              const Color(0xFF1A1200),
-              const Color(0xFF0A0A0A),
+            colors: const [
+              Color(0xFF1A1200),
+              Color(0xFF0A0A0A),
             ],
           ),
         ),
@@ -736,7 +712,6 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Próxima cita card
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -784,9 +759,7 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
                     ),
                   ),
                   OutlinedButton(
-                    onPressed: () {
-                      // Navigate to appointments
-                    },
+                    onPressed: () {},
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Color(0xFFC9A84C)),
                     ),
@@ -796,7 +769,6 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            // Stats
             Row(
               children: [
                 _buildStatCard(
@@ -1886,8 +1858,8 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
                 Container(
                   width: 80,
                   height: 80,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFC9A84C),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFC9A84C),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -2034,27 +2006,20 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_db == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0A0A0A),
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final screens = [
-      AdminDashboardScreen(db: _db),
-      AdminCitasScreen(db: _db),
-      AdminClientesScreen(db: _db),
-      AdminServiciosScreen(db: _db),
-      AdminReportesScreen(db: _db),
-    ];
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('✂️ BarberPro Admin'),
         centerTitle: true,
       ),
-      body: screens[_selectedIndex],
+      body: _db == null
+          ? const Center(child: CircularProgressIndicator())
+          : [
+              AdminDashboardScreen(db: _db),
+              AdminCitasScreen(db: _db),
+              AdminClientesScreen(db: _db),
+              AdminServiciosScreen(db: _db),
+              AdminReportesScreen(db: _db),
+            ][_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
@@ -2111,7 +2076,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (citaIndex != -1) {
       citas[citaIndex]['estado'] = 'completada';
       
-      // Sumar puntos al cliente
       final servicio = _servicios.firstWhere((s) => s.id == cita.servicioId);
       final clientes = data['clientes'] as List;
       final clienteIndex = clientes.indexWhere((c) => c['id'] == cita.clienteId);
@@ -2200,7 +2164,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 child: Row(
                   children: [
-                    Container(
+                    SizedBox(
                       width: 50,
                       child: Text(
                         cita.hora,
@@ -2747,7 +2711,6 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
     if (index != -1) {
       citas[index]['estado'] = nuevoEstado;
       
-      // Si se completa, sumar puntos
       if (nuevoEstado == 'completada') {
         final servicios = (data['servicios'] as List).map((s) => Servicio.fromJson(s)).toList();
         final servicio = servicios.firstWhere((s) => s.id == cita.servicioId);
@@ -3002,8 +2965,8 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
                       Container(
                         width: 50,
                         height: 50,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFC9A84C),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFC9A84C),
                           shape: BoxShape.circle,
                         ),
                         child: Center(
@@ -3379,7 +3342,6 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
         .where((c) => c.estado == 'completada')
         .fold<double>(0, (sum, c) => sum + c.precio);
 
-    // Servicios populares
     final Map<String, int> servicioCount = {};
     for (final cita in _citas.where((c) => c.estado == 'completada')) {
       servicioCount[cita.servicioNombre] = (servicioCount[cita.servicioNombre] ?? 0) + 1;
@@ -3478,7 +3440,6 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
           ],
         ),
       ),
->>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
     );
   }
 }

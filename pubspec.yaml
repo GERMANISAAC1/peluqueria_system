@@ -1,26 +1,49 @@
-name: peluqueria_kety
-description: App de peluqueria Kety
-publish_to: "none"
+name: Flutter Build APK
 
-environment:
-  sdk: ">=3.0.0 <4.0.0"
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-dependencies:
-  flutter:
-    sdk: flutter
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  sqflite: ^2.3.0
-  path: ^1.9.0
-  provider: ^6.1.2
-  intl: ^0.19.0
-  qr_flutter: ^4.1.0
-  mobile_scanner: ^5.0.0
+    steps:
+      # 1. Clonar repositorio
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
+      # 2. Instalar Flutter
+      - name: Install Flutter
+        run: |
+          git clone https://github.com/flutter/flutter.git --depth 1 -b stable
+          echo "$PWD/flutter/bin" >> $GITHUB_PATH
+          export PATH="$PWD/flutter/bin:$PATH"
+          flutter doctor
 
-  flutter_lints: ^3.0.0
+      # 3. Limpiar proyecto
+      - name: Clean project
+        run: |
+          flutter clean
+          rm -rf .dart_tool
+          rm -rf build
 
-flutter:
-  uses-material-design: true
+      # 4. Obtener dependencias
+      - name: Get dependencies
+        run: flutter pub get
+
+      # 5. Analizar código
+      - name: Analyze project
+        run: flutter analyze lib
+
+      # 6. Construir APK release
+      - name: Build APK
+        run: flutter build apk --release
+
+      # 7. Subir APK como archivo descargable
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: peluqueria_kety-apk
+          path: build/app/outputs/flutter-apk/app-release.apk

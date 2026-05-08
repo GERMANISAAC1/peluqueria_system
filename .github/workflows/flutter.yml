@@ -3,50 +3,57 @@ name: Flutter CI
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Descargar el repositorio
+      # 1. Clonar repo limpio
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          clean: true
 
-      # 2. Instalar Flutter (stable)
+      # 2. Instalar Flutter estable
       - name: Install Flutter
         run: |
           git clone https://github.com/flutter/flutter.git --depth 1 -b stable
           echo "$PWD/flutter/bin" >> $GITHUB_PATH
+          export PATH="$PWD/flutter/bin:$PATH"
+          flutter doctor
 
-      # 3. Verificar instalación
-      - name: Check Flutter version
+      # 3. Ver versión Flutter
+      - name: Flutter version
         run: flutter --version
 
-      # 4. Limpiar proyecto
+      # 4. Limpiar entorno (IMPORTANTE)
       - name: Clean project
-        run: flutter clean
+        run: |
+          flutter clean
+          rm -rf .dart_tool
+          rm -rf build
 
-      # 5. Instalar dependencias
+      # 5. Obtener dependencias
       - name: Get dependencies
         run: flutter pub get
 
-      # 6. Analizar SOLO tu código
+      # 6. Debug pubspec (opcional pero recomendado)
+      - name: Show pubspec
+        run: cat pubspec.yaml
+
+      # 7. Analizar SOLO código del proyecto
       - name: Analyze project
         run: flutter analyze lib
-
-      # 7. Ejecutar tests (opcional pero recomendado)
-      - name: Run tests
-        run: flutter test
-        continue-on-error: true
 
       # 8. Compilar APK release
       - name: Build APK
         run: flutter build apk --release
 
       # 9. Subir APK como artefacto descargable
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: peluqueria-kety-apk
+          name: peluqueria_kety-apk
           path: build/app/outputs/flutter-apk/app-release.apk

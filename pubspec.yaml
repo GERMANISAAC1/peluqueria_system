@@ -1,4 +1,4 @@
-name: Flutter APK Build
+name: Build APK
 
 on:
   push:
@@ -17,6 +17,9 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+
+      - name: Ver Flutter
+        run: flutter --version
 
       - name: Instalar dependencias
         run: flutter pub get

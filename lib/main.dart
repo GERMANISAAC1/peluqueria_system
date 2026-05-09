@@ -630,7 +630,6 @@ class ClienteHomeScreen extends StatefulWidget {
 
 class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
   List<Cita> _citas = [];
-  List<Servicio> _serviciosList = [];
 
   @override
   void initState() {
@@ -643,10 +642,6 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
     setState(() {
       _citas = (data['citas'] as List)
           .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .toList();
-      _serviciosList = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .where((s) => s.activo)
           .toList();
     });
   }
@@ -2275,7 +2270,6 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
   late DatabaseService _db;
   String _clienteId = '';
   Cliente? _clienteEncontrado;
-  List<Servicio> _servicios = [];
 
   @override
   void initState() {
@@ -2287,13 +2281,6 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
     final prefs = await SharedPreferences.getInstance();
     _db = DatabaseService(prefs);
     await _db.initData();
-    final data = await _db.getData();
-    setState(() {
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .where((s) => s.activo)
-          .toList();
-    });
   }
 
   void _buscarCliente() async {
@@ -2301,10 +2288,14 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
     final clientes = (data['clientes'] as List)
         .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
         .toList();
-    final encontrado = clientes.firstWhere(
-      (c) => c.id.toUpperCase() == _clienteId.toUpperCase(),
-      orElse: () => null,
-    );
+    
+    Cliente? encontrado;
+    for (final cliente in clientes) {
+      if (cliente.id.toUpperCase() == _clienteId.toUpperCase()) {
+        encontrado = cliente;
+        break;
+      }
+    }
     setState(() {
       _clienteEncontrado = encontrado;
     });
@@ -3161,7 +3152,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                         icon: const Icon(Icons.delete, color: Color(0xFFE05A5A)),
                         onPressed: () => _eliminarServicio(servicio.id),
                       ),
-                    ],
+                    ),
                   ),
                 );
               },

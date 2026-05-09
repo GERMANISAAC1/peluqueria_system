@@ -91,6 +91,7 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
 <<<<<<< HEAD
+<<<<<<< HEAD
             VALUE "FileDescription", "barberpro" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "barberpro" "\0"
@@ -105,6 +106,14 @@ BEGIN
             VALUE "OriginalFilename", "peluqueria_kety.exe" "\0"
             VALUE "ProductName", "peluqueria_kety" "\0"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+            VALUE "FileDescription", "barberpro_unicorn" "\0"
+            VALUE "FileVersion", VERSION_AS_STRING "\0"
+            VALUE "InternalName", "barberpro_unicorn" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "OriginalFilename", "barberpro_unicorn.exe" "\0"
+            VALUE "ProductName", "barberpro_unicorn" "\0"
+>>>>>>> Initial commit
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

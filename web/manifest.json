@@ -1,11 +1,16 @@
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "name": "barberpro",
     "short_name": "barberpro",
 =======
     "name": "peluqueria_kety",
     "short_name": "peluqueria_kety",
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+    "name": "barberpro_unicorn",
+    "short_name": "barberpro_unicorn",
+>>>>>>> Initial commit
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

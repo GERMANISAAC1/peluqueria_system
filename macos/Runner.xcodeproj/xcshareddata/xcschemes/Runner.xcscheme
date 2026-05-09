@@ -16,10 +16,14 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "33CC10EC2044A3C60003C045"
 <<<<<<< HEAD
+<<<<<<< HEAD
                BuildableName = "barberpro.app"
 =======
                BuildableName = "peluqueria_kety.app"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+               BuildableName = "barberpro_unicorn.app"
+>>>>>>> Initial commit
                BlueprintName = "Runner"
                ReferencedContainer = "container:Runner.xcodeproj">
             </BuildableReference>
@@ -36,10 +40,14 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "33CC10EC2044A3C60003C045"
 <<<<<<< HEAD
+<<<<<<< HEAD
             BuildableName = "barberpro.app"
 =======
             BuildableName = "peluqueria_kety.app"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+            BuildableName = "barberpro_unicorn.app"
+>>>>>>> Initial commit
             BlueprintName = "Runner"
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
@@ -75,10 +83,14 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "33CC10EC2044A3C60003C045"
 <<<<<<< HEAD
+<<<<<<< HEAD
             BuildableName = "barberpro.app"
 =======
             BuildableName = "peluqueria_kety.app"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+            BuildableName = "barberpro_unicorn.app"
+>>>>>>> Initial commit
             BlueprintName = "Runner"
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
@@ -96,10 +108,14 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "33CC10EC2044A3C60003C045"
 <<<<<<< HEAD
+<<<<<<< HEAD
             BuildableName = "barberpro.app"
 =======
             BuildableName = "peluqueria_kety.app"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+            BuildableName = "barberpro_unicorn.app"
+>>>>>>> Initial commit
             BlueprintName = "Runner"
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>

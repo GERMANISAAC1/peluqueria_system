@@ -7,10 +7,14 @@ plugins {
 
 android {
 <<<<<<< HEAD
+<<<<<<< HEAD
     namespace = "com.example.barberpro"
 =======
     namespace = "com.example.peluqueria_kety"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+    namespace = "com.example.barberpro_unicorn"
+>>>>>>> Initial commit
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -26,10 +30,14 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
 <<<<<<< HEAD
+<<<<<<< HEAD
         applicationId = "com.example.barberpro"
 =======
         applicationId = "com.example.peluqueria_kety"
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+        applicationId = "com.example.barberpro_unicorn"
+>>>>>>> Initial commit
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

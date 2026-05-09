@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+<<<<<<< HEAD
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
@@ -3458,6 +3459,35 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
             Text(label, style: const TextStyle(color: Color(0xFF888888), fontSize: 11)),
           ],
         ),
+=======
+import 'package:firebase_core/firebase_core.dart';
+import 'routes/route_generator.dart';
+import 'core/theme/app_theme.dart';
+import 'presentation/providers/app_provider.dart';
+import 'package:provider/provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  runApp(const BarberProUnicorn());
+}
+
+class BarberProUnicorn extends StatelessWidget {
+  const BarberProUnicorn({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MultiProvider(
+      providers: AppProvider.providers,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'BarberPro Unicorn',
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.system,
+        onGenerateRoute: RouteGenerator.generateRoute,
+        initialRoute: '/',
+>>>>>>> Initial commit
       ),
     );
   }

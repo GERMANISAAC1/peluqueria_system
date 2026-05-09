@@ -46,6 +46,7 @@ static void my_application_activate(GApplication* application) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
 <<<<<<< HEAD
+<<<<<<< HEAD
     gtk_header_bar_set_title(header_bar, "barberpro");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
@@ -58,6 +59,13 @@ static void my_application_activate(GApplication* application) {
   } else {
     gtk_window_set_title(window, "peluqueria_kety");
 >>>>>>> 4059aac1e3a0f823b063f7bb6b173b93875a43c2
+=======
+    gtk_header_bar_set_title(header_bar, "barberpro_unicorn");
+    gtk_header_bar_set_show_close_button(header_bar, TRUE);
+    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
+  } else {
+    gtk_window_set_title(window, "barberpro_unicorn");
+>>>>>>> Initial commit
   }
 
   gtk_window_set_default_size(window, 1280, 720);

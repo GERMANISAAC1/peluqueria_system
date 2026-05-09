@@ -1,37 +1,23 @@
-name: Build APK
+name: barberpro
+description: Sistema BarberPro
+publish_to: 'none'
 
-on:
-  push:
-    branches:
-      - main
+version: 1.0.0+1
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+environment:
+  sdk: '^3.11.0'
 
-    steps:
-      - name: Clonar repositorio
-        uses: actions/checkout@v4
+dependencies:
+  flutter:
+    sdk: flutter
 
-      - name: Instalar Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
+  cupertino_icons: ^1.0.8
 
-      - name: Ver Flutter
-        run: flutter --version
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 
-      - name: Instalar dependencias
-        run: flutter pub get
+  flutter_lints: ^6.0.0
 
-      - name: Analizar proyecto
-        run: flutter analyze
-
-      - name: Compilar APK
-        run: flutter build apk --release
-
-      - name: Subir APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: barberpro-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+flutter:
+  uses-material-design: true

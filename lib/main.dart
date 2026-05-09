@@ -53,10 +53,12 @@ class _SplashScreenState extends State<SplashScreen> {
   void initState() {
     super.initState();
     Future.delayed(const Duration(seconds: 2), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
     });
   }
 
@@ -209,15 +211,16 @@ class _LoginScreenState extends State<LoginScreen> {
   void _loginAs(String role) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('session_role', role);
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => role == 'cliente'
-            ? const ClienteMainScreen()
-            : const AdminMainScreen(),
-      ),
-    );
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => role == 'cliente'
+              ? const ClienteMainScreen()
+              : const AdminMainScreen(),
+        ),
+      );
+    }
   }
 }
 
@@ -538,7 +541,9 @@ class _ClienteMainScreenState extends State<ClienteMainScreen> {
     _db = DatabaseService(prefs);
     await _db.initData();
     await _loadClienteActual();
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _loadClienteActual() async {
@@ -551,7 +556,9 @@ class _ClienteMainScreenState extends State<ClienteMainScreen> {
 
   Future<void> _refreshData() async {
     await _loadClienteActual();
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -639,11 +646,13 @@ class _ClienteHomeScreenState extends State<ClienteHomeScreen> {
 
   Future<void> _loadData() async {
     final data = await widget.db.getData();
-    setState(() {
-      _citas = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _citas = (data['citas'] as List)
+            .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+    }
   }
 
   Cita? _getProximaCita() {
@@ -912,12 +921,14 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
 
   Future<void> _loadServicios() async {
     final data = await widget.db.getData();
-    setState(() {
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .where((s) => s.activo)
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _servicios = (data['servicios'] as List)
+            .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+            .where((s) => s.activo)
+            .toList();
+      });
+    }
   }
 
   Future<List<Cita>> _getCitasOcupadas() async {
@@ -973,12 +984,14 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
   }
 
   void _showSnackbar(String message, {bool isError = true}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.green,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : Colors.green,
+        ),
+      );
+    }
   }
 
   @override
@@ -1082,7 +1095,7 @@ class _ReservarCitaDialogState extends State<ReservarCitaDialog> {
                               );
                             },
                           );
-                          if (date != null) {
+                          if (date != null && mounted) {
                             setState(() => _fechaSeleccionada = date);
                           }
                         },
@@ -1225,13 +1238,15 @@ class _ClienteCitasScreenState extends State<ClienteCitasScreen> {
 
   Future<void> _loadCitas() async {
     final data = await widget.db.getData();
-    setState(() {
-      _citas = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .where((c) => c.clienteId == widget.cliente.id)
-          .toList();
-      _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
-    });
+    if (mounted) {
+      setState(() {
+        _citas = (data['citas'] as List)
+            .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+            .where((c) => c.clienteId == widget.cliente.id)
+            .toList();
+        _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
+      });
+    }
   }
 
   Future<void> _cancelarCita(Cita cita) async {
@@ -1531,10 +1546,12 @@ class _ClientePuntosScreenState extends State<ClientePuntosScreen> {
     return RefreshIndicator(
       onRefresh: () async {
         widget.onRefresh();
-        setState(() {
-          _puntos = widget.cliente.puntos;
-          _historial = widget.cliente.historialPuntos;
-        });
+        if (mounted) {
+          setState(() {
+            _puntos = widget.cliente.puntos;
+            _historial = widget.cliente.historialPuntos;
+          });
+        }
       },
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -1961,7 +1978,9 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
     final prefs = await SharedPreferences.getInstance();
     _db = DatabaseService(prefs);
     await _db.initData();
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -1971,21 +1990,6 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
         title: const Text('✂️ BarberPro Admin'),
         centerTitle: true,
       ),
-<<<<<<< HEAD
-      body: Column(
-        children: [
-          Expanded(
-            child: [
-              AdminDashboardScreen(db: _db),
-              AdminCitasScreen(db: _db),
-              AdminClientesScreen(db: _db),
-              AdminServiciosScreen(db: _db),
-              AdminReportesScreen(db: _db),
-            ][_selectedIndex],
-          ),
-        ],
-      ),
-=======
       body: [
         AdminDashboardScreen(db: _db),
         AdminCitasScreen(db: _db),
@@ -1993,7 +1997,6 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
         AdminServiciosScreen(db: _db),
         AdminReportesScreen(db: _db),
       ][_selectedIndex],
->>>>>>> workflow apk
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
@@ -2033,18 +2036,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _loadData() async {
     final data = await widget.db.getData();
     final hoy = DateTime.now().toIso8601String().split('T')[0];
-    setState(() {
-      _citasHoy = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .where((c) => c.fecha == hoy)
-          .toList();
-      _clientes = (data['clientes'] as List)
-          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
-          .toList();
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _citasHoy = (data['citas'] as List)
+            .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+            .where((c) => c.fecha == hoy)
+            .toList();
+        _clientes = (data['clientes'] as List)
+            .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _servicios = (data['servicios'] as List)
+            .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+            .toList();
+      });
+    }
   }
 
   Future<void> _completarCita(Cita cita) async {
@@ -2306,16 +2311,20 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
         break;
       }
     }
-    setState(() {
-      _clienteEncontrado = encontrado;
-    });
+    if (mounted) {
+      setState(() {
+        _clienteEncontrado = encontrado;
+      });
+    }
   }
 
   Future<void> _registrarServicio() async {
     if (_clienteEncontrado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cliente no encontrado'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cliente no encontrado'), backgroundColor: Colors.red),
+        );
+      }
       return;
     }
 
@@ -2326,9 +2335,11 @@ class _RegistrarQRDialogState extends State<RegistrarQRDialog> {
         .toList();
     
     if (servicios.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay servicios disponibles'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay servicios disponibles'), backgroundColor: Colors.red),
+        );
+      }
       return;
     }
 
@@ -2462,22 +2473,26 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
 
   Future<void> _loadData() async {
     final data = await widget.db.getData();
-    setState(() {
-      _clientes = (data['clientes'] as List)
-          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
-          .toList();
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .where((s) => s.activo)
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _clientes = (data['clientes'] as List)
+            .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _servicios = (data['servicios'] as List)
+            .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+            .where((s) => s.activo)
+            .toList();
+      });
+    }
   }
 
   Future<void> _crearCita() async {
     if (_clienteSeleccionado == null || _servicioSeleccionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona cliente y servicio'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selecciona cliente y servicio'), backgroundColor: Colors.red),
+        );
+      }
       return;
     }
 
@@ -2585,7 +2600,9 @@ class _NuevaCitaAdminDialogState extends State<NuevaCitaAdminDialog> {
                     );
                   },
                 );
-                if (date != null) setState(() => _fecha = date);
+                if (date != null && mounted) {
+                  setState(() => _fecha = date);
+                }
               },
             ),
             const SizedBox(height: 16),
@@ -2668,12 +2685,14 @@ class _AdminCitasScreenState extends State<AdminCitasScreen> {
 
   Future<void> _loadCitas() async {
     final data = await widget.db.getData();
-    setState(() {
-      _citas = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .toList();
-      _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
-    });
+    if (mounted) {
+      setState(() {
+        _citas = (data['citas'] as List)
+            .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _citas.sort((a, b) => '$b.fecha $b.hora'.compareTo('$a.fecha $a.hora'));
+      });
+    }
   }
 
   List<Cita> get _citasFiltradas {
@@ -2876,11 +2895,13 @@ class _AdminClientesScreenState extends State<AdminClientesScreen> {
 
   Future<void> _loadClientes() async {
     final data = await widget.db.getData();
-    setState(() {
-      _clientes = (data['clientes'] as List)
-          .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _clientes = (data['clientes'] as List)
+            .map((c) => Cliente.fromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+    }
   }
 
   List<Cliente> get _clientesFiltrados {
@@ -3045,11 +3066,13 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
 
   Future<void> _loadServicios() async {
     final data = await widget.db.getData();
-    setState(() {
-      _servicios = (data['servicios'] as List)
-          .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _servicios = (data['servicios'] as List)
+            .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
+            .toList();
+      });
+    }
   }
 
   Future<void> _eliminarServicio(String id) async {
@@ -3162,7 +3185,7 @@ class _AdminServiciosScreenState extends State<AdminServiciosScreen> {
                         icon: const Icon(Icons.delete, color: Color(0xFFE05A5A)),
                         onPressed: () => _eliminarServicio(servicio.id),
                       ),
-                    ),
+                    ],
                   ),
                 );
               },
@@ -3320,11 +3343,13 @@ class _AdminReportesScreenState extends State<AdminReportesScreen> {
 
   Future<void> _loadData() async {
     final data = await widget.db.getData();
-    setState(() {
-      _citas = (data['citas'] as List)
-          .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-          .toList();
-    });
+    if (mounted) {
+      setState(() {
+        _citas = (data['citas'] as List)
+            .map((c) => Cita.fromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+    }
   }
 
   @override

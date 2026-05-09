@@ -1971,6 +1971,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
         title: const Text('✂️ BarberPro Admin'),
         centerTitle: true,
       ),
+<<<<<<< HEAD
       body: Column(
         children: [
           Expanded(
@@ -1984,6 +1985,15 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
           ),
         ],
       ),
+=======
+      body: [
+        AdminDashboardScreen(db: _db),
+        AdminCitasScreen(db: _db),
+        AdminClientesScreen(db: _db),
+        AdminServiciosScreen(db: _db),
+        AdminReportesScreen(db: _db),
+      ][_selectedIndex],
+>>>>>>> workflow apk
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),

@@ -6,6 +6,7 @@ void main() => runApp(const BarberProApp());
 
 class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -113,7 +114,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: RadialGradient(center: Alignment(-0.3, -0.5), radius: 1.3, colors: [Color(0xFF1A1200), Color(0xFF0A0A0A)])),
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(-0.3, -0.5),
+            radius: 1.3,
+            colors: [Color(0xFF1A1200), Color(0xFF0A0A0A)],
+          ),
+        ),
         child: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(32),
@@ -123,21 +130,46 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text('✂️', style: TextStyle(fontSize: 90)),
                 const Text('BarberPro', style: TextStyle(fontSize: 38, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C))),
                 const SizedBox(height: 50),
-                TextField(controller: telCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: "Número de celular", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone))),
+                TextField(
+                  controller: telCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: "Número de celular",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                ),
                 const SizedBox(height: 16),
-                TextField(controller: passCtrl, obscureText: true, decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock))),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "Contraseña",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.lock),
+                  ),
+                ),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
                     onPressed: loading ? null : login,
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A84C), foregroundColor: Colors.black),
-                    child: loading ? const CircularProgressIndicator(color: Colors.black) : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFC9A84C),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: loading
+                        ? const CircularProgressIndicator(color: Colors.black)
+                        : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 const SizedBox(height: 30),
-                const Text("Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                const Text(
+                  "Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
               ],
             ),
           ),
@@ -246,7 +278,7 @@ class QuickCard extends StatelessWidget {
   }
 }
 
-// ==================== RESERVA DE CITA ====================
+// Reserva de Cita
 class ReservaCitaPage extends StatefulWidget {
   final Usuario usuario;
   const ReservaCitaPage({super.key, required this.usuario});
@@ -332,7 +364,10 @@ class _ReservaCitaPageState extends State<ReservaCitaPage> {
               )).toList(),
             ),
             const Spacer(),
-            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: reservar, child: const Text("Confirmar Reserva"))),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(onPressed: reservar, child: const Text("Confirmar Reserva")),
+            ),
           ],
         ),
       ),
@@ -340,7 +375,6 @@ class _ReservaCitaPageState extends State<ReservaCitaPage> {
   }
 }
 
-// ==================== OTRAS PANTALLAS ====================
 class ClienteCitas extends StatefulWidget {
   final Usuario usuario;
   const ClienteCitas({super.key, required this.usuario});
@@ -394,21 +428,30 @@ class ClienteQR extends StatelessWidget {
   final Usuario usuario;
   const ClienteQR({super.key, required this.usuario});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mi QR")), body: Center(child: Text("QR Cliente\n${usuario.id}", textAlign: TextAlign.center, style: const TextStyle(fontSize: 20))));
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text("Mi QR")),
+        body: Center(child: Text("QR Cliente\n${usuario.id}", textAlign: TextAlign.center, style: const TextStyle(fontSize: 20))),
+      );
 }
 
 class ClientePuntos extends StatelessWidget {
   final Usuario usuario;
   const ClientePuntos({super.key, required this.usuario});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mis Puntos")), body: Center(child: Text("${usuario.puntos} PUNTOS", style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C)))));
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text("Mis Puntos")),
+        body: Center(child: Text("${usuario.puntos} PUNTOS", style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C)))),
+      );
 }
 
 class ClientePerfil extends StatelessWidget {
   final Usuario usuario;
   const ClientePerfil({super.key, required this.usuario});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Perfil")), body: Center(child: Text(usuario.nombre)));
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text("Perfil")),
+        body: Center(child: Text(usuario.nombre)),
+      );
 }
 
 class AdminMain extends StatelessWidget {

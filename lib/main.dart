@@ -47,11 +47,6 @@ class BarberDB {
         {"id": "ADM001", "nombre": "Admin BarberPro", "telefono": "999888777", "password": "admin123", "rol": "admin", "puntos": 0, "membresia": "Admin"}
       ],
       "citas": [],
-      "servicios": [
-        {"id": "1", "nombre": "Corte Clásico", "precio": 25.0, "puntos": 10},
-        {"id": "2", "nombre": "Corte + Barba", "precio": 40.0, "puntos": 15},
-        {"id": "3", "nombre": "Degradado", "precio": 35.0, "puntos": 12},
-      ]
     };
   }
 }
@@ -77,7 +72,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> login() async {
     setState(() => loading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
+
+    await Future.delayed(const Duration(seconds: 1));
 
     final db = await BarberDB.load();
     final usuarios = db['usuarios'] as List<dynamic>;
@@ -99,16 +95,24 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
+      // Navegación corregida
       if (user.rol == "cliente") {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ClienteMain(usuario: user)));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => ClienteMain(usuario: user)),
+        );
       } else {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminMain()));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AdminMain()),
+        );
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Número o contraseña incorrectos"), backgroundColor: Colors.red),
       );
     }
+
     setState(() => loading = false);
   }
 
@@ -132,21 +136,46 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text('✂️', style: TextStyle(fontSize: 90)),
                 const Text('BarberPro', style: TextStyle(fontSize: 38, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C))),
                 const SizedBox(height: 50),
-                TextField(controller: telCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: "Número de celular", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone))),
+                TextField(
+                  controller: telCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: "Número de celular",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                ),
                 const SizedBox(height: 16),
-                TextField(controller: passCtrl, obscureText: true, decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock))),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "Contraseña",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.lock),
+                  ),
+                ),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
                     onPressed: loading ? null : login,
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A84C), foregroundColor: Colors.black),
-                    child: loading ? const CircularProgressIndicator(color: Colors.black) : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFC9A84C),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: loading
+                        ? const CircularProgressIndicator(color: Colors.black)
+                        : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 const SizedBox(height: 30),
-                const Text("Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                const Text(
+                  "Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
               ],
             ),
           ),
@@ -171,7 +200,7 @@ class _ClienteMainState extends State<ClienteMain> {
   Widget build(BuildContext context) {
     final pages = [
       ClienteInicio(usuario: widget.usuario),
-      ClienteCitas(usuario: widget.usuario),
+      const ClienteCitas(),
       ClienteQR(usuario: widget.usuario),
       ClientePuntos(usuario: widget.usuario),
       ClientePerfil(usuario: widget.usuario),
@@ -198,7 +227,7 @@ class _ClienteMainState extends State<ClienteMain> {
   }
 }
 
-// ==================== PANTALLAS CLIENTE ====================
+// ==================== PANTALLAS ====================
 class ClienteInicio extends StatelessWidget {
   final Usuario usuario;
   const ClienteInicio({super.key, required this.usuario});
@@ -219,48 +248,15 @@ class ClienteInicio extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 20),
-        const Text("Acceso Rápido", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          children: [
-            QuickCard("Reservar Cita", "📅", () {}),
-            QuickCard("Mi QR", "📱", () {}),
-            QuickCard("Puntos", "⭐", () {}),
-            QuickCard("Membresía", "👑", () {}),
-          ],
-        ),
       ],
     );
   }
 }
 
-class QuickCard extends StatelessWidget {
-  final String title, emoji;
-  final VoidCallback onTap;
-  const QuickCard(this.title, this.emoji, this.onTap, {super.key});
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(emoji, style: const TextStyle(fontSize: 42)), Text(title)]),
-      ),
-    );
-  }
-}
-
-// ==================== RESERVA Y OTRAS PANTALLAS (simplificadas) ====================
 class ClienteCitas extends StatelessWidget {
-  final Usuario usuario;
-  const ClienteCitas({super.key, required this.usuario});
+  const ClienteCitas({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mis Citas")), body: const Center(child: Text("Mis Citas")));
+  Widget build(BuildContext context) => const Scaffold(body: Center(child: Text("Mis Citas")));
 }
 
 class ClienteQR extends StatelessWidget {

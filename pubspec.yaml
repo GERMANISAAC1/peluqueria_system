@@ -1,35 +1,18 @@
-<<<<<<< HEAD
 name: barberpro
-description: Sistema BarberPro
+description: BarberPro App
+
 publish_to: 'none'
 
 version: 1.0.0+1
 
 environment:
-  sdk: '^3.11.0'
-=======
-
-name: barberpro_unicorn
-description: BarberPro Unicorn SaaS
-publish_to: 'none'
-version: 3.0.0+1
-
-environment:
-  sdk: ">=3.3.0 <4.0.0"
->>>>>>> Initial commit
+  sdk: ">=3.11.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-<<<<<<< HEAD
 
-  cupertino_icons: ^1.0.8
-<<<<<<< HEAD
-=======
-  sqflite: ^2.4.2
-  path: ^1.9.1
-  shared_preferences: ^2.5.3
->>>>>>> cambios
+  cupertino_icons: ^1.0.9
 
 dev_dependencies:
   flutter_test:
@@ -39,15 +22,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-=======
-  firebase_core: any
-  firebase_auth: any
-  cloud_firestore: any
-  firebase_messaging: any
-  provider: any
-  intl: any
-  uuid: any
-  provider: ^6.1.2
-dev_dependencies:
-  flutter_lints: ^5.0.0
->>>>>>> Initial commit

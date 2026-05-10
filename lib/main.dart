@@ -54,7 +54,7 @@ class BarberDB {
 // ==================== MODELOS ====================
 class Usuario {
   final String id, nombre, telefono, rol, membresia;
-  final int puntos;
+  int puntos;
   Usuario({required this.id, required this.nombre, required this.telefono, required this.rol, this.membresia = "Ninguna", this.puntos = 0});
 }
 
@@ -72,47 +72,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> login() async {
     setState(() => loading = true);
-
     await Future.delayed(const Duration(seconds: 1));
 
-    final db = await BarberDB.load();
-    final usuarios = db['usuarios'] as List<dynamic>;
-
-    final userMap = usuarios.firstWhere(
-      (u) => u['telefono'] == telCtrl.text.trim() && u['password'] == passCtrl.text.trim(),
-      orElse: () => null,
-    );
-
-    if (userMap != null) {
-      final user = Usuario(
-        id: userMap['id'],
-        nombre: userMap['nombre'],
-        telefono: userMap['telefono'],
-        rol: userMap['rol'],
-        membresia: userMap['membresia'],
-        puntos: userMap['puntos'],
-      );
-
-      if (!mounted) return;
-
-      // Navegación corregida
-      if (user.rol == "cliente") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => ClienteMain(usuario: user)),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AdminMain()),
-        );
-      }
+    if (telCtrl.text.trim() == "987654321" && passCtrl.text.trim() == "123456") {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ClienteMain()));
+    } else if (telCtrl.text.trim() == "999888777" && passCtrl.text.trim() == "admin123") {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminMain()));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Número o contraseña incorrectos"), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Credenciales incorrectas"), backgroundColor: Colors.red));
     }
-
     setState(() => loading = false);
   }
 
@@ -120,13 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(-0.3, -0.5),
-            radius: 1.3,
-            colors: [Color(0xFF1A1200), Color(0xFF0A0A0A)],
-          ),
-        ),
+        decoration: const BoxDecoration(gradient: RadialGradient(center: Alignment(-0.3, -0.5), radius: 1.3, colors: [Color(0xFF1A1200), Color(0xFF0A0A0A)])),
         child: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(32),
@@ -136,46 +98,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text('✂️', style: TextStyle(fontSize: 90)),
                 const Text('BarberPro', style: TextStyle(fontSize: 38, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C))),
                 const SizedBox(height: 50),
-                TextField(
-                  controller: telCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: "Número de celular",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone),
-                  ),
-                ),
+                TextField(controller: telCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: "Número de celular", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone))),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: passCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: "Contraseña",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
-                  ),
-                ),
+                TextField(controller: passCtrl, obscureText: true, decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock))),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
                     onPressed: loading ? null : login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFC9A84C),
-                      foregroundColor: Colors.black,
-                    ),
-                    child: loading
-                        ? const CircularProgressIndicator(color: Colors.black)
-                        : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A84C), foregroundColor: Colors.black),
+                    child: loading ? const CircularProgressIndicator(color: Colors.black) : const Text("INICIAR SESIÓN", style: TextStyle(fontSize: 18)),
                   ),
                 ),
                 const SizedBox(height: 30),
-                const Text(
-                  "Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
+                const Text("Demo Cliente:\n987654321 / 123456\nDemo Admin:\n999888777 / admin123", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
               ],
             ),
           ),
@@ -187,8 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
 // ==================== CLIENTE MAIN ====================
 class ClienteMain extends StatefulWidget {
-  final Usuario usuario;
-  const ClienteMain({super.key, required this.usuario});
+  const ClienteMain({super.key});
   @override
   State<ClienteMain> createState() => _ClienteMainState();
 }
@@ -199,11 +135,11 @@ class _ClienteMainState extends State<ClienteMain> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      ClienteInicio(usuario: widget.usuario),
+      const ClienteInicio(),
       const ClienteCitas(),
-      ClienteQR(usuario: widget.usuario),
-      ClientePuntos(usuario: widget.usuario),
-      ClientePerfil(usuario: widget.usuario),
+      const ClienteQR(),
+      const ClientePuntos(),
+      const ClientePerfil(),
     ];
 
     return Scaffold(
@@ -227,28 +163,58 @@ class _ClienteMainState extends State<ClienteMain> {
   }
 }
 
-// ==================== PANTALLAS ====================
+// ==================== PANTALLAS CLIENTE ====================
 class ClienteInicio extends StatelessWidget {
-  final Usuario usuario;
-  const ClienteInicio({super.key, required this.usuario});
+  const ClienteInicio({super.key});
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
+        const Card(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Hola, ${usuario.nombre.split(" ")[0]} 👋", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                Text("Puntos: ${usuario.puntos} ⭐ • ${usuario.membresia}", style: const TextStyle(color: Color(0xFFC9A84C), fontSize: 16)),
+                Text("Hola, Carlos 👋", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                Text("Puntos: 320 ⭐ • Premium", style: TextStyle(color: Color(0xFFC9A84C), fontSize: 16)),
               ],
             ),
           ),
         ),
+        const SizedBox(height: 20),
+        const Text("Acceso Rápido", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: [
+            QuickCard("Reservar Cita", "📅", () {}),
+            QuickCard("Mi QR", "📱", () {}),
+            QuickCard("Mis Puntos", "⭐", () {}),
+            QuickCard("Membresía", "👑", () {}),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+class QuickCard extends StatelessWidget {
+  final String title, emoji;
+  final VoidCallback onTap;
+  const QuickCard(this.title, this.emoji, this.onTap, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(emoji, style: const TextStyle(fontSize: 42)), Text(title)]),
+      ),
     );
   }
 }
@@ -260,24 +226,21 @@ class ClienteCitas extends StatelessWidget {
 }
 
 class ClienteQR extends StatelessWidget {
-  final Usuario usuario;
-  const ClienteQR({super.key, required this.usuario});
+  const ClienteQR({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mi QR")), body: Center(child: Text("QR: ${usuario.id}")));
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mi QR")), body: const Center(child: Text("QR del Cliente\nCLI001", textAlign: TextAlign.center, style: TextStyle(fontSize: 20))));
 }
 
 class ClientePuntos extends StatelessWidget {
-  final Usuario usuario;
-  const ClientePuntos({super.key, required this.usuario});
+  const ClientePuntos({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mis Puntos")), body: Center(child: Text("${usuario.puntos} Puntos")));
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Mis Puntos")), body: const Center(child: Text("320 PUNTOS", style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Color(0xFFC9A84C)))));
 }
 
 class ClientePerfil extends StatelessWidget {
-  final Usuario usuario;
-  const ClientePerfil({super.key, required this.usuario});
+  const ClientePerfil({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Perfil")), body: Center(child: Text(usuario.nombre)));
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Perfil")), body: const Center(child: Text("Carlos Mendoza")));
 }
 
 class AdminMain extends StatelessWidget {
@@ -286,7 +249,7 @@ class AdminMain extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("BarberPro - Admin")),
-      body: const Center(child: Text("Panel de Administración")),
+      body: const Center(child: Text("Panel de Administración", style: TextStyle(fontSize: 24))),
     );
   }
 }

@@ -1,32 +1,26 @@
 name: barberpro
-description: Sistema de Gestión para Barbería - BarberPro
+description: BarberPro App
+
 publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
-  flutter: ">=3.0.0"
+  sdk: ">=3.11.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  shared_preferences: ^2.3.0
-  intl: ^0.19.0
+
+  cupertino_icons: ^1.0.9
+  shared_preferences: ^2.5.5
+  provider: ^6.1.5
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
-
-  # Icono de la aplicación (puedes cambiarlo después)
-  assets:
-    - assets/
-  
-  # Opcional: Nombre mostrado en el launcher
-  android:
-    package: com.barberpro.app
-  ios:
-    bundleIdentifier: com.barberpro.app

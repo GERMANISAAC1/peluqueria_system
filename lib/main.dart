@@ -1,3922 +1,2780 @@
+// ================================================================
+// BARBERPRO — main.dart
+// Flutter + Supabase (PostgreSQL)
+// Escáner QR real · Membresía editable · Accesos rápidos funcionales
+// ================================================================
+
+import 'dart:convert';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'dart:convert';
-import 'dart:math';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
+// CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
+// ────────────────────────────────────────────────────────────
+const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
+const _supabaseAnon = 'TU_ANON_KEY';
+
+// ────────────────────────────────────────────────────────────
 // ENTRY POINT
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ),
-  );
+  await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnon);
   runApp(const BarberProApp());
 }
 
-// ══════════════════════════════════════════════════
+SupabaseClient get _sb => Supabase.instance.client;
+const _uuid = Uuid();
+
+// ────────────────────────────────────────────────────────────
 // COLORES
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
 class C {
-  static const gold        = Color(0xFFC9A84C);
-  static const goldLight   = Color(0xFFE8D08A);
-  static const black       = Color(0xFF0A0A0A);
-  static const dark        = Color(0xFF111111);
-  static const dark2       = Color(0xFF1A1A1A);
-  static const dark3       = Color(0xFF222222);
-  static const textPrimary = Color(0xFFF5F0E8);
-  static const textMuted   = Color(0xFF888888);
-  static const textDim     = Color(0xFF555555);
-  static const success     = Color(0xFF4CAF82);
-  static const danger      = Color(0xFFE05A5A);
-  static const info        = Color(0xFF5A9CE0);
-  static const border      = Color(0x33C9A84C);
-  static const borderStrong= Color(0x80C9A84C);
-
-  static Color estadoColor(String estado) {
-    switch (estado) {
-      case 'pendiente':  return C.info;
-      case 'confirmada': return C.gold;
-      case 'completada': return C.success;
-      case 'cancelada':  return C.danger;
-      default:           return C.textMuted;
-    }
-  }
+  static const gold   = Color(0xFFC9A84C);
+  static const goldBg = Color(0x18C9A84C);
+  static const black  = Color(0xFF0A0A0A);
+  static const d1     = Color(0xFF111111);
+  static const d2     = Color(0xFF1A1A1A);
+  static const d3     = Color(0xFF222222);
+  static const brd    = Color(0x33C9A84C);
+  static const brdS   = Color(0x80C9A84C);
+  static const txt    = Color(0xFFF5F0E8);
+  static const muted  = Color(0xFF888888);
+  static const dim    = Color(0xFF555555);
+  static const ok     = Color(0xFF4CAF82);
+  static const err    = Color(0xFFE05A5A);
+  static const info   = Color(0xFF5A9CE0);
 }
 
-// ══════════════════════════════════════════════════
-// MODELOS
-// ══════════════════════════════════════════════════
-class Usuario {
-  final String id;
-  String nombre;
-  String celular;
-  String passwordHash;
-  final String rol; // 'cliente' | 'admin'
-  String? email;
-  String membresia;
-  int puntos;
-  List<HistorialPunto> historialPuntos;
+// ────────────────────────────────────────────────────────────
+// TEMA
+// ────────────────────────────────────────────────────────────
+ThemeData get kTheme => ThemeData(
+  useMaterial3: false,
+  brightness: Brightness.dark,
+  scaffoldBackgroundColor: C.black,
+  primaryColor: C.gold,
+  colorScheme: const ColorScheme.dark(primary: C.gold, secondary: C.gold, surface: C.d2, error: C.err),
+  appBarTheme: const AppBarTheme(
+    backgroundColor: C.d1, elevation: 0, centerTitle: true,
+    titleTextStyle: TextStyle(color: C.gold, fontSize: 19, fontWeight: FontWeight.bold, letterSpacing: .5),
+    iconTheme: IconThemeData(color: C.txt),
+    systemOverlayStyle: SystemUiOverlayStyle.light,
+  ),
+  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+    backgroundColor: C.d1, selectedItemColor: C.gold,
+    unselectedItemColor: C.muted, type: BottomNavigationBarType.fixed, elevation: 0,
+  ),
+  inputDecorationTheme: InputDecorationTheme(
+    filled: true, fillColor: C.d3,
+    border:        _ob(C.brd), enabledBorder: _ob(C.brd),
+    focusedBorder: _ob(C.gold, w: 1.5),
+    errorBorder:   _ob(C.err), focusedErrorBorder: _ob(C.err, w: 1.5),
+    labelStyle: const TextStyle(color: C.muted, fontSize: 13),
+    hintStyle: const TextStyle(color: C.dim, fontSize: 13),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  ),
+  elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(
+    backgroundColor: C.gold, foregroundColor: C.black,
+    minimumSize: const Size(double.infinity, 52),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600), elevation: 0,
+  )),
+  dialogTheme: DialogTheme(
+    backgroundColor: C.d2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.brd)),
+    titleTextStyle: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold),
+    contentTextStyle: const TextStyle(color: C.txt),
+  ),
+  snackBarTheme: SnackBarThemeData(
+    backgroundColor: C.d2, contentTextStyle: const TextStyle(color: C.txt),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: C.brdS)),
+    behavior: SnackBarBehavior.floating,
+  ),
+);
+OutlineInputBorder _ob(Color c, {double w = 1}) =>
+    OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c, width: w));
 
-  Usuario({
-    required this.id,
-    required this.nombre,
-    required this.celular,
-    required this.passwordHash,
-    required this.rol,
-    this.email,
-    this.membresia = 'Ninguna',
-    this.puntos = 0,
-    List<HistorialPunto>? historialPuntos,
-  }) : historialPuntos = historialPuntos ?? [];
-
-  String get iniciales {
-    final p = nombre.trim().split(' ');
-    if (p.length >= 2) return '${p[0][0]}${p[1][0]}'.toUpperCase();
-    return nombre.isNotEmpty ? nombre[0].toUpperCase() : 'U';
-  }
-
-  bool get esVIP => membresia == 'Premium' || membresia == 'VIP Anual';
-
-  String get nivelLoyalty {
-    if (puntos >= 500) return '🥇 Oro';
-    if (puntos >= 200) return '🥈 Plata';
-    return '🥉 Bronce';
-  }
-
-  int get puntosParaSiguienteNivel {
-    if (puntos >= 500) return 0;
-    if (puntos >= 200) return 500 - puntos;
-    return 200 - puntos;
-  }
-
-  double get progresoNivel {
-    if (puntos >= 500) return 1.0;
-    if (puntos >= 200) return (puntos - 200) / 300.0;
-    return puntos / 200.0;
-  }
-
-  double get descuentoPorcentaje {
-    if (puntos >= 500) return 20;
-    if (puntos >= 200) return 10;
-    return 5;
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'nombre': nombre,
-    'celular': celular,
-    'passwordHash': passwordHash,
-    'rol': rol,
-    'email': email,
-    'membresia': membresia,
-    'puntos': puntos,
-    'historialPuntos': historialPuntos.map((h) => h.toJson()).toList(),
-  };
-
-  factory Usuario.fromJson(Map<String, dynamic> j) => Usuario(
-    id: j['id'] as String,
-    nombre: j['nombre'] as String,
-    celular: j['celular'] as String,
-    passwordHash: j['passwordHash'] as String,
-    rol: j['rol'] as String,
-    email: j['email'] as String?,
-    membresia: (j['membresia'] as String?) ?? 'Ninguna',
-    puntos: (j['puntos'] as int?) ?? 0,
-    historialPuntos: ((j['historialPuntos'] as List?) ?? [])
-        .map((h) => HistorialPunto.fromJson(h as Map<String, dynamic>))
-        .toList(),
-  );
-}
-
-class HistorialPunto {
-  final String fecha;
-  final String concepto;
-  final int puntos;
-
-  HistorialPunto({
-    required this.fecha,
-    required this.concepto,
-    required this.puntos,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'fecha': fecha,
-    'concepto': concepto,
-    'puntos': puntos,
-  };
-
-  factory HistorialPunto.fromJson(Map<String, dynamic> j) => HistorialPunto(
-    fecha: j['fecha'] as String,
-    concepto: j['concepto'] as String,
-    puntos: j['puntos'] as int,
-  );
-}
-
-class Servicio {
-  final String id;
-  String nombre;
-  String descripcion;
-  double precio;
-  int duracion;
-  int puntos;
-  String icono;
-  bool activo;
-
-  Servicio({
-    required this.id,
-    required this.nombre,
-    required this.descripcion,
-    required this.precio,
-    required this.duracion,
-    required this.puntos,
-    required this.icono,
-    this.activo = true,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'nombre': nombre,
-    'descripcion': descripcion,
-    'precio': precio,
-    'duracion': duracion,
-    'puntos': puntos,
-    'icono': icono,
-    'activo': activo,
-  };
-
-  factory Servicio.fromJson(Map<String, dynamic> j) => Servicio(
-    id: j['id'] as String,
-    nombre: j['nombre'] as String,
-    descripcion: j['descripcion'] as String,
-    precio: (j['precio'] as num).toDouble(),
-    duracion: j['duracion'] as int,
-    puntos: j['puntos'] as int,
-    icono: j['icono'] as String,
-    activo: j['activo'] as bool,
-  );
-}
-
-class Cita {
-  final String id;
-  final String clienteId;
-  final String clienteNombre;
-  final String clienteCelular;
-  final String servicioId;
-  final String servicioNombre;
-  final String fecha;
-  final String hora;
-  String estado;
-  final double precio;
-  final String notas;
-
-  Cita({
-    required this.id,
-    required this.clienteId,
-    required this.clienteNombre,
-    required this.clienteCelular,
-    required this.servicioId,
-    required this.servicioNombre,
-    required this.fecha,
-    required this.hora,
-    required this.estado,
-    required this.precio,
-    this.notas = '',
-  });
-
-  bool get esHoy {
-    final hoy = DateTime.now().toIso8601String().split('T')[0];
-    return fecha == hoy;
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'clienteId': clienteId,
-    'clienteNombre': clienteNombre,
-    'clienteCelular': clienteCelular,
-    'servicioId': servicioId,
-    'servicioNombre': servicioNombre,
-    'fecha': fecha,
-    'hora': hora,
-    'estado': estado,
-    'precio': precio,
-    'notas': notas,
-  };
-
-  factory Cita.fromJson(Map<String, dynamic> j) => Cita(
-    id: j['id'] as String,
-    clienteId: j['clienteId'] as String,
-    clienteNombre: j['clienteNombre'] as String,
-    clienteCelular: (j['clienteCelular'] as String?) ?? '',
-    servicioId: j['servicioId'] as String,
-    servicioNombre: j['servicioNombre'] as String,
-    fecha: j['fecha'] as String,
-    hora: j['hora'] as String,
-    estado: j['estado'] as String,
-    precio: (j['precio'] as num).toDouble(),
-    notas: (j['notas'] as String?) ?? '',
-  );
-}
-
-class Promocion {
-  final String id;
-  String titulo;
-  String descripcion;
-  int descuento;
-  String hasta;
-  bool activa;
-
-  Promocion({
-    required this.id,
-    required this.titulo,
-    required this.descripcion,
-    required this.descuento,
-    required this.hasta,
-    this.activa = true,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'titulo': titulo,
-    'descripcion': descripcion,
-    'descuento': descuento,
-    'hasta': hasta,
-    'activa': activa,
-  };
-
-  factory Promocion.fromJson(Map<String, dynamic> j) => Promocion(
-    id: j['id'] as String,
-    titulo: j['titulo'] as String,
-    descripcion: j['descripcion'] as String,
-    descuento: j['descuento'] as int,
-    hasta: j['hasta'] as String,
-    activa: j['activa'] as bool,
-  );
-}
-
-// ══════════════════════════════════════════════════
-// SERVICIO DE BASE DE DATOS (SharedPreferences)
-// ══════════════════════════════════════════════════
-class DB {
-  static const _key = 'barberpro_v2';
-  static SharedPreferences? _prefs;
-
-  static Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-    if (_prefs!.getString(_key) == null) await _seed();
-  }
-
-  static String _hash(String password) {
-    // Hash simple con salt — en producción usar bcrypt/argon2
-    final bytes = utf8.encode('bpro_salt_2024_$password');
-    var hash = 0;
-    for (final b in bytes) {
-      hash = ((hash << 5) - hash) + b;
-      hash &= 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
-  }
-
-  static String _genId(String prefix) {
-    final rand = Random().nextInt(99999).toString().padLeft(5, '0');
-    return '$prefix${DateTime.now().millisecondsSinceEpoch.toRadixString(36).toUpperCase()}$rand';
-  }
-
-  static Future<void> _seed() async {
-    final hoy = DateTime.now().toIso8601String().split('T')[0];
-    final manana = DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T')[0];
-    final adminId = _genId('USR');
-    final cli1Id  = _genId('USR');
-    final cli2Id  = _genId('USR');
-    final svc1Id  = _genId('SVC');
-    final svc2Id  = _genId('SVC');
-    final svc3Id  = _genId('SVC');
-    final svc4Id  = _genId('SVC');
-
-    final data = {
-      'usuarios': [
-        // Admin: celular 999000000 / clave: admin123
-        {
-          'id': adminId, 'nombre': 'Administrador', 'celular': '999000000',
-          'passwordHash': _hash('admin123'), 'rol': 'admin',
-          'email': 'admin@barberpro.pe', 'membresia': 'Ninguna', 'puntos': 0,
-          'historialPuntos': [],
-        },
-        // Cliente 1: celular 987654321 / clave: cliente123
-        {
-          'id': cli1Id, 'nombre': 'Carlos Mendoza', 'celular': '987654321',
-          'passwordHash': _hash('cliente123'), 'rol': 'cliente',
-          'email': 'carlos@email.com', 'membresia': 'Premium', 'puntos': 320,
-          'historialPuntos': [
-            {'fecha': hoy, 'concepto': 'Corte clásico', 'puntos': 10},
-            {'fecha': hoy, 'concepto': 'Corte + barba', 'puntos': 15},
-          ],
-        },
-        // Cliente 2: celular 976543210 / clave: pedro123
-        {
-          'id': cli2Id, 'nombre': 'Pedro Sánchez', 'celular': '976543210',
-          'passwordHash': _hash('pedro123'), 'rol': 'cliente',
-          'email': 'pedro@email.com', 'membresia': 'Básico', 'puntos': 85,
-          'historialPuntos': [],
-        },
-      ],
-      'servicios': [
-        {'id': svc1Id, 'nombre': 'Corte clásico',    'descripcion': 'Corte tradicional con tijera y peine', 'precio': 25.0, 'duracion': 30, 'puntos': 10, 'icono': '✂️', 'activo': true},
-        {'id': svc2Id, 'nombre': 'Corte + barba',    'descripcion': 'Corte completo y arreglo de barba',    'precio': 40.0, 'duracion': 50, 'puntos': 15, 'icono': '🪒', 'activo': true},
-        {'id': svc3Id, 'nombre': 'Afeitado clásico', 'descripcion': 'Afeitado con navaja y toalla caliente','precio': 30.0, 'duracion': 40, 'puntos': 12, 'icono': '🔥', 'activo': true},
-        {'id': svc4Id, 'nombre': 'Degradado fade',   'descripcion': 'Fade profesional a máquina',           'precio': 35.0, 'duracion': 45, 'puntos': 13, 'icono': '💈', 'activo': true},
-      ],
-      'citas': [
-        {'id': _genId('CIT'), 'clienteId': cli1Id, 'clienteNombre': 'Carlos Mendoza', 'clienteCelular': '987654321', 'servicioId': svc1Id, 'servicioNombre': 'Corte clásico', 'fecha': hoy,    'hora': '10:00', 'estado': 'confirmada', 'precio': 25.0, 'notas': ''},
-        {'id': _genId('CIT'), 'clienteId': cli2Id, 'clienteNombre': 'Pedro Sánchez',  'clienteCelular': '976543210', 'servicioId': svc2Id, 'servicioNombre': 'Corte + barba', 'fecha': hoy,    'hora': '11:00', 'estado': 'pendiente',  'precio': 40.0, 'notas': ''},
-        {'id': _genId('CIT'), 'clienteId': cli1Id, 'clienteNombre': 'Carlos Mendoza', 'clienteCelular': '987654321', 'servicioId': svc3Id, 'servicioNombre': 'Afeitado clásico','fecha': manana,'hora': '15:30', 'estado': 'pendiente',  'precio': 30.0, 'notas': 'Sin prisa'},
-      ],
-      'promociones': [
-        {'id': _genId('PRO'), 'titulo': 'Martes de descuento', 'descripcion': '20% off en todos los cortes los martes', 'descuento': 20, 'hasta': '2025-12-31', 'activa': true},
-        {'id': _genId('PRO'), 'titulo': 'Combo Verano',        'descripcion': 'Corte + barba a precio especial S/ 35',   'descuento': 15, 'hasta': '2026-03-31', 'activa': true},
-      ],
-    };
-    await _prefs!.setString(_key, jsonEncode(data));
-  }
-
-  // ── LECTURA ──────────────────────────────
-  static Map<String, dynamic> _raw() =>
-      jsonDecode(_prefs!.getString(_key)!) as Map<String, dynamic>;
-
-  static Future<void> _save(Map<String, dynamic> data) async =>
-      await _prefs!.setString(_key, jsonEncode(data));
-
-  // ── USUARIOS ─────────────────────────────
-  static List<Usuario> usuarios() {
-    final raw = _raw();
-    return (raw['usuarios'] as List)
-        .map((u) => Usuario.fromJson(u as Map<String, dynamic>))
-        .toList();
-  }
-
-  static Usuario? loginCheck(String celular, String password) {
-    return usuarios().where((u) =>
-        u.celular == celular && u.passwordHash == _hash(password)
-    ).firstOrNull;
-  }
-
-  static bool celularExiste(String celular) =>
-      usuarios().any((u) => u.celular == celular);
-
-  static Future<Usuario> registrar({
-    required String nombre,
-    required String celular,
-    required String password,
-    String? email,
-  }) async {
-    final raw = _raw();
-    final nuevo = Usuario(
-      id: _genId('USR'),
-      nombre: nombre,
-      celular: celular,
-      passwordHash: _hash(password),
-      rol: 'cliente',
-      email: email,
-    );
-    (raw['usuarios'] as List).add(nuevo.toJson());
-    await _save(raw);
-    return nuevo;
-  }
-
-  static Future<void> actualizarUsuario(Usuario u) async {
-    final raw = _raw();
-    final list = raw['usuarios'] as List;
-    final idx = list.indexWhere((x) => (x as Map)['id'] == u.id);
-    if (idx != -1) list[idx] = u.toJson();
-    await _save(raw);
-  }
-
-  static Future<void> eliminarUsuario(String id) async {
-    final raw = _raw();
-    raw['usuarios'] = (raw['usuarios'] as List)
-        .where((u) => (u as Map)['id'] != id)
-        .toList();
-    await _save(raw);
-  }
-
-  static Future<void> agregarPuntos(String usuarioId, int puntos, String concepto) async {
-    final raw = _raw();
-    final list = raw['usuarios'] as List;
-    final idx = list.indexWhere((u) => (u as Map)['id'] == usuarioId);
-    if (idx != -1) {
-      final u = list[idx] as Map<String, dynamic>;
-      u['puntos'] = ((u['puntos'] as int?) ?? 0) + puntos;
-      (u['historialPuntos'] as List).add({
-        'fecha': DateTime.now().toIso8601String().split('T')[0],
-        'concepto': concepto,
-        'puntos': puntos,
-      });
-    }
-    await _save(raw);
-  }
-
-  // ── SERVICIOS ────────────────────────────
-  static List<Servicio> servicios({bool soloActivos = false}) {
-    final raw = _raw();
-    var list = (raw['servicios'] as List)
-        .map((s) => Servicio.fromJson(s as Map<String, dynamic>))
-        .toList();
-    if (soloActivos) list = list.where((s) => s.activo).toList();
-    return list;
-  }
-
-  static Future<void> agregarServicio(Servicio s) async {
-    final raw = _raw();
-    (raw['servicios'] as List).add(s.toJson());
-    await _save(raw);
-  }
-
-  static Future<void> eliminarServicio(String id) async {
-    final raw = _raw();
-    raw['servicios'] = (raw['servicios'] as List)
-        .where((s) => (s as Map)['id'] != id)
-        .toList();
-    await _save(raw);
-  }
-
-  // ── CITAS ────────────────────────────────
-  static List<Cita> citas({String? clienteId, String? estado, String? fecha}) {
-    final raw = _raw();
-    var list = (raw['citas'] as List)
-        .map((c) => Cita.fromJson(c as Map<String, dynamic>))
-        .toList();
-    if (clienteId != null) list = list.where((c) => c.clienteId == clienteId).toList();
-    if (estado != null)    list = list.where((c) => c.estado == estado).toList();
-    if (fecha != null)     list = list.where((c) => c.fecha == fecha).toList();
-    list.sort((a, b) {
-      final cmp = b.fecha.compareTo(a.fecha);
-      return cmp != 0 ? cmp : b.hora.compareTo(a.hora);
-    });
-    return list;
-  }
-
-  static List<Cita> citasHoy() {
-    final hoy = DateTime.now().toIso8601String().split('T')[0];
-    return citas(fecha: hoy)
-      ..sort((a, b) => a.hora.compareTo(b.hora));
-  }
-
-  static Future<void> agregarCita(Cita c) async {
-    final raw = _raw();
-    (raw['citas'] as List).add(c.toJson());
-    await _save(raw);
-  }
-
-  static Future<void> cambiarEstadoCita(String id, String estado) async {
-    final raw = _raw();
-    final list = raw['citas'] as List;
-    final idx = list.indexWhere((c) => (c as Map)['id'] == id);
-    if (idx != -1) (list[idx] as Map<String, dynamic>)['estado'] = estado;
-    await _save(raw);
-  }
-
-  static Future<void> completarCita(String citaId) async {
-    final raw = _raw();
-    final cList = raw['citas'] as List;
-    final idx = cList.indexWhere((c) => (c as Map)['id'] == citaId);
-    if (idx == -1) return;
-    final citaMap = cList[idx] as Map<String, dynamic>;
-    citaMap['estado'] = 'completada';
-
-    // Sumar puntos al cliente
-    final svcId = citaMap['servicioId'] as String;
-    final svc = (raw['servicios'] as List)
-        .cast<Map<String, dynamic>>()
-        .firstWhere((s) => s['id'] == svcId, orElse: () => {});
-    if (svc.isNotEmpty) {
-      final pts = svc['puntos'] as int;
-      final nombre = svc['nombre'] as String;
-      final uList = raw['usuarios'] as List;
-      final uIdx = uList.indexWhere((u) => (u as Map)['id'] == citaMap['clienteId']);
-      if (uIdx != -1) {
-        final u = uList[uIdx] as Map<String, dynamic>;
-        u['puntos'] = ((u['puntos'] as int?) ?? 0) + pts;
-        (u['historialPuntos'] as List).add({
-          'fecha': DateTime.now().toIso8601String().split('T')[0],
-          'concepto': nombre,
-          'puntos': pts,
-        });
-      }
-    }
-    await _save(raw);
-  }
-
-  static bool horarioOcupado(String fecha, String hora) {
-    return citas(fecha: fecha).any((c) =>
-        c.hora == hora && c.estado != 'cancelada');
-  }
-
-  // ── PROMOCIONES ──────────────────────────
-  static List<Promocion> promociones() {
-    final raw = _raw();
-    return (raw['promociones'] as List)
-        .map((p) => Promocion.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
-
-  static Future<void> agregarPromocion(Promocion p) async {
-    final raw = _raw();
-    (raw['promociones'] as List).add(p.toJson());
-    await _save(raw);
-  }
-
-  static Future<void> eliminarPromocion(String id) async {
-    final raw = _raw();
-    raw['promociones'] = (raw['promociones'] as List)
-        .where((p) => (p as Map)['id'] != id)
-        .toList();
-    await _save(raw);
-  }
-
-  // ── HELPERS ──────────────────────────────
-  static String genId(String prefix) => _genId(prefix);
-
-  static String formatFecha(String fecha) {
-    final p = fecha.split('-');
-    if (p.length != 3) return fecha;
-    return '${p[2]}/${p[1]}/${p[0]}';
-  }
-}
-
-// ══════════════════════════════════════════════════
-// SESSION MANAGER
-// ══════════════════════════════════════════════════
-class Session {
-  static Usuario? current;
-
-  static Future<void> save(Usuario u) async {
-    current = u;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('session_id', u.id);
-    await prefs.setString('session_rol', u.rol);
-  }
-
-  static Future<Usuario?> restore() async {
-    final prefs = await SharedPreferences.getInstance();
-    final id = prefs.getString('session_id');
-    if (id == null) return null;
-    return DB.usuarios().where((u) => u.id == id).firstOrNull;
-  }
-
-  static Future<void> clear() async {
-    current = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('session_id');
-    await prefs.remove('session_rol');
-  }
-}
-
-// ══════════════════════════════════════════════════
-// APP ROOT
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
+// APP
+// ────────────────────────────────────────────────────────────
 class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'BarberPro',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        primaryColor: C.gold,
-        scaffoldBackgroundColor: C.black,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: C.dark,
-          elevation: 0,
-          centerTitle: true,
-          titleTextStyle: TextStyle(
-            color: C.gold, fontSize: 20, fontWeight: FontWeight.bold,
-          ),
-          iconTheme: IconThemeData(color: C.textPrimary),
-        ),
-        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          backgroundColor: C.dark,
-          selectedItemColor: C.gold,
-          unselectedItemColor: C.textMuted,
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: C.dark3,
-          labelStyle: const TextStyle(color: C.textMuted),
-          hintStyle: const TextStyle(color: C.textDim),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: C.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: C.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: C.gold, width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: C.danger),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: C.danger),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: C.gold,
-            foregroundColor: C.black,
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: C.gold,
-            side: const BorderSide(color: C.borderStrong),
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        ),
-        colorScheme: const ColorScheme.dark(
-          primary: C.gold,
-          secondary: C.goldLight,
-          surface: C.dark2,
-          error: C.danger,
-        ),
-      ),
-      home: const SplashScreen(),
-    );
+  Widget build(BuildContext context) =>
+      MaterialApp(title: 'BarberPro', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
+}
+
+// ────────────────────────────────────────────────────────────
+// HASH DE CONTRASEÑA (sin dependencias externas pesadas)
+// ────────────────────────────────────────────────────────────
+String hashPass(String pass) {
+  final bytes = utf8.encode(pass + 'BaRbErPrO2024');
+  return crypto.sha256.convert(bytes).toString();
+}
+
+// ────────────────────────────────────────────────────────────
+// SERVICIO SUPABASE
+// ────────────────────────────────────────────────────────────
+class SB {
+  // ── AUTH ──
+  static Future<Map<String, dynamic>?> login(String cel, String pass) async {
+    final r = await _sb.from('usuarios')
+        .select()
+        .eq('celular', cel)
+        .eq('password_hash', hashPass(pass))
+        .maybeSingle();
+    return r;
+  }
+
+  static Future<bool> celularExiste(String cel) async {
+    final r = await _sb.from('usuarios').select('id').eq('celular', cel).maybeSingle();
+    return r != null;
+  }
+
+  static Future<Map<String, dynamic>> registrar({
+    required String nombre, required String celular,
+    required String pass, String email = '',
+  }) async {
+    final r = await _sb.from('usuarios').insert({
+      'nombre': nombre, 'celular': celular,
+      'password_hash': hashPass(pass), 'rol': 'cliente',
+      'email': email, 'membresia': 'Ninguna', 'puntos': 0,
+    }).select().single();
+    return r;
+  }
+
+  // ── USUARIOS ──
+  static Future<Map<String, dynamic>?> getUsuario(String id) async =>
+      await _sb.from('usuarios').select().eq('id', id).maybeSingle();
+
+  static Future<Map<String, dynamic>?> getUsuarioCelular(String cel) async =>
+      await _sb.from('usuarios').select().eq('celular', cel).maybeSingle();
+
+  static Future<List<Map<String, dynamic>>> getClientes({String? q}) async {
+    var query = _sb.from('usuarios').select().eq('rol', 'cliente').order('nombre');
+    if (q != null && q.isNotEmpty) {
+      query = query.or('nombre.ilike.%$q%,celular.ilike.%$q%');
+    }
+    return List<Map<String, dynamic>>.from(await query);
+  }
+
+  static Future<void> updateUsuario(String id, Map<String, dynamic> data) async =>
+      await _sb.from('usuarios').update(data).eq('id', id);
+
+  static Future<void> deleteCliente(String id) async =>
+      await _sb.from('usuarios').delete().eq('id', id).eq('rol', 'cliente');
+
+  static Future<void> addPuntos(String uid, int pts, String concepto, {String? citaId}) async {
+    await _sb.rpc('completar_cita_manual', params: {
+      'p_usuario_id': uid, 'p_puntos': pts,
+      'p_concepto': concepto, 'p_cita_id': citaId,
+    });
+  }
+
+  // Versión directa (sin RPC) por si no tienes la función
+  static Future<void> addPuntosDirecto(String uid, int pts, String concepto) async {
+    final u = await getUsuario(uid);
+    if (u == null) return;
+    final ptsActual = (u['puntos'] as int?) ?? 0;
+    await _sb.from('usuarios').update({'puntos': ptsActual + pts}).eq('id', uid);
+    await _sb.from('historial_puntos').insert({
+      'usuario_id': uid, 'concepto': concepto, 'puntos': pts,
+    });
+  }
+
+  static Future<void> setMembresia(String uid, String plan) async =>
+      await _sb.from('usuarios').update({'membresia': plan}).eq('id', uid);
+
+  // ── SERVICIOS ──
+  static Future<List<Map<String, dynamic>>> getServicios({bool soloActivos = false}) async {
+    var q = _sb.from('servicios').select().order('nombre');
+    if (soloActivos) q = q.eq('activo', true);
+    return List<Map<String, dynamic>>.from(await q);
+  }
+
+  static Future<void> addServicio(Map<String, dynamic> s) async =>
+      await _sb.from('servicios').insert(s);
+
+  static Future<void> updateServicio(String id, Map<String, dynamic> s) async =>
+      await _sb.from('servicios').update(s).eq('id', id);
+
+  static Future<void> deleteServicio(String id) async =>
+      await _sb.from('servicios').update({'activo': false}).eq('id', id);
+
+  // ── PLANES MEMBRESÍA (editables) ──
+  static Future<List<Map<String, dynamic>>> getPlanes() async =>
+      List<Map<String, dynamic>>.from(
+          await _sb.from('planes_membresia').select().eq('activo', true).order('orden'));
+
+  static Future<void> addPlan(Map<String, dynamic> p) async =>
+      await _sb.from('planes_membresia').insert(p);
+
+  static Future<void> updatePlan(String id, Map<String, dynamic> p) async =>
+      await _sb.from('planes_membresia').update(p).eq('id', id);
+
+  static Future<void> deletePlan(String id) async =>
+      await _sb.from('planes_membresia').update({'activo': false}).eq('id', id);
+
+  // ── CITAS ──
+  static Future<List<Map<String, dynamic>>> getCitas({
+    String? clienteId, String? estado, String? fecha}) async {
+    var q = _sb.from('citas').select(
+      'id,cliente_id,cliente_nombre,servicio_id,servicio_nombre,fecha,hora,estado,precio,notas,creado_en'
+    ).order('fecha', ascending: false).order('hora', ascending: false);
+    if (clienteId != null) q = q.eq('cliente_id', clienteId);
+    if (estado    != null) q = q.eq('estado', estado);
+    if (fecha     != null) q = q.eq('fecha', fecha);
+    return List<Map<String, dynamic>>.from(await q);
+  }
+
+  static Future<List<Map<String, dynamic>>> getCitasHoy() async {
+    final hoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    return List<Map<String, dynamic>>.from(await _sb.from('citas')
+        .select().eq('fecha', hoy).order('hora'));
+  }
+
+  static Future<bool> horarioOcupado(String fecha, String hora, {String? excluirId}) async {
+    var q = _sb.from('citas').select('id').eq('fecha', fecha).eq('hora', hora)
+        .neq('estado', 'cancelada');
+    if (excluirId != null) q = q.neq('id', excluirId);
+    final r = await q;
+    return (r as List).isNotEmpty;
+  }
+
+  static Future<void> addCita(Map<String, dynamic> c) async =>
+      await _sb.from('citas').insert(c);
+
+  static Future<void> setCitaEstado(String id, String estado) async =>
+      await _sb.from('citas').update({'estado': estado}).eq('id', id);
+
+  static Future<void> completarCita(String id) async {
+    // Usa la función PostgreSQL que suma puntos automáticamente
+    try {
+      await _sb.rpc('completar_cita', params: {'cita_uuid': id});
+    } catch (_) {
+      // Fallback manual si no existe la función RPC
+      final cita = await _sb.from('citas').select().eq('id', id).single();
+      await _sb.from('citas').update({'estado': 'completada'}).eq('id', id);
+      final svc = await _sb.from('servicios')
+          .select('puntos_otorga').eq('id', cita['servicio_id']).single();
+      final pts = (svc['puntos_otorga'] as int?) ?? 0;
+      await addPuntosDirecto(cita['cliente_id'].toString(), pts, cita['servicio_nombre'].toString());
+    }
+  }
+
+  // ── HISTORIAL PUNTOS ──
+  static Future<List<Map<String, dynamic>>> getHistorial(String uid) async =>
+      List<Map<String, dynamic>>.from(await _sb.from('historial_puntos')
+          .select().eq('usuario_id', uid).order('fecha', ascending: false));
+
+  // ── PROMOCIONES ──
+  static Future<List<Map<String, dynamic>>> getPromociones({bool soloActivas = false}) async {
+    var q = _sb.from('promociones').select().order('creado_en', ascending: false);
+    if (soloActivas) q = q.eq('activa', true);
+    return List<Map<String, dynamic>>.from(await q);
+  }
+
+  static Future<void> addPromocion(Map<String, dynamic> p) async =>
+      await _sb.from('promociones').insert(p);
+
+  static Future<void> deletePromocion(String id) async =>
+      await _sb.from('promociones').delete().eq('id', id);
+
+  // ── REPORTES ──
+  static Future<Map<String, dynamic>> reportes() async {
+    final citas    = List<Map<String, dynamic>>.from(await _sb.from('citas').select());
+    final usuarios = List<Map<String, dynamic>>.from(
+        await _sb.from('usuarios').select().eq('rol', 'cliente'));
+    final hoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    final completadas = citas.where((c) => c['estado'] == 'completada').toList();
+    final ingTotal    = completadas.fold<double>(0, (s, c) => s + (c['precio'] as num).toDouble());
+    final citasHoy    = citas.where((c) => c['fecha'].toString() == hoy).length;
+    final ingHoy      = citas.where((c) => c['fecha'].toString() == hoy && c['estado'] == 'completada')
+        .fold<double>(0, (s, c) => s + (c['precio'] as num).toDouble());
+    final vip = usuarios.where((u) =>
+        u['membresia'] == 'Premium' || u['membresia'] == 'VIP Anual').length;
+
+    final Map<String, int> pop = {};
+    for (final c in completadas) {
+      final n = c['servicio_nombre'].toString();
+      pop[n] = (pop[n] ?? 0) + 1;
+    }
+    final pops = pop.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+    return {
+      'total': citas.length, 'completadas': completadas.length,
+      'canceladas': citas.where((c) => c['estado'] == 'cancelada').length,
+      'ingTotal': ingTotal, 'citasHoy': citasHoy, 'ingHoy': ingHoy,
+      'clientes': usuarios.length, 'vip': vip, 'populares': pops,
+    };
   }
 }
 
-// ══════════════════════════════════════════════════
-// SPLASH SCREEN
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
+// SESSION (en memoria)
+// ────────────────────────────────────────────────────────────
+class Session {
+  static Map<String, dynamic>? usuario;
+  static bool get isAdmin => usuario?['rol'] == 'admin';
+  static String get uid => usuario!['id'].toString();
+  static void clear() => usuario = null;
+}
+
+// ────────────────────────────────────────────────────────────
+// HELPERS UI COMUNES
+// ────────────────────────────────────────────────────────────
+Color _estadoColor(String e) => switch (e) {
+  'pendiente'  => C.info,
+  'confirmada' => C.gold,
+  'completada' => C.ok,
+  'cancelada'  => C.err,
+  _            => C.muted,
+};
+
+String _fmtFecha(String f) {
+  try {
+    final d = DateTime.parse(f);
+    return DateFormat('dd/MM/yyyy').format(d);
+  } catch (_) { return f; }
+}
+
+void _snack(BuildContext ctx, String msg, {bool err = false}) {
+  ScaffoldMessenger.of(ctx).clearSnackBars();
+  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+    content: Text(msg), backgroundColor: err ? C.err : C.ok));
+}
+
+Future<bool> _confirm(BuildContext ctx, String t, String msg) async {
+  final r = await showDialog<bool>(context: ctx, builder: (_) => AlertDialog(
+    title: Text(t), content: Text(msg),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+      TextButton(onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Si', style: TextStyle(color: C.err))),
+    ],
+  ));
+  return r ?? false;
+}
+
+Widget _badge(String l, Color c) => Container(
+  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+  decoration: BoxDecoration(color: c.withOpacity(.15), borderRadius: BorderRadius.circular(20)),
+  child: Text(l.toUpperCase(), style: TextStyle(color: c, fontSize: 10, fontWeight: FontWeight.w700)),
+);
+
+Widget _stat(String icon, String val, String lbl) => Expanded(
+  child: Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+    child: Column(children: [
+      Text(icon, style: const TextStyle(fontSize: 24)),
+      const SizedBox(height: 6),
+      Text(val, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: C.gold)),
+      const SizedBox(height: 2),
+      Text(lbl, style: const TextStyle(color: C.muted, fontSize: 10), textAlign: TextAlign.center),
+    ]),
+  ),
+);
+
+class _T extends StatelessWidget {
+  final String t;
+  const _T(this.t);
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Text(t, style: const TextStyle(color: C.gold, fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: .5)),
+  );
+}
+
+class _F extends StatelessWidget {
+  final TextEditingController c;
+  final String label;
+  final String? hint;
+  final bool obs;
+  final TextInputType kb;
+  final List<TextInputFormatter>? fmt;
+  final String? Function(String?)? val;
+  final Widget? suffix;
+  final int lines;
+  const _F({required this.c, required this.label, this.hint, this.obs = false,
+    this.kb = TextInputType.text, this.fmt, this.val, this.suffix, this.lines = 1});
+  @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: c, obscureText: obs, keyboardType: kb, inputFormatters: fmt,
+    style: const TextStyle(color: C.txt), maxLines: obs ? 1 : lines,
+    decoration: InputDecoration(labelText: label, hintText: hint, suffixIcon: suffix),
+    validator: val,
+  );
+}
+
+Widget _dlgHead(String t, BuildContext ctx) => Row(
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
+    Text(t, style: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+    IconButton(icon: const Icon(Icons.close, color: C.muted), onPressed: () => Navigator.pop(ctx)),
+  ],
+);
+
+DropdownButtonFormField<T> _drop<T>({
+  required T? val, required String label, String? hint,
+  required List<DropdownMenuItem<T>> items, required ValueChanged<T?> onChange,
+}) => DropdownButtonFormField<T>(
+  value: val, hint: hint != null ? Text(hint) : null,
+  dropdownColor: C.d3, style: const TextStyle(color: C.txt),
+  decoration: InputDecoration(labelText: hint == null ? label : null),
+  items: items, onChanged: onChange,
+);
+
+// ────────────────────────────────────────────────────────────
+// SPLASH
+// ────────────────────────────────────────────────────────────
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _fade;
+class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+  late final AnimationController _ac =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
 
   @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
-    _ctrl.forward();
-    _init();
-  }
+  void initState() { super.initState(); _go(); }
 
-  Future<void> _init() async {
-    await DB.init();
-    await Future.delayed(const Duration(milliseconds: 1800));
+  Future<void> _go() async {
+    await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;
-    final user = await Session.restore();
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => user != null
-            ? (user.rol == 'admin'
-                ? AdminMainScreen(usuario: user)
-                : ClienteMainScreen(usuario: user))
-            : const LoginScreen(),
-      ),
-    );
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
   @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _ac.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: C.black,
-      body: FadeTransition(
-        opacity: _fade,
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _LogoWidget(size: 100),
-              SizedBox(height: 24),
-              Text(
-                'BARBERPRO',
-                style: TextStyle(
-                  color: C.gold, fontSize: 26,
-                  fontWeight: FontWeight.bold, letterSpacing: 6,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Sistema de gestión profesional',
-                style: TextStyle(color: C.textMuted, fontSize: 13),
-              ),
-              SizedBox(height: 48),
-              SizedBox(
-                width: 28, height: 28,
-                child: CircularProgressIndicator(
-                  color: C.gold, strokeWidth: 2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: C.black,
+    body: FadeTransition(
+      opacity: CurvedAnimation(parent: _ac, curve: Curves.easeIn),
+      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 100, height: 100,
+          decoration: BoxDecoration(shape: BoxShape.circle,
+              border: Border.all(color: C.gold, width: 2), color: C.goldBg),
+          child: const Center(child: Text('✂️', style: TextStyle(fontSize: 50)))),
+        const SizedBox(height: 18),
+        const Text('BARBERPRO', style: TextStyle(
+            color: C.gold, fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: 5)),
+        const SizedBox(height: 6),
+        const Text('Sistema de gestion profesional', style: TextStyle(color: C.muted, fontSize: 13)),
+        const SizedBox(height: 40),
+        const SizedBox(width: 22, height: 22,
+            child: CircularProgressIndicator(color: C.gold, strokeWidth: 2)),
+      ])),
+    ),
+  );
 }
 
-// ══════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES
-// ══════════════════════════════════════════════════
-class _LogoWidget extends StatelessWidget {
-  final double size;
-  const _LogoWidget({this.size = 80});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size, height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: C.gold, width: 2),
-        color: C.gold.withValues(alpha: 0.08),
-      ),
-      child: Center(
-        child: Text('✂️', style: TextStyle(fontSize: size * 0.46)),
-      ),
-    );
-  }
-}
-
-class _GoldCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets? padding;
-  final Color? borderColor;
-  final VoidCallback? onTap;
-
-  const _GoldCard({
-    required this.child,
-    this.padding,
-    this.borderColor,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: C.dark2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor ?? C.border),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: padding ?? const EdgeInsets.all(16),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EstadoBadge extends StatelessWidget {
-  final String estado;
-  const _EstadoBadge(this.estado);
-
-  @override
-  Widget build(BuildContext context) {
-    final color = C.estadoColor(estado);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        estado.toUpperCase(),
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String icon;
-  final String value;
-  final String label;
-
-  const _StatCard({required this.icon, required this.value, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: C.dark2,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: C.border),
-        ),
-        child: Column(
-          children: [
-            Text(icon, style: const TextStyle(fontSize: 26)),
-            const SizedBox(height: 8),
-            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: C.gold)),
-            const SizedBox(height: 4),
-            Text(label, style: const TextStyle(color: C.textMuted, fontSize: 11), textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-void _snack(BuildContext ctx, String msg, {bool error = false}) {
-  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-    content: Text(msg),
-    backgroundColor: error ? C.danger : C.success,
-    behavior: SnackBarBehavior.floating,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  ));
-}
-
-// ══════════════════════════════════════════════════
-// LOGIN SCREEN
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
+// LOGIN
+// ────────────────────────────────────────────────────────────
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _formKey  = GlobalKey<FormState>();
-  final _celCtrl  = TextEditingController();
-  final _passCtrl = TextEditingController();
-  bool _verPass   = false;
-  bool _loading   = false;
+class _LoginState extends State<LoginScreen> {
+  final _fk = GlobalKey<FormState>();
+  final _cel = TextEditingController();
+  final _pas = TextEditingController();
+  bool _obs = true, _loading = false;
 
   @override
-  void dispose() {
-    _celCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _cel.dispose(); _pas.dispose(); super.dispose(); }
 
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_fk.currentState!.validate()) return;
     setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 400)); // UX feedback
-
-    final usuario = DB.loginCheck(
-      _celCtrl.text.trim(),
-      _passCtrl.text.trim(),
-    );
-
-    if (!mounted) return;
-    setState(() => _loading = false);
-
-    if (usuario == null) {
-      _snack(context, 'Celular o clave incorrectos', error: true);
-      return;
+    try {
+      final u = await SB.login(_cel.text.trim(), _pas.text);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      if (u == null) { _snack(context, 'Celular o contraseña incorrectos', err: true); return; }
+      Session.usuario = u;
+      _push(u['rol'] == 'admin' ? AdminMain(admin: u) : ClienteMain(usuario: u));
+    } catch (e) {
+      if (mounted) { setState(() => _loading = false); _snack(context, 'Error: $e', err: true); }
     }
-
-    await Session.save(usuario);
-    if (!mounted) return;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => usuario.rol == 'admin'
-            ? AdminMainScreen(usuario: usuario)
-            : ClienteMainScreen(usuario: usuario),
-      ),
-    );
   }
+
+  void _push(Widget w) => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => w));
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.3),
-            radius: 1.2,
-            colors: [Color(0xFF1A1200), C.black],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const _LogoWidget(size: 90),
-                    const SizedBox(height: 20),
-                    const Text('BarberPro',
-                        style: TextStyle(color: C.gold, fontSize: 36, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    const Text('Sistema de gestión profesional',
-                        style: TextStyle(color: C.textMuted, fontSize: 13)),
-                    const SizedBox(height: 48),
-
-                    // Celular
-                    TextFormField(
-                      controller: _celCtrl,
-                      keyboardType: TextInputType.phone,
-                      maxLength: 9,
-                      style: const TextStyle(color: C.textPrimary),
-                      decoration: const InputDecoration(
-                        labelText: 'Número de celular',
-                        prefixIcon: Icon(Icons.phone_android, color: C.textMuted),
-                        counterText: '',
-                      ),
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Ingresa tu celular';
-                        if (v.length != 9) return 'El celular debe tener 9 dígitos';
-                        if (!v.startsWith('9')) return 'El celular debe empezar con 9';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Contraseña
-                    TextFormField(
-                      controller: _passCtrl,
-                      obscureText: !_verPass,
-                      style: const TextStyle(color: C.textPrimary),
-                      decoration: InputDecoration(
-                        labelText: 'Clave de acceso',
-                        prefixIcon: const Icon(Icons.lock_outline, color: C.textMuted),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _verPass ? Icons.visibility_off : Icons.visibility,
-                            color: C.textMuted,
-                          ),
-                          onPressed: () => setState(() => _verPass = !_verPass),
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Ingresa tu clave';
-                        if (v.length < 4) return 'Mínimo 4 caracteres';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 28),
-
-                    // Botón Ingresar
-                    _loading
-                        ? const SizedBox(
-                            height: 52,
-                            child: Center(child: CircularProgressIndicator(color: C.gold)),
-                          )
-                        : ElevatedButton(
-                            onPressed: _login,
-                            child: const Text('Ingresar'),
-                          ),
-                    const SizedBox(height: 16),
-
-                    // Ir a registro
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text('¿No tienes cuenta? ',
-                            style: TextStyle(color: C.textMuted, fontSize: 13)),
-                        GestureDetector(
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                          ),
-                          child: const Text('Regístrate',
-                              style: TextStyle(
-                                  color: C.gold, fontSize: 13, fontWeight: FontWeight.w600)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Credenciales de demo
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: C.dark2,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: C.border),
-                      ),
-                      child: const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Cuentas de prueba:',
-                              style: TextStyle(color: C.gold, fontSize: 12, fontWeight: FontWeight.w600)),
-                          SizedBox(height: 6),
-                          Text('👑 Admin:    999000000 / admin123',
-                              style: TextStyle(color: C.textMuted, fontSize: 11)),
-                          Text('👤 Cliente:  987654321 / cliente123',
-                              style: TextStyle(color: C.textMuted, fontSize: 11)),
-                          Text('👤 Cliente:  976543210 / pedro123',
-                              style: TextStyle(color: C.textMuted, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    body: Container(
+      decoration: const BoxDecoration(gradient: RadialGradient(
+        center: Alignment(0, -.3), radius: 1.2, colors: [Color(0xFF1A1200), C.black])),
+      child: SafeArea(child: Center(child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: Form(key: _fk, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(width: 88, height: 88,
+            decoration: BoxDecoration(shape: BoxShape.circle,
+                border: Border.all(color: C.gold, width: 2), color: C.goldBg),
+            child: const Center(child: Text('✂️', style: TextStyle(fontSize: 44)))),
+          const SizedBox(height: 16),
+          const Text('BarberPro', style: TextStyle(color: C.gold, fontSize: 36, fontWeight: FontWeight.bold)),
+          const Text('Ingresa a tu cuenta', style: TextStyle(color: C.muted, fontSize: 13)),
+          const SizedBox(height: 36),
+          _F(c: _cel, label: 'Número de celular', hint: '987654321',
+              kb: TextInputType.phone,
+              fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)],
+              val: (v) {
+                if (v == null || v.isEmpty) return 'Ingresa tu celular';
+                if (v.length != 9) return 'Debe tener 9 dígitos';
+                if (!v.startsWith('9')) return 'Debe empezar con 9';
+                return null;
+              }),
+          const SizedBox(height: 14),
+          _F(c: _pas, label: 'Contraseña', obs: _obs,
+              suffix: IconButton(
+                icon: Icon(_obs ? Icons.visibility_off : Icons.visibility, color: C.muted, size: 20),
+                onPressed: () => setState(() => _obs = !_obs)),
+              val: (v) => (v == null || v.length < 6) ? 'Mínimo 6 caracteres' : null),
+          const SizedBox(height: 26),
+          _loading
+              ? const CircularProgressIndicator(color: C.gold)
+              : ElevatedButton(onPressed: _login, child: const Text('INGRESAR')),
+          const SizedBox(height: 18),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Text('¿Sin cuenta? ', style: TextStyle(color: C.muted, fontSize: 13)),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())),
+              child: const Text('Regístrate', style: TextStyle(
+                color: C.gold, fontSize: 13, fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline, decorationColor: C.gold))),
+          ]),
+          const SizedBox(height: 24),
+          Container(padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: C.brd)),
+            child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Cuentas demo:', style: TextStyle(color: C.gold, fontSize: 11, fontWeight: FontWeight.bold)),
+              SizedBox(height: 4),
+              Text('Admin:   999000000 / admin123',   style: TextStyle(color: C.muted, fontSize: 11, fontFamily: 'monospace')),
+              Text('Cliente: 999111111 / cliente123', style: TextStyle(color: C.muted, fontSize: 11, fontFamily: 'monospace')),
+            ])),
+        ])),
+      ))),
+    ),
+  );
 }
 
-// ══════════════════════════════════════════════════
-// REGISTER SCREEN
-// ══════════════════════════════════════════════════
+// ────────────────────────────────────────────────────────────
+// REGISTRO
+// ────────────────────────────────────────────────────────────
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
-
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  State<RegisterScreen> createState() => _RegState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
-  final _formKey   = GlobalKey<FormState>();
-  final _nomCtrl   = TextEditingController();
-  final _celCtrl   = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
-  final _pass2Ctrl = TextEditingController();
-  bool _verPass    = false;
-  bool _loading    = false;
+class _RegState extends State<RegisterScreen> {
+  final _fk = GlobalKey<FormState>();
+  final _nom = TextEditingController();
+  final _cel = TextEditingController();
+  final _eml = TextEditingController();
+  final _pa1 = TextEditingController();
+  final _pa2 = TextEditingController();
+  bool _o1 = true, _o2 = true, _loading = false;
 
   @override
-  void dispose() {
-    _nomCtrl.dispose(); _celCtrl.dispose(); _emailCtrl.dispose();
-    _passCtrl.dispose(); _pass2Ctrl.dispose();
-    super.dispose();
-  }
+  void dispose() { for (final c in [_nom,_cel,_eml,_pa1,_pa2]) c.dispose(); super.dispose(); }
 
   Future<void> _registrar() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_fk.currentState!.validate()) return;
     setState(() => _loading = true);
-
-    if (DB.celularExiste(_celCtrl.text.trim())) {
-      setState(() => _loading = false);
-      if (mounted) _snack(context, 'Ese número ya está registrado', error: true);
-      return;
+    try {
+      if (await SB.celularExiste(_cel.text.trim())) {
+        if (!mounted) return;
+        setState(() => _loading = false);
+        _snack(context, 'Celular ya registrado', err: true);
+        return;
+      }
+      final u = await SB.registrar(nombre: _nom.text.trim(), celular: _cel.text.trim(),
+          pass: _pa1.text, email: _eml.text.trim());
+      if (!mounted) return;
+      Session.usuario = u;
+      Navigator.pushAndRemoveUntil(context,
+          MaterialPageRoute(builder: (_) => ClienteMain(usuario: u)), (_) => false);
+    } catch (e) {
+      if (mounted) { setState(() => _loading = false); _snack(context, 'Error: $e', err: true); }
     }
-
-    final usuario = await DB.registrar(
-      nombre: _nomCtrl.text.trim(),
-      celular: _celCtrl.text.trim(),
-      password: _passCtrl.text.trim(),
-      email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
-    );
-    await Session.save(usuario);
-
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => ClienteMainScreen(usuario: usuario)),
-      (_) => false,
-    );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Crear cuenta')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              const SizedBox(height: 8),
-              const _LogoWidget(size: 70),
-              const SizedBox(height: 24),
-
-              // Nombre
-              TextFormField(
-                controller: _nomCtrl,
-                style: const TextStyle(color: C.textPrimary),
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre completo',
-                  prefixIcon: Icon(Icons.person_outline, color: C.textMuted),
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Ingresa tu nombre';
-                  if (v.trim().length < 3) return 'Mínimo 3 caracteres';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-
-              // Celular
-              TextFormField(
-                controller: _celCtrl,
-                keyboardType: TextInputType.phone,
-                maxLength: 9,
-                style: const TextStyle(color: C.textPrimary),
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Número de celular',
-                  prefixIcon: Icon(Icons.phone_android, color: C.textMuted),
-                  counterText: '',
-                ),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Ingresa tu celular';
-                  if (v.length != 9) return '9 dígitos requeridos';
-                  if (!v.startsWith('9')) return 'Debe empezar con 9';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-
-              // Email (opcional)
-              TextFormField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'Email (opcional)',
-                  prefixIcon: Icon(Icons.email_outlined, color: C.textMuted),
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              // Contraseña
-              TextFormField(
-                controller: _passCtrl,
-                obscureText: !_verPass,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: InputDecoration(
-                  labelText: 'Clave de acceso',
-                  prefixIcon: const Icon(Icons.lock_outline, color: C.textMuted),
-                  suffixIcon: IconButton(
-                    icon: Icon(_verPass ? Icons.visibility_off : Icons.visibility,
-                        color: C.textMuted),
-                    onPressed: () => setState(() => _verPass = !_verPass),
-                  ),
-                ),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Ingresa una clave';
-                  if (v.length < 6) return 'Mínimo 6 caracteres';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-
-              // Confirmar contraseña
-              TextFormField(
-                controller: _pass2Ctrl,
-                obscureText: !_verPass,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'Confirmar clave',
-                  prefixIcon: Icon(Icons.lock_outline, color: C.textMuted),
-                ),
-                validator: (v) {
-                  if (v != _passCtrl.text) return 'Las claves no coinciden';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 28),
-
-              _loading
-                  ? const SizedBox(
-                      height: 52,
-                      child: Center(child: CircularProgressIndicator(color: C.gold)),
-                    )
-                  : ElevatedButton(
-                      onPressed: _registrar,
-                      child: const Text('Crear cuenta'),
-                    ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Ya tengo cuenta — Iniciar sesión',
-                    style: TextStyle(color: C.textMuted)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Crear cuenta')),
+    body: SafeArea(child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Form(key: _fk, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('¡Bienvenido!', style: TextStyle(color: C.gold, fontSize: 24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('Completa tus datos', style: TextStyle(color: C.muted, fontSize: 13)),
+        const SizedBox(height: 24),
+        _F(c: _nom, label: 'Nombre completo',
+            val: (v) => (v == null || v.trim().length < 3) ? 'Requerido' : null),
+        const SizedBox(height: 12),
+        _F(c: _cel, label: 'Celular', hint: '987654321', kb: TextInputType.phone,
+            fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)],
+            val: (v) {
+              if (v == null || v.isEmpty) return 'Requerido';
+              if (v.length != 9) return '9 dígitos';
+              if (!v.startsWith('9')) return 'Empieza con 9';
+              return null;
+            }),
+        const SizedBox(height: 12),
+        _F(c: _eml, label: 'Email (opcional)', kb: TextInputType.emailAddress),
+        const SizedBox(height: 12),
+        _F(c: _pa1, label: 'Contraseña', obs: _o1,
+            suffix: IconButton(icon: Icon(_o1 ? Icons.visibility_off : Icons.visibility, color: C.muted, size: 20),
+                onPressed: () => setState(() => _o1 = !_o1)),
+            val: (v) => (v == null || v.length < 6) ? 'Mínimo 6 caracteres' : null),
+        const SizedBox(height: 12),
+        _F(c: _pa2, label: 'Confirmar contraseña', obs: _o2,
+            suffix: IconButton(icon: Icon(_o2 ? Icons.visibility_off : Icons.visibility, color: C.muted, size: 20),
+                onPressed: () => setState(() => _o2 = !_o2)),
+            val: (v) => v != _pa1.text ? 'No coinciden' : null),
+        const SizedBox(height: 28),
+        _loading
+            ? const Center(child: CircularProgressIndicator(color: C.gold))
+            : ElevatedButton(onPressed: _registrar, child: const Text('CREAR CUENTA')),
+      ])),
+    )),
+  );
 }
 
-// ══════════════════════════════════════════════════
-// CLIENTE — MAIN SCREEN (con estado compartido)
-// ══════════════════════════════════════════════════
-class ClienteMainScreen extends StatefulWidget {
-  final Usuario usuario;
-  const ClienteMainScreen({super.key, required this.usuario});
-
+// ────────────────────────────────────────────────────────────
+// CLIENTE MAIN
+// ────────────────────────────────────────────────────────────
+class ClienteMain extends StatefulWidget {
+  final Map<String, dynamic> usuario;
+  const ClienteMain({super.key, required this.usuario});
   @override
-  State<ClienteMainScreen> createState() => _ClienteMainScreenState();
+  State<ClienteMain> createState() => _ClienteMainState();
 }
 
-class _ClienteMainScreenState extends State<ClienteMainScreen> {
+class _ClienteMainState extends State<ClienteMain> {
   int _tab = 0;
-  late Usuario _usuario;
+  late Map<String, dynamic> _u;
 
   @override
-  void initState() {
-    super.initState();
-    _usuario = widget.usuario;
+  void initState() { super.initState(); _u = Map.from(widget.usuario); }
+
+  Future<void> _reload() async {
+    final u = await SB.getUsuario(_u['id'].toString());
+    if (mounted && u != null) setState(() => _u = u);
   }
 
-  void _refresh() {
-    final updated = DB.usuarios().where((u) => u.id == _usuario.id).firstOrNull;
-    if (updated != null) setState(() => _usuario = updated);
+  Future<void> _logout() async {
+    Session.clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()), (_) => false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final screens = [
-      _ClienteInicioTab(usuario: _usuario, onRefresh: _refresh),
-      _ClienteCitasTab(usuario: _usuario, onRefresh: _refresh),
-      _ClienteQRTab(usuario: _usuario),
-      _ClientePuntosTab(usuario: _usuario),
-      _ClienteMembresiaTab(usuario: _usuario, onRefresh: _refresh),
-      _ClientePerfilTab(usuario: _usuario, onRefresh: _refresh),
+    final tabs = [
+      CliHomeTab(u: _u, onReload: _reload),
+      CliCitasTab(u: _u, onReload: _reload),
+      CliQRTab(u: _u),
+      CliPuntosTab(u: _u, onReload: _reload),
+      CliPerfilTab(u: _u, onReload: _reload, onLogout: _logout),
     ];
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('✂️ BarberPro'),
-        automaticallyImplyLeading: false,
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 12),
+        actions: [Padding(
+          padding: const EdgeInsets.only(right: 14),
+          child: Center(child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: C.gold.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: C.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.star, size: 14, color: C.gold),
-                const SizedBox(width: 4),
-                Text('${_usuario.puntos} pts',
-                    style: const TextStyle(color: C.gold, fontSize: 12, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ],
+            decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(20)),
+            child: Row(children: [
+              const Icon(Icons.star, size: 13, color: C.gold),
+              const SizedBox(width: 4),
+              Text('${_u['puntos'] ?? 0} pts',
+                  style: const TextStyle(color: C.gold, fontSize: 12, fontWeight: FontWeight.w600)),
+            ]),
+          )),
+        )],
       ),
-      body: screens[_tab],
+      body: IndexedStack(index: _tab, children: tabs),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tab,
-        onTap: (i) {
-          _refresh();
-          setState(() => _tab = i);
-        },
+        onTap: (i) { setState(() => _tab = i); _reload(); },
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined),      activeIcon: Icon(Icons.home),            label: 'Inicio'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined), activeIcon: Icon(Icons.calendar_today), label: 'Citas'),
-          BottomNavigationBarItem(icon: Icon(Icons.qr_code_outlined),   activeIcon: Icon(Icons.qr_code),         label: 'QR'),
-          BottomNavigationBarItem(icon: Icon(Icons.star_outline),       activeIcon: Icon(Icons.star),            label: 'Puntos'),
-          BottomNavigationBarItem(icon: Icon(Icons.workspace_premium_outlined), activeIcon: Icon(Icons.workspace_premium), label: 'Membresía'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline),     activeIcon: Icon(Icons.person),          label: 'Perfil'),
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined),         activeIcon: Icon(Icons.home),          label: 'Inicio'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined),activeIcon: Icon(Icons.calendar_today),label: 'Citas'),
+          BottomNavigationBarItem(icon: Icon(Icons.qr_code_outlined),      activeIcon: Icon(Icons.qr_code),       label: 'QR'),
+          BottomNavigationBarItem(icon: Icon(Icons.star_outline),          activeIcon: Icon(Icons.star),          label: 'Puntos'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline),        activeIcon: Icon(Icons.person),        label: 'Perfil'),
         ],
       ),
     );
   }
 }
 
-// ── TAB: INICIO ──────────────────────────────────
-class _ClienteInicioTab extends StatefulWidget {
-  final Usuario usuario;
-  final VoidCallback onRefresh;
-  const _ClienteInicioTab({required this.usuario, required this.onRefresh});
-
+// ────────────────────────────────────────────────────────────
+// CLIENTE HOME (accesos rápidos 100% funcionales)
+// ────────────────────────────────────────────────────────────
+class CliHomeTab extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onReload;
+  const CliHomeTab({super.key, required this.u, required this.onReload});
   @override
-  State<_ClienteInicioTab> createState() => _ClienteInicioTabState();
+  State<CliHomeTab> createState() => _CliHomeState();
 }
 
-class _ClienteInicioTabState extends State<_ClienteInicioTab> {
-  List<Cita> _misCitas = [];
+class _CliHomeState extends State<CliHomeTab> {
+  List<Map<String, dynamic>> _citas = [];
+  List<Map<String, dynamic>> _promos = [];
+  bool _loading = true;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final c = await SB.getCitas(clienteId: widget.u['id'].toString());
+    final p = await SB.getPromociones(soloActivas: true);
+    if (mounted) setState(() { _citas = c; _promos = p; _loading = false; });
   }
 
-  void _load() {
-    setState(() {
-      _misCitas = DB.citas(clienteId: widget.usuario.id);
-    });
+  Map<String, dynamic>? get _proxima {
+    final hoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final activas = _citas.where((c) =>
+        c['fecha'].toString().compareTo(hoy) >= 0 && c['estado'] != 'cancelada').toList();
+    activas.sort((a, b) => a['fecha'].toString().compareTo(b['fecha'].toString()));
+    return activas.isEmpty ? null : activas.first;
   }
 
-  Cita? get _proximaCita {
-    final hoy = DateTime.now().toIso8601String().split('T')[0];
-    final futuras = _misCitas.where((c) =>
-        c.estado != 'cancelada' && c.fecha.compareTo(hoy) >= 0
-    ).toList()
-      ..sort((a, b) {
-        final fc = a.fecha.compareTo(b.fecha);
-        return fc != 0 ? fc : a.hora.compareTo(b.hora);
-      });
-    return futuras.firstOrNull;
+  // ── Navegar a tab específico ──
+  void _goTab(int i) {
+    final main = context.findAncestorStateOfType<_ClienteMainState>();
+    main?.setState(() => main._tab = i);
   }
+
+  // ── Abrir reservar ──
+  void _openReservar() => showModalBottomSheet(
+    context: context, isScrollControlled: true, backgroundColor: C.d2,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => ReservarSheet(u: widget.u, onOk: () { _load(); widget.onReload(); }),
+  );
+
+  // ── Abrir membresía ──
+  void _openMembresia() => showModalBottomSheet(
+    context: context, isScrollControlled: true, backgroundColor: C.d2,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => MembresiaSheet(u: widget.u, onOk: () { _load(); widget.onReload(); }),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final prox = _proximaCita;
+    final px = _proxima;
     return RefreshIndicator(
       color: C.gold,
-      onRefresh: () async { _load(); widget.onRefresh(); },
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Card próxima cita
-          _GoldCard(
-            borderColor: C.gold,
-            padding: const EdgeInsets.all(18),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1A1200), Color(0xFF2A1F00)]),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Text('📅', style: TextStyle(fontSize: 36)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('PRÓXIMA CITA',
-                            style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-                        const SizedBox(height: 4),
-                        Text(
-                          prox != null
-                              ? '${DB.formatFecha(prox.fecha)} · ${prox.hora}'
-                              : 'Sin citas programadas',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                        ),
-                        if (prox != null)
-                          Text(prox.servicioNombre,
-                              style: const TextStyle(color: C.gold, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+      onRefresh: () async { await _load(); widget.onReload(); },
+      child: _loading
+          ? const Center(child: CircularProgressIndicator(color: C.gold))
+          : ListView(padding: const EdgeInsets.all(16), children: [
 
-          // Estadísticas
-          Row(children: [
-            _StatCard(icon: '📅', value: _misCitas.length.toString(), label: 'Citas totales'),
-            const SizedBox(width: 12),
-            _StatCard(icon: '⭐', value: widget.usuario.puntos.toString(), label: 'Mis puntos'),
-          ]),
-          const SizedBox(height: 20),
-
-          const Text('ACCESO RÁPIDO',
-              style: TextStyle(color: C.gold, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.15,
-            children: [
-              _quickCard('✂️', 'Reservar cita', 'Elige tu servicio', () {
-                showDialog(
-                  context: context,
-                  builder: (_) => _ReservarCitaDialog(
-                    usuario: widget.usuario,
-                    onSuccess: () { _load(); widget.onRefresh(); },
-                  ),
-                );
-              }),
-              _quickCard('📱', 'Mi QR', 'Código de cliente', null),
-              _quickCard('⭐', 'Mis puntos', 'Programa de lealtad', null),
-              _quickCard('👑', 'Membresía', 'Planes y beneficios', null),
-            ],
-          ),
-
-          // Promociones activas
-          const SizedBox(height: 20),
-          const Text('PROMOCIONES ACTIVAS',
-              style: TextStyle(color: C.gold, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          ...DB.promociones().where((p) => p.activa).map((p) => _GoldCard(
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: C.gold.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text('${p.descuento}%',
-                      style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 18)),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(p.titulo, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Text(p.descripcion,
-                          style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                      Text('Válido hasta: ${DB.formatFecha(p.hasta)}',
-                          style: const TextStyle(color: C.textDim, fontSize: 11)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )),
-        ],
-      ),
-    );
-  }
-
-  Widget _quickCard(String ico, String titulo, String sub, VoidCallback? onTap) {
-    return _GoldCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(ico, style: const TextStyle(fontSize: 32)),
-          const SizedBox(height: 8),
-          Text(titulo,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              textAlign: TextAlign.center),
-          Text(sub,
-              style: const TextStyle(color: C.textMuted, fontSize: 11),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
-}
-
-// ── TAB: CITAS ────────────────────────────────────
-class _ClienteCitasTab extends StatefulWidget {
-  final Usuario usuario;
-  final VoidCallback onRefresh;
-  const _ClienteCitasTab({required this.usuario, required this.onRefresh});
-
-  @override
-  State<_ClienteCitasTab> createState() => _ClienteCitasTabState();
-}
-
-class _ClienteCitasTabState extends State<_ClienteCitasTab> {
-  List<Cita> _citas = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  void _load() {
-    setState(() => _citas = DB.citas(clienteId: widget.usuario.id));
-  }
-
-  Future<void> _cancelar(Cita c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: C.dark2,
-        title: const Text('Cancelar cita', style: TextStyle(color: C.gold)),
-        content: const Text('¿Confirmas la cancelación?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: const Text('No', style: TextStyle(color: C.textMuted))),
-          TextButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Sí', style: TextStyle(color: C.danger))),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await DB.cambiarEstadoCita(c.id, 'cancelada');
-    _load();
-    widget.onRefresh();
-    if (mounted) _snack(context, 'Cita cancelada', error: true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text('Mis Citas',
-                    style: TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Nueva'),
-                style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(100, 40), padding: const EdgeInsets.symmetric(horizontal: 14)),
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (_) => _ReservarCitaDialog(
-                    usuario: widget.usuario,
-                    onSuccess: () { _load(); widget.onRefresh(); },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _citas.isEmpty
-              ? const Center(child: Text('No tienes citas registradas', style: TextStyle(color: C.textMuted)))
-              : RefreshIndicator(
-                  color: C.gold,
-                  onRefresh: () async => _load(),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _citas.length,
-                    itemBuilder: (_, i) {
-                      final c = _citas[i];
-                      return _GoldCard(
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(c.servicioNombre,
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                      const SizedBox(height: 3),
-                                      Text('${DB.formatFecha(c.fecha)} · ${c.hora}',
-                                          style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                                    ],
-                                  ),
-                                ),
-                                _EstadoBadge(c.estado),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('S/ ${c.precio.toStringAsFixed(0)}',
-                                    style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 16)),
-                                if (c.estado == 'pendiente' || c.estado == 'confirmada')
-                                  OutlinedButton(
-                                    onPressed: () => _cancelar(c),
-                                    style: OutlinedButton.styleFrom(
-                                      side: const BorderSide(color: C.danger),
-                                      minimumSize: const Size(90, 34),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    ),
-                                    child: const Text('Cancelar', style: TextStyle(color: C.danger, fontSize: 12)),
-                                  ),
-                              ],
-                            ),
-                            if (c.notas.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Row(children: [
-                                const Icon(Icons.notes, size: 14, color: C.textMuted),
-                                const SizedBox(width: 6),
-                                Expanded(child: Text(c.notas,
-                                    style: const TextStyle(color: C.textMuted, fontSize: 12))),
-                              ]),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── TAB: QR ───────────────────────────────────────
-class _ClienteQRTab extends StatelessWidget {
-  final Usuario usuario;
-  const _ClienteQRTab({required this.usuario});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('Mi Código QR',
-                style: TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            const Text('Muestra este código al barbero para registrar tu servicio',
-                style: TextStyle(color: C.textMuted, fontSize: 13),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 28),
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: QrImageView(
-                data: usuario.id,
-                version: QrVersions.auto,
-                size: 200,
-                backgroundColor: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 20),
-            _GoldCard(
-              child: Column(
-                children: [
-                  Text('ID: ${usuario.id}',
-                      style: const TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-                  const SizedBox(height: 8),
-                  Text(usuario.nombre,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: C.gold.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: C.border),
-                    ),
-                    child: Text(
-                      usuario.membresia != 'Ninguna'
-                          ? '👑 ${usuario.membresia}'
-                          : '👤 Cliente estándar',
-                      style: const TextStyle(color: C.gold, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _GoldCard(
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: C.textMuted, size: 18),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'El barbero escaneará tu código y se registrará automáticamente el servicio en tu historial de puntos.',
-                      style: TextStyle(color: C.textMuted, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── TAB: PUNTOS ───────────────────────────────────
-class _ClientePuntosTab extends StatelessWidget {
-  final Usuario usuario;
-  const _ClientePuntosTab({required this.usuario});
-
-  @override
-  Widget build(BuildContext context) {
-    final u = DB.usuarios().where((x) => x.id == usuario.id).firstOrNull ?? usuario;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Círculo de puntos
+        // ── Próxima cita ──
         Container(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(colors: [Color(0xFF1A1200), Color(0xFF2A1F00)]),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: C.gold),
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: 110, height: 110,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: C.gold, width: 3),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('${u.puntos}',
-                        style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: C.gold)),
-                    const Text('PUNTOS',
-                        style: TextStyle(color: C.textMuted, fontSize: 10, letterSpacing: 1)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                decoration: BoxDecoration(
-                  color: C.gold.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(u.nivelLoyalty,
-                    style: const TextStyle(color: C.gold, fontWeight: FontWeight.w600)),
-              ),
-              const SizedBox(height: 14),
-              if (u.puntosParaSiguienteNivel > 0)
-                Text('${u.puntosParaSiguienteNivel} pts para el siguiente nivel',
-                    style: const TextStyle(color: C.textMuted, fontSize: 12))
-              else
-                const Text('¡Nivel máximo alcanzado!',
-                    style: TextStyle(color: C.gold, fontSize: 12)),
-              const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: LinearProgressIndicator(
-                  value: u.progresoNivel,
-                  minHeight: 8,
-                  backgroundColor: C.dark3,
-                  valueColor: const AlwaysStoppedAnimation<Color>(C.gold),
-                ),
-              ),
-            ],
-          ),
+            borderRadius: BorderRadius.circular(14), border: Border.all(color: C.gold)),
+          child: Row(children: [
+            const Text('📅', style: TextStyle(fontSize: 32)),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('PRÓXIMA CITA', style: TextStyle(color: C.muted, fontSize: 10, letterSpacing: 1.5)),
+              const SizedBox(height: 3),
+              Text(px != null
+                  ? '${_fmtFecha(px['fecha'].toString())}  ·  ${px['hora']}'
+                  : 'Sin citas programadas',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              if (px != null) Text(px['servicio_nombre'].toString(),
+                  style: const TextStyle(color: C.gold, fontSize: 12)),
+            ])),
+            OutlinedButton(
+              onPressed: _openReservar,
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: C.gold),
+                  foregroundColor: C.gold, minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+              child: Text(px != null ? 'Nueva' : 'Reservar', style: const TextStyle(fontSize: 12))),
+          ]),
         ),
+        const SizedBox(height: 14),
+
+        // ── Stats ──
+        Row(children: [
+          _stat('📅', '${_citas.length}', 'Total citas'),
+          const SizedBox(width: 12),
+          _stat('⭐', '${widget.u['puntos'] ?? 0}', 'Mis puntos'),
+        ]),
+        const SizedBox(height: 18),
+
+        // ── Accesos rápidos FUNCIONALES ──
+        const _T('ACCESO RÁPIDO'),
+        GridView.count(
+          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.2,
+          children: [
+            _qCard('✂️', 'Reservar cita',  'Elige tu servicio',
+                _openReservar),                     // ← abre sheet reservar
+            _qCard('📱', 'Mi QR',          'Código de cliente',
+                () => _goTab(2)),                   // ← navega a tab QR
+            _qCard('⭐', 'Mis puntos',     'Programa de lealtad',
+                () => _goTab(3)),                   // ← navega a tab Puntos
+            _qCard('👑', 'Membresía',
+                (widget.u['membresia'] ?? 'Ninguna') != 'Ninguna'
+                    ? (widget.u['membresia'].toString()) : 'Ver planes',
+                _openMembresia),                    // ← abre sheet membresía
+          ],
+        ),
+
+        // ── Promociones activas ──
+        if (_promos.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          const _T('PROMOCIONES ACTIVAS'),
+          ..._promos.map((p) => Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: C.brd)),
+            child: Row(children: [
+              const Text('🏷️', style: TextStyle(fontSize: 26)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(p['titulo'].toString(), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                Text(p['descripcion'].toString(), style: const TextStyle(color: C.muted, fontSize: 12)),
+              ])),
+              _badge('${p['descuento']}% OFF', C.gold),
+            ]),
+          )),
+        ],
+      ]),
+    );
+  }
+
+  Widget _qCard(String icon, String t, String s, VoidCallback fn) =>
+      GestureDetector(onTap: fn, child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: C.brd)),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text(icon, style: const TextStyle(fontSize: 28)),
+          const SizedBox(height: 6),
+          Text(t, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), textAlign: TextAlign.center),
+          Text(s, style: const TextStyle(color: C.muted, fontSize: 10), textAlign: TextAlign.center),
+        ]),
+      ));
+}
+
+// ────────────────────────────────────────────────────────────
+// RESERVAR CITA SHEET
+// ────────────────────────────────────────────────────────────
+class ReservarSheet extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onOk;
+  const ReservarSheet({super.key, required this.u, required this.onOk});
+  @override
+  State<ReservarSheet> createState() => _ReservarState();
+}
+
+class _ReservarState extends State<ReservarSheet> {
+  static const _horas = ['09:00','09:30','10:00','10:30','11:00','11:30',
+    '12:00','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00'];
+  List<Map<String, dynamic>> _svcs = [];
+  Map<String, dynamic>? _svc;
+  DateTime _fecha = DateTime.now();
+  String? _hora;
+  Set<String> _ocupadas = {};
+  final _notasCtrl = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void initState() { super.initState(); _loadSvcs(); }
+  @override
+  void dispose() { _notasCtrl.dispose(); super.dispose(); }
+
+  Future<void> _loadSvcs() async {
+    final s = await SB.getServicios(soloActivos: true);
+    if (mounted) setState(() => _svcs = s);
+    await _refreshOcupadas();
+  }
+
+  Future<void> _refreshOcupadas() async {
+    final f = DateFormat('yyyy-MM-dd').format(_fecha);
+    final ocu = <String>{};
+    for (final h in _horas) {
+      if (await SB.horarioOcupado(f, h)) ocu.add(h);
+    }
+    if (mounted) setState(() => _ocupadas = ocu);
+  }
+
+  Future<void> _confirmar() async {
+    if (_svc == null) { _snack(context, 'Selecciona un servicio', err: true); return; }
+    if (_hora == null) { _snack(context, 'Selecciona un horario', err: true); return; }
+    final f = DateFormat('yyyy-MM-dd').format(_fecha);
+    if (await SB.horarioOcupado(f, _hora!)) {
+      if (mounted) _snack(context, 'Horario no disponible', err: true); return;
+    }
+    setState(() => _loading = true);
+    try {
+      await SB.addCita({
+        'cliente_id': widget.u['id'], 'cliente_nombre': widget.u['nombre'],
+        'servicio_id': _svc!['id'], 'servicio_nombre': _svc!['nombre'],
+        'fecha': f, 'hora': _hora!, 'estado': 'pendiente',
+        'precio': _svc!['precio'], 'notas': _notasCtrl.text,
+      });
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onOk();
+      _snack(context, '¡Cita reservada con éxito!');
+    } catch (e) {
+      if (mounted) { setState(() => _loading = false); _snack(context, 'Error: $e', err: true); }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    initialChildSize: .92, maxChildSize: .92, minChildSize: .5, expand: false,
+    builder: (_, ctrl) => Padding(
+      padding: EdgeInsets.only(left: 20, right: 20, top: 12,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+      child: ListView(controller: ctrl, children: [
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        const Text('Reservar Cita', style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
 
-        // Descuento actual
-        _GoldCard(
-          child: Row(
-            children: [
-              const Icon(Icons.local_offer, color: C.gold),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Tu descuento actual',
-                        style: TextStyle(color: C.textMuted, fontSize: 12)),
-                    Text('En todos los servicios',
-                        style: TextStyle(color: C.textPrimary, fontWeight: FontWeight.w500)),
-                  ],
-                ),
+        // servicios
+        const Text('Servicio', style: TextStyle(color: C.muted, fontSize: 12)),
+        const SizedBox(height: 8),
+        SizedBox(height: 90, child: ListView.builder(
+          scrollDirection: Axis.horizontal, itemCount: _svcs.length,
+          itemBuilder: (_, i) {
+            final s = _svcs[i]; final sel = _svc?['id'] == s['id'];
+            return GestureDetector(
+              onTap: () => setState(() => _svc = s),
+              child: AnimatedContainer(duration: const Duration(milliseconds: 180),
+                width: 90, margin: const EdgeInsets.only(right: 10), padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: sel ? C.goldBg : C.d3,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: sel ? C.gold : C.brd, width: sel ? 1.5 : 1)),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text(s['icono'].toString(), style: const TextStyle(fontSize: 22)),
+                  const SizedBox(height: 3),
+                  Text(s['nombre'].toString(), style: const TextStyle(fontSize: 10),
+                      maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+                  Text('S/${(s['precio'] as num).toInt()}',
+                      style: const TextStyle(color: C.gold, fontSize: 11, fontWeight: FontWeight.w600)),
+                ]),
               ),
-              Text('${u.descuentoPorcentaje.toInt()}% OFF',
-                  style: const TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
-            ],
-          ),
-        ),
+            );
+          },
+        )),
+        const SizedBox(height: 14),
 
-        // Beneficios
-        _GoldCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('BENEFICIOS POR NIVEL',
-                  style: TextStyle(color: C.textMuted, fontSize: 12, letterSpacing: 1)),
-              const SizedBox(height: 14),
-              _beneficioRow('🥉', 'Bronce — 0 a 199 pts', '5% descuento en servicios'),
-              const Divider(color: C.border, height: 20),
-              _beneficioRow('🥈', 'Plata — 200 a 499 pts', '10% descuento + 1 corte gratis/mes'),
-              const Divider(color: C.border, height: 20),
-              _beneficioRow('🥇', 'Oro — 500+ pts', '20% descuento + prioridad de cita'),
-            ],
+        // fecha
+        const Text('Fecha', style: TextStyle(color: C.muted, fontSize: 12)),
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(context: context, initialDate: _fecha,
+              firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 60)),
+              builder: (_, ch) => Theme(data: ThemeData.dark().copyWith(
+                  colorScheme: const ColorScheme.dark(primary: C.gold)), child: ch!));
+            if (d != null) { setState(() { _fecha = d; _hora = null; }); _refreshOcupadas(); }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(8), border: Border.all(color: C.brd)),
+            child: Row(children: [
+              const Icon(Icons.calendar_today, size: 15, color: C.muted), const SizedBox(width: 10),
+              Text(DateFormat('dd/MM/yyyy').format(_fecha), style: const TextStyle(color: C.txt)),
+              const Spacer(), const Icon(Icons.chevron_right, size: 16, color: C.muted),
+            ]),
           ),
         ),
+        const SizedBox(height: 14),
 
-        // Historial
-        _GoldCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('HISTORIAL DE PUNTOS',
-                  style: TextStyle(color: C.textMuted, fontSize: 12, letterSpacing: 1)),
-              const SizedBox(height: 12),
-              if (u.historialPuntos.isEmpty)
-                const Center(child: Text('Sin historial aún', style: TextStyle(color: C.textMuted)))
-              else
-                ...u.historialPuntos.reversed.map((h) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40, height: 40,
-                        decoration: BoxDecoration(
-                          color: C.gold.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Center(child: Text('⭐', style: TextStyle(fontSize: 18))),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(h.concepto,
-                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-                            Text(h.fecha,
-                                style: const TextStyle(color: C.textMuted, fontSize: 11)),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: C.gold.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text('+${h.puntos} pts',
-                            style: const TextStyle(color: C.gold, fontSize: 11, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                  ),
-                )),
-            ],
-          ),
+        // horarios
+        const Text('Horario disponible', style: TextStyle(color: C.muted, fontSize: 12)),
+        const SizedBox(height: 8),
+        GridView.builder(
+          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.9),
+          itemCount: _horas.length,
+          itemBuilder: (_, i) {
+            final h = _horas[i]; final ocu = _ocupadas.contains(h); final sel = _hora == h;
+            return GestureDetector(
+              onTap: ocu ? null : () => setState(() => _hora = h),
+              child: AnimatedContainer(duration: const Duration(milliseconds: 150),
+                decoration: BoxDecoration(
+                  color: sel ? C.gold : ocu ? C.err.withOpacity(.08) : C.d3,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: sel ? C.gold : ocu ? C.err.withOpacity(.3) : C.brd)),
+                child: Center(child: Text(h, style: TextStyle(
+                  color: sel ? C.black : ocu ? C.err : C.txt,
+                  fontSize: 11, fontWeight: sel ? FontWeight.bold : FontWeight.normal))),
+              ),
+            );
+          },
         ),
-      ],
-    );
-  }
+        const SizedBox(height: 14),
 
-  Widget _beneficioRow(String emoji, String titulo, String beneficio) {
-    return Row(
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 24)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(titulo, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-              Text(beneficio, style: const TextStyle(color: C.textMuted, fontSize: 11)),
-            ],
+        // notas
+        const Text('Notas (opcional)', style: TextStyle(color: C.muted, fontSize: 12)),
+        const SizedBox(height: 6),
+        _F(c: _notasCtrl, label: '', hint: 'Indicaciones especiales...', lines: 2),
+
+        // resumen
+        if (_svc != null) ...[
+          const SizedBox(height: 14),
+          Container(padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: C.brd)),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_svc!['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text('${_svc!['duracion_min']} min  ·  +${_svc!['puntos_otorga']} pts',
+                    style: const TextStyle(color: C.muted, fontSize: 12)),
+              ]),
+              Text('S/ ${(_svc!['precio'] as num).toInt()}',
+                  style: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+            ]),
           ),
-        ),
-      ],
-    );
-  }
+        ],
+        const SizedBox(height: 18),
+        _loading
+            ? const Center(child: CircularProgressIndicator(color: C.gold))
+            : ElevatedButton(onPressed: _confirmar, child: const Text('✅  Confirmar reserva')),
+      ]),
+    ),
+  );
 }
 
-// ── TAB: MEMBRESÍA ────────────────────────────────
-class _ClienteMembresiaTab extends StatefulWidget {
-  final Usuario usuario;
-  final VoidCallback onRefresh;
-  const _ClienteMembresiaTab({required this.usuario, required this.onRefresh});
-
+// ────────────────────────────────────────────────────────────
+// MEMBRESÍA SHEET (planes desde Supabase — editables)
+// ────────────────────────────────────────────────────────────
+class MembresiaSheet extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onOk;
+  const MembresiaSheet({super.key, required this.u, required this.onOk});
   @override
-  State<_ClienteMembresiaTab> createState() => _ClienteMembresiaTabState();
+  State<MembresiaSheet> createState() => _MembresiaState();
 }
 
-class _ClienteMembresiaTabState extends State<_ClienteMembresiaTab> {
-  late Usuario _u;
+class _MembresiaState extends State<MembresiaSheet> {
+  List<Map<String, dynamic>> _planes = [];
+  bool _loading = true;
 
   @override
-  void initState() {
-    super.initState();
-    _u = widget.usuario;
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final p = await SB.getPlanes();
+    if (mounted) setState(() { _planes = p; _loading = false; });
   }
 
   Future<void> _activar(String plan) async {
-    _u.membresia = plan;
-    await DB.actualizarUsuario(_u);
-    setState(() {});
-    widget.onRefresh();
-    if (mounted) _snack(context, '¡Plan $plan activado! 👑');
+    await SB.setMembresia(widget.u['id'].toString(), plan);
+    if (!mounted) return;
+    Navigator.pop(context);
+    widget.onOk();
+    _snack(context, 'Plan $plan activado! 👑');
+  }
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    initialChildSize: .88, maxChildSize: .92, minChildSize: .5, expand: false,
+    builder: (_, ctrl) => Padding(padding: const EdgeInsets.all(20),
+      child: _loading
+          ? const Center(child: CircularProgressIndicator(color: C.gold))
+          : ListView(controller: ctrl, children: [
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        const Text('Planes de Membresía', style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 16),
+        ..._planes.map((p) {
+          final activo = widget.u['membresia'] == p['nombre'];
+          final beneficios = (p['beneficios'] as List?)?.cast<String>() ?? [];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: activo ? C.goldBg : C.d3,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: activo ? C.gold : C.brd, width: activo ? 1.5 : 1)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text(p['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                RichText(text: TextSpan(children: [
+                  TextSpan(text: 'S/${(p['precio'] as num).toInt()}',
+                      style: const TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
+                  TextSpan(text: '/${p['periodo']}',
+                      style: const TextStyle(color: C.muted, fontSize: 12)),
+                ])),
+              ]),
+              if ((p['descripcion'] ?? '').toString().isNotEmpty)
+                Padding(padding: const EdgeInsets.only(top: 4),
+                    child: Text(p['descripcion'].toString(),
+                        style: const TextStyle(color: C.muted, fontSize: 12))),
+              const SizedBox(height: 10),
+              ...beneficios.map((b) => Padding(padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(children: [
+                    const Text('✅ ', style: TextStyle(fontSize: 12)),
+                    Expanded(child: Text(b, style: const TextStyle(color: C.muted, fontSize: 12))),
+                  ]))),
+              const SizedBox(height: 12),
+              activo
+                  ? Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(color: C.ok.withOpacity(.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: C.ok.withOpacity(.3))),
+                      child: const Center(child: Text('✓ Plan activo',
+                          style: TextStyle(color: C.ok, fontWeight: FontWeight.w600))))
+                  : SizedBox(width: double.infinity, child: ElevatedButton(
+                      onPressed: () => _activar(p['nombre'].toString()),
+                      child: Text('Activar ${p['nombre']}'))),
+            ]),
+          );
+        }),
+      ]),
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// CLIENTE CITAS
+// ────────────────────────────────────────────────────────────
+class CliCitasTab extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onReload;
+  const CliCitasTab({super.key, required this.u, required this.onReload});
+  @override
+  State<CliCitasTab> createState() => _CliCitasState();
+}
+
+class _CliCitasState extends State<CliCitasTab> {
+  List<Map<String, dynamic>> _citas = [];
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final c = await SB.getCitas(clienteId: widget.u['id'].toString());
+    if (mounted) setState(() => _citas = c);
+  }
+
+  Future<void> _cancelar(Map<String, dynamic> c) async {
+    if (!await _confirm(context, 'Cancelar cita',
+        '¿Cancelar ${c['servicio_nombre']} del ${_fmtFecha(c['fecha'].toString())}?')) return;
+    await SB.setCitaEstado(c['id'].toString(), 'cancelada');
+    _load(); widget.onReload();
+    if (mounted) _snack(context, 'Cita cancelada', err: true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    floatingActionButton: FloatingActionButton(
+      backgroundColor: C.gold, foregroundColor: C.black,
+      onPressed: () => showModalBottomSheet(
+        context: context, isScrollControlled: true, backgroundColor: C.d2,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (_) => ReservarSheet(u: widget.u, onOk: () { _load(); widget.onReload(); }),
+      ),
+      child: const Icon(Icons.add),
+    ),
+    body: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: _citas.isEmpty
+          ? const Center(child: Text('No tienes citas registradas', style: TextStyle(color: C.muted)))
+          : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _citas.length,
+              itemBuilder: (_, i) {
+                final c = _citas[i]; final col = _estadoColor(c['estado'].toString());
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(c['servicio_nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        const SizedBox(height: 3),
+                        Text('${_fmtFecha(c['fecha'].toString())}  ·  ${c['hora']}',
+                            style: const TextStyle(color: C.muted, fontSize: 12)),
+                      ])),
+                      _badge(c['estado'].toString(), col),
+                    ]),
+                    const SizedBox(height: 10),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('S/ ${(c['precio'] as num).toInt()}',
+                          style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 15)),
+                      if (c['estado'] == 'pendiente' || c['estado'] == 'confirmada')
+                        OutlinedButton(
+                          onPressed: () => _cancelar(c),
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: C.err),
+                              foregroundColor: C.err, minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+                          child: const Text('Cancelar', style: TextStyle(fontSize: 12))),
+                    ]),
+                    if ((c['notas'] ?? '').toString().isNotEmpty)
+                      Padding(padding: const EdgeInsets.only(top: 6),
+                          child: Text('📝 ${c['notas']}', style: const TextStyle(color: C.muted, fontSize: 11))),
+                  ]),
+                );
+              }),
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// CLIENTE QR
+// ────────────────────────────────────────────────────────────
+class CliQRTab extends StatelessWidget {
+  final Map<String, dynamic> u;
+  const CliQRTab({super.key, required this.u});
+  @override
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(
+      mainAxisAlignment: MainAxisAlignment.center, children: [
+      const _T('Mi Código QR'),
+      Container(padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.brd)),
+        child: Column(children: [
+          const Text('Muestra este código al barbero\npara registrar tu servicio',
+              textAlign: TextAlign.center, style: TextStyle(color: C.muted, fontSize: 13)),
+          const SizedBox(height: 18),
+          Container(padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
+            child: QrImageView(
+              // Datos embebidos: id|celular|nombre
+              data: '${u['id']}|${u['celular']}|${u['nombre']}',
+              version: QrVersions.auto, size: 200, backgroundColor: Colors.white)),
+          const SizedBox(height: 14),
+          Text('ID: ${u['id'].toString().substring(0, 8).toUpperCase()}...',
+              style: const TextStyle(color: C.muted, fontSize: 11, letterSpacing: 2, fontFamily: 'monospace')),
+          const SizedBox(height: 8),
+          _badge(
+            (u['membresia'] ?? 'Ninguna') != 'Ninguna' ? '👑 ${u['membresia']}' : 'Cliente estándar',
+            (u['membresia'] ?? 'Ninguna') != 'Ninguna' ? C.gold : C.muted),
+        ])),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(10), border: Border.all(color: C.brd)),
+        child: Row(children: [
+          const Text('⭐', style: TextStyle(fontSize: 22)), const SizedBox(width: 12),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${u['puntos'] ?? 0} puntos acumulados',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+            Text(_nivel(u['puntos'] as int? ?? 0),
+                style: const TextStyle(color: C.gold, fontSize: 12)),
+          ]),
+        ])),
+    ])),
+  );
+  String _nivel(int p) {
+    if (p >= 500) return 'Nivel: Oro 🥇';
+    if (p >= 200) return 'Nivel: Plata 🥈';
+    return 'Nivel: Bronce 🥉';
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// CLIENTE PUNTOS
+// ────────────────────────────────────────────────────────────
+class CliPuntosTab extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onReload;
+  const CliPuntosTab({super.key, required this.u, required this.onReload});
+  @override
+  State<CliPuntosTab> createState() => _CliPuntosState();
+}
+
+class _CliPuntosState extends State<CliPuntosTab> {
+  Map<String, dynamic>? _u;
+  List<Map<String, dynamic>> _hist = [];
+
+  @override
+  void initState() { super.initState(); _u = widget.u; _reload(); }
+
+  Future<void> _reload() async {
+    final u = await SB.getUsuario(widget.u['id'].toString());
+    final h = await SB.getHistorial(widget.u['id'].toString());
+    if (mounted && u != null) setState(() { _u = u; _hist = h; });
+  }
+
+  int get _pts => (_u ?? widget.u)['puntos'] as int? ?? 0;
+  String get _nivel { if (_pts >= 500) return '🥇 Oro'; if (_pts >= 200) return '🥈 Plata'; return '🥉 Bronce'; }
+  double get _prog { if (_pts >= 500) return 1.0; if (_pts >= 200) return (_pts-200)/300.0; return _pts/200.0; }
+  int get _falt { if (_pts >= 500) return 0; if (_pts >= 200) return 500-_pts; return 200-_pts; }
+  double get _desc { if (_pts >= 500) return 20; if (_pts >= 200) return 10; return 5; }
+
+  @override
+  Widget build(BuildContext context) => RefreshIndicator(
+    color: C.gold, onRefresh: () async { await _reload(); widget.onReload(); },
+    child: ListView(padding: const EdgeInsets.all(16), children: [
+      Container(padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF1A1200), Color(0xFF2A1F00)]),
+          borderRadius: BorderRadius.circular(16), border: Border.all(color: C.gold)),
+        child: Column(children: [
+          Container(width: 100, height: 100,
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.gold, width: 3)),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('$_pts', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: C.gold)),
+              const Text('PUNTOS', style: TextStyle(color: C.muted, fontSize: 9, letterSpacing: 1)),
+            ])),
+          const SizedBox(height: 12),
+          _badge(_nivel, C.gold),
+          const SizedBox(height: 10),
+          if (_falt > 0) Text('$_falt puntos para siguiente nivel',
+              style: const TextStyle(color: C.muted, fontSize: 12)),
+          const SizedBox(height: 8),
+          ClipRRect(borderRadius: BorderRadius.circular(20),
+              child: LinearProgressIndicator(value: _prog.clamp(0.0, 1.0),
+                  backgroundColor: C.d3, color: C.gold, minHeight: 8)),
+        ])),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('DESCUENTO ACTUAL', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+            SizedBox(height: 4),
+            Text('En todos los servicios', style: TextStyle(color: C.txt, fontSize: 13)),
+          ]),
+          Text('${_desc.toInt()}% OFF', style: const TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
+        ])),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('BENEFICIOS POR NIVEL', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 12),
+          _nv('🥉', 'Bronce — 0 a 199 pts', '5% descuento'),
+          const Divider(color: C.brd, height: 20),
+          _nv('🥈', 'Plata — 200 a 499 pts', '10% descuento + 1 corte gratis/mes'),
+          const Divider(color: C.brd, height: 20),
+          _nv('🥇', 'Oro — 500+ pts', '20% descuento + prioridad de cita'),
+        ])),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('HISTORIAL DE PUNTOS', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 12),
+          if (_hist.isEmpty) const Center(child: Text('Sin historial aún', style: TextStyle(color: C.muted)))
+          else ..._hist.map((h) => Padding(padding: const EdgeInsets.only(bottom: 10),
+              child: Row(children: [
+                Container(width: 36, height: 36,
+                  decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(8)),
+                  child: const Center(child: Text('⭐', style: TextStyle(fontSize: 18)))),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(h['concepto'].toString(), style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+                  Text(DateFormat('dd/MM/yyyy').format(DateTime.parse(h['fecha'].toString())),
+                      style: const TextStyle(color: C.muted, fontSize: 11)),
+                ])),
+                _badge('+${h['puntos']} pts', C.gold),
+              ]))),
+        ])),
+    ]),
+  );
+  Widget _nv(String e, String t, String b) => Row(children: [
+    Text(e, style: const TextStyle(fontSize: 22)), const SizedBox(width: 12),
+    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(t, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+      Text(b, style: const TextStyle(color: C.muted, fontSize: 11)),
+    ])),
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// CLIENTE PERFIL
+// ────────────────────────────────────────────────────────────
+class CliPerfilTab extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onReload;
+  final VoidCallback onLogout;
+  const CliPerfilTab({super.key, required this.u, required this.onReload, required this.onLogout});
+  @override
+  State<CliPerfilTab> createState() => _CliPerfilState();
+}
+
+class _CliPerfilState extends State<CliPerfilTab> {
+  final _fk = GlobalKey<FormState>();
+  late final _nom = TextEditingController(text: widget.u['nombre']?.toString() ?? '');
+  late final _eml = TextEditingController(text: widget.u['email']?.toString() ?? '');
+  bool _saving = false;
+
+  @override
+  void dispose() { _nom.dispose(); _eml.dispose(); super.dispose(); }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    setState(() => _saving = true);
+    await SB.updateUsuario(widget.u['id'].toString(), {'nombre': _nom.text.trim(), 'email': _eml.text.trim()});
+    if (!mounted) return;
+    setState(() => _saving = false);
+    widget.onReload();
+    _snack(context, 'Perfil actualizado ✓');
+  }
+
+  String _init(String n) {
+    final p = n.trim().split(' ');
+    return p.length >= 2 ? '${p[0][0]}${p[1][0]}'.toUpperCase() : n.isNotEmpty ? n[0].toUpperCase() : 'U';
   }
 
   @override
   Widget build(BuildContext context) {
-    final u = DB.usuarios().where((x) => x.id == _u.id).firstOrNull ?? _u;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('Membresía',
-            style: TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
+    final u = widget.u; final mem = u['membresia']?.toString() ?? 'Ninguna';
+    return SingleChildScrollView(padding: const EdgeInsets.all(16), child: Form(key: _fk, child: Column(children: [
+      Container(padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.brd)),
+        child: Column(children: [
+          Container(width: 68, height: 68,
+            decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
+            child: Center(child: Text(_init(u['nombre']?.toString() ?? ''),
+                style: const TextStyle(color: C.black, fontSize: 26, fontWeight: FontWeight.bold)))),
+          const SizedBox(height: 10),
+          Text(u['nombre']?.toString() ?? '', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(u['celular']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 13)),
+          const SizedBox(height: 8),
+          _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía', mem != 'Ninguna' ? C.gold : C.muted),
+        ])),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('EDITAR PERFIL', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 14),
+          _F(c: _nom, label: 'Nombre completo',
+              val: (v) => (v == null || v.trim().length < 3) ? 'Requerido' : null),
+          const SizedBox(height: 12),
+          _F(c: _eml, label: 'Email (opcional)', kb: TextInputType.emailAddress),
+          const SizedBox(height: 18),
+          _saving ? const Center(child: CircularProgressIndicator(color: C.gold))
+              : ElevatedButton(onPressed: _guardar, child: const Text('Guardar cambios')),
+        ])),
+      const SizedBox(height: 14),
+      OutlinedButton(onPressed: widget.onLogout,
+        style: OutlinedButton.styleFrom(side: const BorderSide(color: C.err),
+            foregroundColor: C.err, minimumSize: const Size(double.infinity, 52)),
+        child: const Text('Cerrar sesión')),
+    ])));
+  }
+}
 
-        // Estado actual
-        if (u.membresia != 'Ninguna')
-          _GoldCard(
-            borderColor: C.gold,
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                const Text('👑', style: TextStyle(fontSize: 32)),
-                const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('MEMBRESÍA ACTIVA',
-                        style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-                    Text('Plan ${u.membresia}',
-                        style: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ],
-            ),
-          )
-        else
-          _GoldCard(
-            child: const Text('Sin membresía activa',
-                style: TextStyle(color: C.textMuted), textAlign: TextAlign.center),
-          ),
+// ════════════════════════════════════════════════════════════
+// ADMIN
+// ════════════════════════════════════════════════════════════
+class AdminMain extends StatefulWidget {
+  final Map<String, dynamic> admin;
+  const AdminMain({super.key, required this.admin});
+  @override
+  State<AdminMain> createState() => _AdminMainState();
+}
 
-        const SizedBox(height: 8),
+class _AdminMainState extends State<AdminMain> {
+  int _tab = 0;
 
-        // Plan Básico
-        _planCard('Plan Básico', 'S/49', '/mes',
-            '4 cortes al mes · Reserva anticipada',
-            ['✅ 4 cortes de cabello', '✅ Reserva anticipada', '✅ 5% descuento en productos'],
-            'Básico', C.border),
-
-        // Plan Premium
-        _planCard('Plan Premium', 'S/89', '/mes',
-            'Servicios ilimitados · VIP',
-            ['✅ Cortes ilimitados', '✅ Afeitado clásico incluido', '✅ 15% descuento en productos', '✅ Prioridad en citas'],
-            'Premium', const Color(0xFF808080)),
-
-        // Plan VIP Anual
-        _planCard('Plan VIP Anual', 'S/790', '/año',
-            'Todo incluido · Ahorra S/278',
-            ['✅ Todo del plan Premium', '✅ Kit de productos de bienvenida', '✅ 25% descuento permanente', '✅ Barbero personal asignado'],
-            'VIP Anual', C.gold),
-      ],
-    );
+  Future<void> _logout() async {
+    Session.clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()), (_) => false);
   }
 
-  Widget _planCard(String nombre, String precio, String periodo, String subtitulo,
-      List<String> items, String planKey, Color borderColor) {
-    final activo = (DB.usuarios().where((x) => x.id == _u.id).firstOrNull ?? _u).membresia == planKey;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: C.dark2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: activo ? C.gold : borderColor, width: activo ? 2 : 1),
+  @override
+  Widget build(BuildContext context) {
+    final tabs = [
+      AdmDashTab(onLogout: _logout),
+      const AdmCitasTab(),
+      const AdmClientesTab(),
+      const AdmServiciosTab(),
+      const AdmMembresiaTab(),   // ← Planes editables
+    ];
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('✂️ Admin Panel'),
+        actions: [
+          IconButton(icon: const Icon(Icons.bar_chart, color: C.muted),
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const ReportesScreen())),
+              tooltip: 'Reportes'),
+          IconButton(icon: const Icon(Icons.logout, color: C.muted),
+              onPressed: _logout, tooltip: 'Salir'),
+        ],
       ),
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(nombre,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-              RichText(
-                text: TextSpan(
-                  children: [
-                    TextSpan(text: precio,
-                        style: const TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
-                    TextSpan(text: periodo,
-                        style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(subtitulo, style: const TextStyle(color: C.textMuted, fontSize: 12)),
-          const SizedBox(height: 14),
-          ...items.map((i) => Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(i, style: const TextStyle(fontSize: 13, color: C.textPrimary)),
-          )),
-          const SizedBox(height: 14),
-          activo
-              ? Container(
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: C.success.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: C.success),
-                  ),
-                  child: const Text('✅ Plan activo',
-                      style: TextStyle(color: C.success, fontWeight: FontWeight.bold)),
-                )
-              : ElevatedButton(
-                  onPressed: () => _activar(planKey),
-                  child: Text('Activar $nombre'),
-                ),
+      body: IndexedStack(index: _tab, children: tabs),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tab, onTap: (i) => setState(() => _tab = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),     activeIcon: Icon(Icons.dashboard),    label: 'Panel'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined), activeIcon: Icon(Icons.calendar_today),label: 'Citas'),
+          BottomNavigationBarItem(icon: Icon(Icons.people_outline),         activeIcon: Icon(Icons.people),       label: 'Clientes'),
+          BottomNavigationBarItem(icon: Icon(Icons.cut_outlined),           activeIcon: Icon(Icons.cut),          label: 'Servicios'),
+          BottomNavigationBarItem(icon: Icon(Icons.workspace_premium_outlined), activeIcon: Icon(Icons.workspace_premium), label: 'Membresía'),
         ],
       ),
     );
   }
 }
 
-// ── TAB: PERFIL ───────────────────────────────────
-class _ClientePerfilTab extends StatefulWidget {
-  final Usuario usuario;
-  final VoidCallback onRefresh;
-  const _ClientePerfilTab({required this.usuario, required this.onRefresh});
-
+// ────────────────────────────────────────────────────────────
+// ADMIN DASHBOARD
+// ────────────────────────────────────────────────────────────
+class AdmDashTab extends StatefulWidget {
+  final VoidCallback onLogout;
+  const AdmDashTab({super.key, required this.onLogout});
   @override
-  State<_ClientePerfilTab> createState() => _ClientePerfilTabState();
+  State<AdmDashTab> createState() => _AdmDashState();
 }
 
-class _ClientePerfilTabState extends State<_ClientePerfilTab> {
-  late TextEditingController _nomCtrl;
-  late TextEditingController _emailCtrl;
-  final _passCtrl  = TextEditingController();
-  final _pass2Ctrl = TextEditingController();
-  bool _verPass = false;
+class _AdmDashState extends State<AdmDashTab> {
+  Map<String, dynamic> _r = {};
+  List<Map<String, dynamic>> _hoy = [];
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final r = await SB.reportes();
+    final h = await SB.getCitasHoy();
+    if (mounted) setState(() { _r = r; _hoy = h; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) => RefreshIndicator(
+    color: C.gold, onRefresh: _load,
+    child: _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+        : ListView(padding: const EdgeInsets.all(16), children: [
+      Row(children: [
+        _stat('📅', '${_r['citasHoy'] ?? 0}', 'Citas hoy'),
+        const SizedBox(width: 12),
+        _stat('👥', '${_r['clientes'] ?? 0}', 'Clientes'),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        _stat('💰', 'S/${(_r['ingHoy'] ?? 0.0).toInt()}', 'Ingresos hoy'),
+        const SizedBox(width: 12),
+        _stat('👑', '${_r['vip'] ?? 0}', 'VIP activos'),
+      ]),
+      const SizedBox(height: 20),
+      const _T('CITAS DE HOY'),
+      if (_hoy.isEmpty) const Padding(padding: EdgeInsets.all(20),
+          child: Center(child: Text('Sin citas para hoy', style: TextStyle(color: C.muted))))
+      else ..._hoy.map((c) => _citaCard(c)),
+      const SizedBox(height: 20),
+      const _T('ACCIONES RÁPIDAS'),
+      ElevatedButton.icon(
+        onPressed: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => QRScannerScreen(onScanned: (data) async {
+              // data = "id|celular|nombre"
+              final parts = data.split('|');
+              if (parts.isEmpty) return;
+              final uid = parts[0];
+              final u = await SB.getUsuario(uid);
+              if (u == null || !mounted) return;
+              if (!mounted) return;
+              _showQRResult(u);
+            }))),
+        icon: const Icon(Icons.qr_code_scanner),
+        label: const Text('Escanear QR de cliente'),
+        style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+      ),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: () => showDialog(context: context,
+            builder: (_) => NuevaCitaDialog(onOk: _load)),
+        icon: const Icon(Icons.add), label: const Text('Crear cita manual'),
+        style: OutlinedButton.styleFrom(side: const BorderSide(color: C.brd),
+            foregroundColor: C.txt, minimumSize: const Size(double.infinity, 52))),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const AdmPromoScreen())),
+        icon: const Icon(Icons.local_offer_outlined), label: const Text('Gestionar promociones'),
+        style: OutlinedButton.styleFrom(side: const BorderSide(color: C.brd),
+            foregroundColor: C.txt, minimumSize: const Size(double.infinity, 52))),
+    ]),
+  );
+
+  Widget _citaCard(Map<String, dynamic> c) {
+    final col = _estadoColor(c['estado'].toString());
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+      child: Row(children: [
+        SizedBox(width: 46, child: Text(c['hora'].toString(),
+            style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 13))),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(c['cliente_nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('${c['servicio_nombre']}  ·  S/${(c['precio'] as num).toInt()}',
+              style: const TextStyle(color: C.muted, fontSize: 12)),
+        ])),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          _badge(c['estado'].toString(), col),
+          const SizedBox(height: 4),
+          if (c['estado'] == 'pendiente')
+            _mBtn('Confirmar', C.gold, () => _accion(c['id'].toString(), 'confirmada')),
+          if (c['estado'] == 'confirmada')
+            _mBtn('✓ Completar', C.ok, () async {
+              await SB.completarCita(c['id'].toString()); _load();
+            }),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _mBtn(String l, Color col, VoidCallback fn) => GestureDetector(onTap: fn,
+    child: Container(margin: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: col.withOpacity(.12), borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: col.withOpacity(.4))),
+      child: Text(l, style: TextStyle(color: col, fontSize: 11, fontWeight: FontWeight.w600))));
+
+  Future<void> _accion(String id, String est) async {
+    await SB.setCitaEstado(id, est); _load();
+  }
+
+  void _showQRResult(Map<String, dynamic> u) {
+    showDialog(context: context, builder: (_) => _QRResultDialog(u: u, onOk: _load));
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// ESCÁNER QR REAL (mobile_scanner)
+// ────────────────────────────────────────────────────────────
+class QRScannerScreen extends StatefulWidget {
+  final Future<void> Function(String data) onScanned;
+  const QRScannerScreen({super.key, required this.onScanned});
+  @override
+  State<QRScannerScreen> createState() => _QRScannerState();
+}
+
+class _QRScannerState extends State<QRScannerScreen> {
+  final MobileScannerController _ctrl = MobileScannerController();
+  bool _procesando = false;
+  String? _resultado;
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_procesando) return;
+    final barcode = capture.barcodes.firstOrNull;
+    if (barcode == null || barcode.rawValue == null) return;
+    setState(() { _procesando = true; _resultado = barcode.rawValue; });
+    await _ctrl.stop();
+    await widget.onScanned(barcode.rawValue!);
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: C.black,
+    appBar: AppBar(title: const Text('Escanear QR'),
+      actions: [
+        IconButton(icon: ValueListenableBuilder(
+          valueListenable: _ctrl.torchState,
+          builder: (_, state, __) => Icon(
+              state == TorchState.on ? Icons.flash_on : Icons.flash_off,
+              color: state == TorchState.on ? C.gold : C.muted),
+        ), onPressed: () => _ctrl.toggleTorch()),
+        IconButton(icon: const Icon(Icons.flip_camera_ios),
+            onPressed: () => _ctrl.switchCamera()),
+      ]),
+    body: Stack(children: [
+      MobileScanner(controller: _ctrl, onDetect: _onDetect),
+      // Marco de escaneo
+      Center(child: Container(
+        width: 260, height: 260,
+        decoration: BoxDecoration(
+          border: Border.all(color: C.gold, width: 2.5),
+          borderRadius: BorderRadius.circular(16)),
+        child: Stack(children: [
+          Positioned(top: 0, left: 0,   child: _corner(true,  true)),
+          Positioned(top: 0, right: 0,  child: _corner(true,  false)),
+          Positioned(bottom: 0, left: 0,  child: _corner(false, true)),
+          Positioned(bottom: 0, right: 0, child: _corner(false, false)),
+        ]),
+      )),
+      Positioned(bottom: 40, left: 0, right: 0,
+        child: Center(child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(color: C.black.withOpacity(.7), borderRadius: BorderRadius.circular(20)),
+          child: Text(
+            _procesando ? 'Procesando: ${_resultado ?? '...'}' : 'Apunta la cámara al código QR',
+            style: TextStyle(color: _procesando ? C.gold : C.txt, fontSize: 14)),
+        ))),
+      if (_procesando) const Center(child: CircularProgressIndicator(color: C.gold)),
+    ]),
+  );
+
+  Widget _corner(bool top, bool left) => Container(
+    width: 28, height: 28,
+    decoration: BoxDecoration(
+      border: Border(
+        top:    top  ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
+        bottom: !top ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
+        left:   left  ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
+        right:  !left ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
+      ),
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// RESULTADO QR → SUMAR PUNTOS
+// ────────────────────────────────────────────────────────────
+class _QRResultDialog extends StatefulWidget {
+  final Map<String, dynamic> u;
+  final VoidCallback onOk;
+  const _QRResultDialog({required this.u, required this.onOk});
+  @override
+  State<_QRResultDialog> createState() => _QRResultDialogState();
+}
+
+class _QRResultDialogState extends State<_QRResultDialog> {
+  List<Map<String, dynamic>> _svcs = [];
+  Map<String, dynamic>? _svc;
+  bool _loading = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final s = await SB.getServicios(soloActivos: true);
+    if (mounted) setState(() { _svcs = s; if (s.isNotEmpty) _svc = s.first; });
+  }
+
+  Future<void> _registrar() async {
+    if (_svc == null) { _snack(context, 'Selecciona servicio', err: true); return; }
+    setState(() => _loading = true);
+    await SB.addPuntosDirecto(
+        widget.u['id'].toString(), _svc!['puntos_otorga'] as int, _svc!['nombre'].toString());
+    if (!mounted) return;
+    Navigator.pop(context);
+    widget.onOk();
+    _snack(context, '+${_svc!['puntos_otorga']} pts a ${widget.u['nombre']} ⭐');
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(child: Padding(padding: const EdgeInsets.all(20),
+    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _dlgHead('Cliente encontrado', context),
+      const SizedBox(height: 14),
+      Container(padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: C.ok.withOpacity(.08), borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: C.ok.withOpacity(.3))),
+        child: Row(children: [
+          Container(width: 38, height: 38,
+            decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
+            child: Center(child: Text(
+              (widget.u['nombre']?.toString() ?? 'C').isNotEmpty
+                  ? (widget.u['nombre']?.toString() ?? 'C')[0].toUpperCase() : 'C',
+              style: const TextStyle(color: C.black, fontWeight: FontWeight.bold)))),
+          const SizedBox(width: 10),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(widget.u['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('${widget.u['puntos']} pts  ·  ${widget.u['membresia']}',
+                style: const TextStyle(color: C.muted, fontSize: 11)),
+          ]),
+        ])),
+      const SizedBox(height: 14),
+      if (_svcs.isNotEmpty) ...[
+        const Text('Servicio realizado', style: TextStyle(color: C.muted, fontSize: 12)),
+        const SizedBox(height: 6),
+        _drop<Map<String, dynamic>>(
+          val: _svc, label: 'Servicio',
+          items: _svcs.map((s) => DropdownMenuItem(value: s,
+              child: Text('${s['icono']} ${s['nombre']}  (+${s['puntos_otorga']}pts)'))).toList(),
+          onChange: (v) => setState(() => _svc = v)),
+      ],
+      const SizedBox(height: 18),
+      _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+          : ElevatedButton(onPressed: _registrar, child: const Text('✅  Registrar y sumar puntos')),
+    ])));
+}
+
+// ────────────────────────────────────────────────────────────
+// CREAR CITA MANUAL — con buscador de cliente en tiempo real
+// ────────────────────────────────────────────────────────────
+class NuevaCitaDialog extends StatefulWidget {
+  final VoidCallback onOk;
+  const NuevaCitaDialog({super.key, required this.onOk});
+  @override
+  State<NuevaCitaDialog> createState() => _NuevaCitaDialogState();
+}
+
+class _NuevaCitaDialogState extends State<NuevaCitaDialog> {
+  static const _horas = ['09:00','09:30','10:00','10:30','11:00','11:30',
+    '12:00','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00'];
+
+  // ── Búsqueda de cliente ──
+  final _busCtrl = TextEditingController();
+  List<Map<String, dynamic>> _resultados = [];
+  Map<String, dynamic>? _cliSel;
+  bool _buscando = false;
+
+  // ── Servicio / fecha / hora ──
+  List<Map<String, dynamic>> _svcs = [];
+  Map<String, dynamic>? _svcSel;
+  DateTime _fecha = DateTime.now();
+  String _hora = '09:00';
+  String _estado = 'pendiente';
+  bool _guardando = false;
+
+  @override
+  void initState() { super.initState(); _loadSvcs(); }
+  @override
+  void dispose() { _busCtrl.dispose(); super.dispose(); }
+
+  Future<void> _loadSvcs() async {
+    final s = await SB.getServicios(soloActivos: true);
+    if (mounted) setState(() { _svcs = s; if (s.isNotEmpty) _svcSel = s.first; });
+  }
+
+  Future<void> _buscar(String q) async {
+    if (q.length < 2) { setState(() { _resultados = []; _buscando = false; }); return; }
+    setState(() => _buscando = true);
+    final r = await SB.getClientes(q: q);
+    if (mounted) setState(() { _resultados = r; _buscando = false; });
+  }
+
+  Future<void> _crear() async {
+    if (_cliSel == null) { _snack(context, 'Selecciona un cliente', err: true); return; }
+    if (_svcSel == null) { _snack(context, 'Selecciona un servicio', err: true); return; }
+    setState(() => _guardando = true);
+    final f = DateFormat('yyyy-MM-dd').format(_fecha);
+    try {
+      await SB.addCita({
+        'cliente_id': _cliSel!['id'], 'cliente_nombre': _cliSel!['nombre'],
+        'servicio_id': _svcSel!['id'], 'servicio_nombre': _svcSel!['nombre'],
+        'fecha': f, 'hora': _hora, 'estado': _estado,
+        'precio': _svcSel!['precio'], 'notas': '',
+      });
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onOk();
+      _snack(context, 'Cita creada con éxito');
+    } catch (e) {
+      if (mounted) { setState(() => _guardando = false); _snack(context, 'Error: $e', err: true); }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _dlgHead('Nueva Cita Manual', context),
+        const SizedBox(height: 14),
+
+        // ── Buscador de cliente ──
+        const Text('BUSCAR CLIENTE', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _busCtrl,
+          style: const TextStyle(color: C.txt),
+          decoration: InputDecoration(
+            labelText: 'Nombre o celular',
+            suffixIcon: _buscando
+                ? const Padding(padding: EdgeInsets.all(12),
+                    child: SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(color: C.gold, strokeWidth: 2)))
+                : const Icon(Icons.search, color: C.muted, size: 18)),
+          onChanged: _buscar,
+        ),
+
+        // Lista de resultados
+        if (_resultados.isNotEmpty && _cliSel == null)
+          Container(
+            margin: const EdgeInsets.only(top: 4),
+            decoration: BoxDecoration(
+              color: C.d3, borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: C.brd)),
+            child: Column(children: _resultados.take(5).map((u) => ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+              leading: Container(width: 32, height: 32,
+                decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
+                child: Center(child: Text(
+                  u['nombre'].toString().isNotEmpty ? u['nombre'].toString()[0].toUpperCase() : 'C',
+                  style: const TextStyle(color: C.black, fontWeight: FontWeight.bold, fontSize: 14)))),
+              title: Text(u['nombre'].toString(), style: const TextStyle(fontSize: 13)),
+              subtitle: Text(u['celular'].toString(), style: const TextStyle(color: C.muted, fontSize: 11)),
+              onTap: () => setState(() {
+                _cliSel = u; _resultados = [];
+                _busCtrl.text = u['nombre'].toString();
+              }),
+            )).toList()),
+          ),
+
+        // Cliente seleccionado
+        if (_cliSel != null) ...[
+          const SizedBox(height: 8),
+          Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: C.gold)),
+            child: Row(children: [
+              const Icon(Icons.check_circle, color: C.gold, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_cliSel!['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text('${_cliSel!['celular']}  ·  ${_cliSel!['puntos']} pts',
+                    style: const TextStyle(color: C.muted, fontSize: 11)),
+              ])),
+              IconButton(icon: const Icon(Icons.close, size: 16, color: C.muted),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                  onPressed: () => setState(() { _cliSel = null; _busCtrl.clear(); })),
+            ])),
+        ],
+        const SizedBox(height: 14),
+
+        // Servicio
+        _drop<Map<String, dynamic>>(
+          val: _svcSel, label: 'Servicio',
+          items: _svcs.map((s) => DropdownMenuItem(value: s,
+              child: Text('${s['icono']} ${s['nombre']}  S/${(s['precio'] as num).toInt()}'))).toList(),
+          onChange: (v) => setState(() => _svcSel = v)),
+        const SizedBox(height: 10),
+
+        // Fecha
+        ListTile(contentPadding: EdgeInsets.zero,
+          title: Text(
+            'Fecha: ${DateFormat('dd/MM/yyyy').format(_fecha)}',
+            style: const TextStyle(color: C.txt)),
+          trailing: const Icon(Icons.calendar_today, color: C.gold, size: 18),
+          onTap: () async {
+            final d = await showDatePicker(context: context, initialDate: _fecha,
+              firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 60)),
+              builder: (_, ch) => Theme(data: ThemeData.dark().copyWith(
+                  colorScheme: const ColorScheme.dark(primary: C.gold)), child: ch!));
+            if (d != null) setState(() => _fecha = d);
+          }),
+        const SizedBox(height: 6),
+
+        // Hora
+        _drop<String>(val: _hora, label: 'Hora',
+          items: _horas.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
+          onChange: (v) => setState(() => _hora = v!)),
+        const SizedBox(height: 10),
+
+        // Estado
+        _drop<String>(val: _estado, label: 'Estado inicial',
+          items: const [
+            DropdownMenuItem(value: 'pendiente',  child: Text('Pendiente')),
+            DropdownMenuItem(value: 'confirmada', child: Text('Confirmada')),
+          ],
+          onChange: (v) => setState(() => _estado = v!)),
+        const SizedBox(height: 18),
+
+        _guardando ? const Center(child: CircularProgressIndicator(color: C.gold))
+            : ElevatedButton(onPressed: _crear, child: const Text('Crear cita')),
+      ])));
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN CITAS
+// ────────────────────────────────────────────────────────────
+class AdmCitasTab extends StatefulWidget {
+  const AdmCitasTab({super.key});
+  @override
+  State<AdmCitasTab> createState() => _AdmCitasState();
+}
+
+class _AdmCitasState extends State<AdmCitasTab> {
+  List<Map<String, dynamic>> _citas = [];
+  String _filtro = '';
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final c = await SB.getCitas(estado: _filtro.isEmpty ? null : _filtro);
+    if (mounted) setState(() { _citas = c; _loading = false; });
+  }
+
+  Future<void> _accion(Map<String, dynamic> c, String est) async {
+    if (est == 'completada') await SB.completarCita(c['id'].toString());
+    else await SB.setCitaEstado(c['id'].toString(), est);
+    _load();
+    if (mounted) _snack(context, 'Estado: $est');
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,0), child: Row(children: [
+      Expanded(child: _drop<String>(
+        val: _filtro.isEmpty ? null : _filtro, label: 'Filtrar', hint: 'Todas las citas',
+        items: const [
+          DropdownMenuItem(value: '',          child: Text('Todas')),
+          DropdownMenuItem(value: 'pendiente', child: Text('Pendientes')),
+          DropdownMenuItem(value: 'confirmada',child: Text('Confirmadas')),
+          DropdownMenuItem(value: 'completada',child: Text('Completadas')),
+          DropdownMenuItem(value: 'cancelada', child: Text('Canceladas')),
+        ],
+        onChange: (v) { setState(() => _filtro = v ?? ''); _load(); })),
+      const SizedBox(width: 8),
+      IconButton(icon: const Icon(Icons.add_circle, color: C.gold, size: 28),
+          onPressed: () => showDialog(context: context,
+              builder: (_) => NuevaCitaDialog(onOk: _load))),
+    ])),
+    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+          : _citas.isEmpty ? const Center(child: Text('Sin citas', style: TextStyle(color: C.muted)))
+          : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _citas.length,
+              itemBuilder: (_, i) {
+                final c = _citas[i]; final col = _estadoColor(c['estado'].toString());
+                return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(c['cliente_nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(c['servicio_nombre'].toString(), style: const TextStyle(color: C.muted, fontSize: 12)),
+                        Text('${_fmtFecha(c['fecha'].toString())}  ·  ${c['hora']}',
+                            style: const TextStyle(color: C.gold, fontSize: 12)),
+                      ])),
+                      _badge(c['estado'].toString(), col),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('S/ ${(c['precio'] as num).toInt()}',
+                          style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold)),
+                      Row(children: [
+                        if (c['estado'] == 'pendiente')
+                          _aBtn('Confirmar', C.gold, () => _accion(c, 'confirmada')),
+                        if (c['estado'] == 'confirmada') ...[
+                          _aBtn('✓', C.ok, () => _accion(c, 'completada')),
+                          const SizedBox(width: 6),
+                        ],
+                        if (c['estado'] != 'cancelada' && c['estado'] != 'completada')
+                          _aBtn('✕', C.err, () => _accion(c, 'cancelada')),
+                      ]),
+                    ]),
+                  ]),
+                );
+              }))),
+  ]);
+
+  Widget _aBtn(String l, Color col, VoidCallback fn) => OutlinedButton(onPressed: fn,
+    style: OutlinedButton.styleFrom(side: BorderSide(color: col), foregroundColor: col,
+        minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        textStyle: const TextStyle(fontSize: 11)),
+    child: Text(l));
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN CLIENTES
+// ────────────────────────────────────────────────────────────
+class AdmClientesTab extends StatefulWidget {
+  const AdmClientesTab({super.key});
+  @override
+  State<AdmClientesTab> createState() => _AdmClientesState();
+}
+
+class _AdmClientesState extends State<AdmClientesTab> {
+  List<Map<String, dynamic>> _clientes = [];
+  String _q = '';
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final c = await SB.getClientes(q: _q.isEmpty ? null : _q);
+    if (mounted) setState(() => _clientes = c);
+  }
+
+  Future<void> _eliminar(String id) async {
+    if (!await _confirm(context, 'Eliminar cliente', 'Esta acción no se puede deshacer.')) return;
+    await SB.deleteCliente(id); _load();
+    if (mounted) _snack(context, 'Cliente eliminado', err: true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,0), child: Row(children: [
+      Expanded(child: TextFormField(
+        style: const TextStyle(color: C.txt),
+        decoration: const InputDecoration(prefixIcon: Icon(Icons.search, color: C.muted, size: 18),
+            hintText: 'Buscar por nombre o celular...'),
+        onChanged: (v) { setState(() => _q = v); _load(); })),
+      const SizedBox(width: 8),
+      IconButton(icon: const Icon(Icons.person_add, color: C.gold, size: 26),
+          onPressed: () => showDialog(context: context,
+              builder: (_) => NuevoClienteDialog(onOk: _load))),
+    ])),
+    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: _clientes.isEmpty
+          ? const Center(child: Text('Sin resultados', style: TextStyle(color: C.muted)))
+          : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _clientes.length,
+              itemBuilder: (_, i) {
+                final u = _clientes[i]; final mem = u['membresia']?.toString() ?? 'Ninguna';
+                final init = (u['nombre']?.toString() ?? 'C').isNotEmpty
+                    ? (u['nombre']?.toString() ?? 'C')[0].toUpperCase() : 'C';
+                return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+                  child: Row(children: [
+                    Container(width: 44, height: 44,
+                      decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
+                      child: Center(child: Text(init,
+                          style: const TextStyle(color: C.black, fontSize: 18, fontWeight: FontWeight.bold)))),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(u['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(u['celular']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Wrap(spacing: 6, children: [
+                        _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía', mem != 'Ninguna' ? C.gold : C.muted),
+                        _badge('⭐ ${u['puntos']} pts', C.info),
+                      ]),
+                    ])),
+                    IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 20),
+                        onPressed: () => _eliminar(u['id'].toString())),
+                  ]));
+              }))),
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN SERVICIOS
+// ────────────────────────────────────────────────────────────
+class AdmServiciosTab extends StatefulWidget {
+  const AdmServiciosTab({super.key});
+  @override
+  State<AdmServiciosTab> createState() => _AdmServiciosState();
+}
+
+class _AdmServiciosState extends State<AdmServiciosTab> {
+  List<Map<String, dynamic>> _svcs = [];
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final s = await SB.getServicios(); if (mounted) setState(() => _svcs = s);
+  }
+
+  Future<void> _eliminar(String id) async {
+    if (!await _confirm(context, 'Eliminar servicio', '¿Confirmar eliminación?')) return;
+    await SB.deleteServicio(id); _load();
+    if (mounted) _snack(context, 'Servicio eliminado', err: true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,8),
+      child: ElevatedButton.icon(onPressed: () => showDialog(context: context,
+          builder: (_) => NuevoServicioDialog(onOk: _load)),
+          icon: const Icon(Icons.add), label: const Text('Nuevo Servicio'))),
+    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: _svcs.length,
+        itemBuilder: (_, i) {
+          final s = _svcs[i];
+          return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+            child: Row(children: [
+              Text(s['icono']?.toString() ?? '✂️', style: const TextStyle(fontSize: 30)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(s['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                Text(s['descripcion']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
+                const SizedBox(height: 5),
+                Wrap(spacing: 6, children: [
+                  _badge('S/${(s['precio'] as num).toInt()}', C.gold),
+                  _badge('${s['duracion_min']}min', C.muted),
+                  _badge('+${s['puntos_otorga']}pts', C.info),
+                ]),
+              ])),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(icon: const Icon(Icons.edit_outlined, color: C.gold, size: 18),
+                    onPressed: () => showDialog(context: context,
+                        builder: (_) => EditServicioDialog(svc: s, onOk: _load))),
+                IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 18),
+                    onPressed: () => _eliminar(s['id'].toString())),
+              ]),
+            ]));
+        }))),
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN MEMBRESÍA (planes EDITABLES desde admin)
+// ────────────────────────────────────────────────────────────
+class AdmMembresiaTab extends StatefulWidget {
+  const AdmMembresiaTab({super.key});
+  @override
+  State<AdmMembresiaTab> createState() => _AdmMembresiaState();
+}
+
+class _AdmMembresiaState extends State<AdmMembresiaTab> {
+  List<Map<String, dynamic>> _planes = [];
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final p = await SB.getPlanes(); if (mounted) setState(() => _planes = p);
+  }
+
+  Future<void> _eliminar(String id) async {
+    if (!await _confirm(context, 'Eliminar plan', '¿Confirmar eliminación?')) return;
+    await SB.deletePlan(id); _load();
+    if (mounted) _snack(context, 'Plan eliminado', err: true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,8),
+      child: ElevatedButton.icon(
+        onPressed: () => showDialog(context: context,
+            builder: (_) => PlanDialog(onOk: _load)),
+        icon: const Icon(Icons.add), label: const Text('Nuevo Plan de Membresía'))),
+    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: _planes.isEmpty
+          ? const Center(child: Text('Sin planes configurados', style: TextStyle(color: C.muted)))
+          : ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _planes.length,
+              itemBuilder: (_, i) {
+                final p = _planes[i];
+                final beneficios = (p['beneficios'] as List?)?.cast<String>() ?? [];
+                return Container(margin: const EdgeInsets.only(bottom: 14), padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text(p['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Row(children: [
+                        RichText(text: TextSpan(children: [
+                          TextSpan(text: 'S/${(p['precio'] as num).toInt()}',
+                              style: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+                          TextSpan(text: '/${p['periodo']}',
+                              style: const TextStyle(color: C.muted, fontSize: 12)),
+                        ])),
+                        const SizedBox(width: 8),
+                        IconButton(icon: const Icon(Icons.edit_outlined, color: C.gold, size: 18),
+                            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                            onPressed: () => showDialog(context: context,
+                                builder: (_) => PlanDialog(plan: p, onOk: _load))),
+                        const SizedBox(width: 4),
+                        IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 18),
+                            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                            onPressed: () => _eliminar(p['id'].toString())),
+                      ]),
+                    ]),
+                    if ((p['descripcion'] ?? '').toString().isNotEmpty)
+                      Text(p['descripcion'].toString(), style: const TextStyle(color: C.muted, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 6, runSpacing: 4,
+                        children: beneficios.map((b) => _badge('✅ $b', C.ok)).toList()),
+                    const SizedBox(height: 8),
+                    _badge('Orden: ${p['orden']}', C.muted),
+                  ]));
+              }))),
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// DIALOG: PLAN MEMBRESÍA (crear / editar)
+// ────────────────────────────────────────────────────────────
+class PlanDialog extends StatefulWidget {
+  final Map<String, dynamic>? plan;
+  final VoidCallback onOk;
+  const PlanDialog({super.key, this.plan, required this.onOk});
+  @override
+  State<PlanDialog> createState() => _PlanDialogState();
+}
+
+class _PlanDialogState extends State<PlanDialog> {
+  final _fk = GlobalKey<FormState>();
+  late final _nom = TextEditingController(text: widget.plan?['nombre']?.toString() ?? '');
+  late final _pre = TextEditingController(text: widget.plan != null ? (widget.plan!['precio'] as num).toInt().toString() : '');
+  late final _des = TextEditingController(text: widget.plan?['descripcion']?.toString() ?? '');
+  late final _ord = TextEditingController(text: widget.plan?['orden']?.toString() ?? '0');
+  late String _periodo = widget.plan?['periodo']?.toString() ?? 'mes';
+  // Beneficios como lista editable
+  final List<TextEditingController> _benCtrls = [];
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    final u = widget.usuario;
-    _nomCtrl   = TextEditingController(text: u.nombre);
-    _emailCtrl = TextEditingController(text: u.email ?? '');
+    final bens = (widget.plan?['beneficios'] as List?)?.cast<String>() ?? [];
+    for (final b in bens) _benCtrls.add(TextEditingController(text: b));
+    if (_benCtrls.isEmpty) _benCtrls.add(TextEditingController());
   }
 
   @override
   void dispose() {
-    _nomCtrl.dispose(); _emailCtrl.dispose();
-    _passCtrl.dispose(); _pass2Ctrl.dispose();
+    _nom.dispose(); _pre.dispose(); _des.dispose(); _ord.dispose();
+    for (final c in _benCtrls) c.dispose();
     super.dispose();
   }
 
   Future<void> _guardar() async {
-    final u = widget.usuario;
-    u.nombre = _nomCtrl.text.trim().isEmpty ? u.nombre : _nomCtrl.text.trim();
-    u.email  = _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim();
-    await DB.actualizarUsuario(u);
-    widget.onRefresh();
-    if (mounted) _snack(context, 'Perfil actualizado ✓');
-  }
-
-  Future<void> _cambiarClave() async {
-    if (_passCtrl.text.length < 6) {
-      _snack(context, 'Mínimo 6 caracteres', error: true); return;
+    if (!_fk.currentState!.validate()) return;
+    setState(() => _loading = true);
+    final bens = _benCtrls.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
+    final data = {
+      'nombre': _nom.text.trim(), 'precio': double.tryParse(_pre.text) ?? 0,
+      'periodo': _periodo, 'descripcion': _des.text.trim(),
+      'beneficios': bens, 'activo': true, 'orden': int.tryParse(_ord.text) ?? 0,
+    };
+    if (widget.plan == null) {
+      await SB.addPlan(data);
+    } else {
+      await SB.updatePlan(widget.plan!['id'].toString(), data);
     }
-    if (_passCtrl.text != _pass2Ctrl.text) {
-      _snack(context, 'Las claves no coinciden', error: true); return;
-    }
-    // En producción: usar bcrypt. Aquí re-usamos el mismo hash
-    final raw = DB._raw();
-    final list = raw['usuarios'] as List;
-    final idx = list.indexWhere((u) => (u as Map)['id'] == widget.usuario.id);
-    if (idx != -1) {
-      // ignore: invalid_use_of_visible_for_testing_member
-      (list[idx] as Map<String, dynamic>)['passwordHash'] =
-          DB._hash(_passCtrl.text.trim());
-    }
-    await DB._save(raw);
-    _passCtrl.clear(); _pass2Ctrl.clear();
-    if (mounted) _snack(context, 'Clave actualizada ✓');
-  }
-
-  Future<void> _logout() async {
-    await Session.clear();
     if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (_) => false,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final u = widget.usuario;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Avatar
-        _GoldCard(
-          child: Column(
-            children: [
-              CircleAvatar(
-                radius: 40,
-                backgroundColor: C.gold,
-                child: Text(u.iniciales,
-                    style: const TextStyle(color: C.black, fontSize: 28, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(height: 12),
-              Text(u.nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text('+51 ${u.celular}', style: const TextStyle(color: C.textMuted, fontSize: 13)),
-              if (u.email != null && u.email!.isNotEmpty)
-                Text(u.email!, style: const TextStyle(color: C.textDim, fontSize: 12)),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                decoration: BoxDecoration(
-                  color: u.esVIP ? C.gold.withValues(alpha: 0.12) : C.dark3,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: u.esVIP ? C.border : C.textDim),
-                ),
-                child: Text(
-                  u.membresia != 'Ninguna' ? '👑 ${u.membresia}' : 'Sin membresía',
-                  style: TextStyle(
-                      color: u.esVIP ? C.gold : C.textMuted, fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Editar perfil
-        _GoldCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('EDITAR PERFIL',
-                  style: TextStyle(color: C.textMuted, fontSize: 12, letterSpacing: 1)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nomCtrl,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Nombre completo'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Email'),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(onPressed: _guardar, child: const Text('Guardar cambios')),
-            ],
-          ),
-        ),
-
-        // Cambiar clave
-        _GoldCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('CAMBIAR CLAVE',
-                  style: TextStyle(color: C.textMuted, fontSize: 12, letterSpacing: 1)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passCtrl,
-                obscureText: !_verPass,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: InputDecoration(
-                  labelText: 'Nueva clave',
-                  suffixIcon: IconButton(
-                    icon: Icon(_verPass ? Icons.visibility_off : Icons.visibility, color: C.textMuted),
-                    onPressed: () => setState(() => _verPass = !_verPass),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _pass2Ctrl,
-                obscureText: !_verPass,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Confirmar nueva clave'),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton(onPressed: _cambiarClave, child: const Text('Actualizar clave')),
-            ],
-          ),
-        ),
-
-        // Logout
-        const SizedBox(height: 4),
-        OutlinedButton.icon(
-          onPressed: _logout,
-          icon: const Icon(Icons.logout, color: C.danger),
-          label: const Text('Cerrar sesión', style: TextStyle(color: C.danger)),
-          style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: C.danger),
-              minimumSize: const Size(double.infinity, 52)),
-        ),
-      ],
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════
-// RESERVAR CITA — DIALOG
-// ══════════════════════════════════════════════════
-class _ReservarCitaDialog extends StatefulWidget {
-  final Usuario usuario;
-  final VoidCallback onSuccess;
-  const _ReservarCitaDialog({required this.usuario, required this.onSuccess});
-
-  @override
-  State<_ReservarCitaDialog> createState() => _ReservarCitaDialogState();
-}
-
-class _ReservarCitaDialogState extends State<_ReservarCitaDialog> {
-  List<Servicio> _servicios = [];
-  Servicio? _svcSel;
-  DateTime _fecha = DateTime.now();
-  String? _horaSel;
-  final _notasCtrl = TextEditingController();
-
-  final _horas = [
-    '09:00','09:30','10:00','10:30','11:00','11:30',
-    '12:00','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _servicios = DB.servicios(soloActivos: true);
-  }
-
-  @override
-  void dispose() {
-    _notasCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _confirmar() async {
-    if (_svcSel == null) { _snack(context, 'Selecciona un servicio', error: true); return; }
-    if (_horaSel == null) { _snack(context, 'Selecciona un horario', error: true); return; }
-
-    final fechaStr = _fecha.toIso8601String().split('T')[0];
-    if (DB.horarioOcupado(fechaStr, _horaSel!)) {
-      _snack(context, 'Horario no disponible', error: true); return;
-    }
-
-    final cita = Cita(
-      id: DB.genId('CIT'),
-      clienteId: widget.usuario.id,
-      clienteNombre: widget.usuario.nombre,
-      clienteCelular: widget.usuario.celular,
-      servicioId: _svcSel!.id,
-      servicioNombre: _svcSel!.nombre,
-      fecha: fechaStr,
-      hora: _horaSel!,
-      estado: 'pendiente',
-      precio: _svcSel!.precio,
-      notas: _notasCtrl.text.trim(),
-    );
-    await DB.agregarCita(cita);
-    if (!mounted) return;
+    setState(() => _loading = false);
     Navigator.pop(context);
-    widget.onSuccess();
-    _snack(context, '¡Cita reservada con éxito! 📅');
+    widget.onOk();
+    _snack(context, widget.plan == null ? 'Plan creado ✓' : 'Plan actualizado ✓');
   }
 
   @override
-  Widget build(BuildContext context) {
-    final fechaStr = _fecha.toIso8601String().split('T')[0];
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: C.border)),
-      insetPadding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Reservar Cita',
-                    style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
-                IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: C.textMuted)),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            const Text('SERVICIO', style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 90,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _servicios.length,
-                itemBuilder: (_, i) {
-                  final s = _servicios[i];
-                  final sel = _svcSel?.id == s.id;
-                  return GestureDetector(
-                    onTap: () => setState(() => _svcSel = s),
-                    child: Container(
-                      width: 90,
-                      margin: const EdgeInsets.only(right: 10),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: C.dark3,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: sel ? C.gold : C.border, width: sel ? 2 : 1),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(s.icono, style: const TextStyle(fontSize: 22)),
-                          const SizedBox(height: 4),
-                          Text(s.nombre,
-                              style: TextStyle(fontSize: 11, color: sel ? C.gold : C.textPrimary),
-                              textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text('S/${s.precio.toInt()}',
-                              style: const TextStyle(color: C.gold, fontSize: 11, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            const Text('FECHA', style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () async {
-                final d = await showDatePicker(
-                  context: context,
-                  initialDate: _fecha,
-                  firstDate: DateTime.now(),
-                  lastDate: DateTime.now().add(const Duration(days: 60)),
-                  builder: (ctx, child) => Theme(
-                    data: ThemeData.dark().copyWith(
-                        colorScheme: const ColorScheme.dark(primary: C.gold)),
-                    child: child!,
-                  ),
-                );
-                if (d != null) setState(() { _fecha = d; _horaSel = null; });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                decoration: BoxDecoration(
-                  color: C.dark3,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: C.border),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.calendar_today, size: 16, color: C.textMuted),
-                    const SizedBox(width: 10),
-                    Text(DB.formatFecha(fechaStr),
-                        style: const TextStyle(color: C.textPrimary, fontSize: 14)),
-                    const Spacer(),
-                    const Icon(Icons.arrow_drop_down, color: C.textMuted),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            const Text('HORARIO', style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-            const SizedBox(height: 8),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.8,
-              ),
-              itemCount: _horas.length,
-              itemBuilder: (_, i) {
-                final h = _horas[i];
-                final ocupado = DB.horarioOcupado(fechaStr, h);
-                final sel = _horaSel == h;
-                return GestureDetector(
-                  onTap: ocupado ? null : () => setState(() => _horaSel = h),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: sel ? C.gold : C.dark3,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: ocupado ? C.danger.withValues(alpha: 0.4) : (sel ? C.gold : C.border),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(h,
-                        style: TextStyle(
-                          color: sel ? C.black : (ocupado ? C.danger : C.textPrimary),
-                          fontSize: 12,
-                          fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-                        )),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-
-            const Text('NOTAS (OPCIONAL)', style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _notasCtrl,
-              style: const TextStyle(color: C.textPrimary),
-              maxLines: 2,
-              decoration: const InputDecoration(hintText: 'Indicaciones especiales...'),
-            ),
-
-            if (_svcSel != null) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: C.gold.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: C.border),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_svcSel!.nombre,
-                        style: const TextStyle(color: C.textMuted, fontSize: 13)),
-                    Text('S/ ${_svcSel!.precio.toStringAsFixed(0)}',
-                        style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 16)),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _confirmar,
-              child: const Text('✅ Confirmar reserva'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════
-// ADMIN — MAIN SCREEN
-// ══════════════════════════════════════════════════
-class AdminMainScreen extends StatefulWidget {
-  final Usuario usuario;
-  const AdminMainScreen({super.key, required this.usuario});
-
-  @override
-  State<AdminMainScreen> createState() => _AdminMainScreenState();
-}
-
-class _AdminMainScreenState extends State<AdminMainScreen> {
-  int _tab = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final screens = [
-      _AdminDashboardTab(onRefresh: () => setState(() {})),
-      _AdminCitasTab(onRefresh: () => setState(() {})),
-      _AdminClientesTab(onRefresh: () => setState(() {})),
-      _AdminServiciosTab(onRefresh: () => setState(() {})),
-      _AdminPromocionesTab(onRefresh: () => setState(() {})),
-      _AdminReportesTab(),
-    ];
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('✂️ Admin — BarberPro'),
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: C.textMuted),
-            onPressed: () async {
-              await Session.clear();
-              if (!mounted) return;
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-                (_) => false,
-              );
-            },
-          ),
-        ],
-      ),
-      body: screens[_tab],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _tab,
-        onTap: (i) => setState(() => _tab = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),   activeIcon: Icon(Icons.dashboard),    label: 'Panel'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined), activeIcon: Icon(Icons.calendar_today), label: 'Citas'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_outline),       activeIcon: Icon(Icons.people),       label: 'Clientes'),
-          BottomNavigationBarItem(icon: Icon(Icons.cut_outlined),         activeIcon: Icon(Icons.cut),          label: 'Servicios'),
-          BottomNavigationBarItem(icon: Icon(Icons.local_offer_outlined), activeIcon: Icon(Icons.local_offer),  label: 'Promos'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined),   activeIcon: Icon(Icons.bar_chart),    label: 'Reportes'),
-        ],
-      ),
-    );
-  }
-}
-
-// ── ADMIN: DASHBOARD ──────────────────────────────
-class _AdminDashboardTab extends StatefulWidget {
-  final VoidCallback onRefresh;
-  const _AdminDashboardTab({required this.onRefresh});
-
-  @override
-  State<_AdminDashboardTab> createState() => _AdminDashboardTabState();
-}
-
-class _AdminDashboardTabState extends State<_AdminDashboardTab> {
-  void _reload() => setState(() {});
-
-  @override
-  Widget build(BuildContext context) {
-    final citasHoy = DB.citasHoy();
-    final clientes = DB.usuarios().where((u) => u.rol == 'cliente').toList();
-    final ingresosHoy = citasHoy
-        .where((c) => c.estado == 'completada')
-        .fold<double>(0, (s, c) => s + c.precio);
-    final vip = clientes.where((c) => c.esVIP).length;
-
-    return RefreshIndicator(
-      color: C.gold,
-      onRefresh: () async => _reload(),
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Stats
-          Row(children: [
-            _StatCard(icon: '📅', value: citasHoy.length.toString(),  label: 'Citas hoy'),
-            const SizedBox(width: 12),
-            _StatCard(icon: '👥', value: clientes.length.toString(),  label: 'Clientes'),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            _StatCard(icon: '💰', value: 'S/${ingresosHoy.toInt()}',  label: 'Ingresos hoy'),
-            const SizedBox(width: 12),
-            _StatCard(icon: '👑', value: vip.toString(),              label: 'VIP activos'),
-          ]),
-          const SizedBox(height: 20),
-
-          // Citas de hoy
-          const Text('CITAS DE HOY',
-              style: TextStyle(color: C.gold, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          if (citasHoy.isEmpty)
-            const _GoldCard(child: Center(child: Text('Sin citas para hoy', style: TextStyle(color: C.textMuted))))
-          else
-            ...citasHoy.map((c) => _GoldCard(
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: C.gold.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(c.hora,
-                        style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 13)),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(c.clienteNombre,
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('${c.servicioNombre} · S/${c.precio.toInt()}',
-                            style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _EstadoBadge(c.estado),
-                      if (c.estado == 'pendiente' || c.estado == 'confirmada') ...[
-                        const SizedBox(height: 6),
-                        GestureDetector(
-                          onTap: () async {
-                            await DB.completarCita(c.id);
-                            _reload();
-                            if (mounted) _snack(context, '✓ Servicio completado · Puntos sumados');
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: C.success.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: C.success),
-                            ),
-                            child: const Text('✓ Completar',
-                                style: TextStyle(color: C.success, fontSize: 11)),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            )),
-
-          const SizedBox(height: 20),
-          const Text('ACCIONES RÁPIDAS',
-              style: TextStyle(color: C.gold, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Escanear QR / Registrar servicio'),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (_) => _RegistrarQRDialog(onSuccess: _reload),
-            ),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('Crear cita manual'),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (_) => _NuevaCitaAdminDialog(onSuccess: _reload),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── ADMIN: CITAS ──────────────────────────────────
-class _AdminCitasTab extends StatefulWidget {
-  final VoidCallback onRefresh;
-  const _AdminCitasTab({required this.onRefresh});
-
-  @override
-  State<_AdminCitasTab> createState() => _AdminCitasTabState();
-}
-
-class _AdminCitasTabState extends State<_AdminCitasTab> {
-  String _filtro = '';
-
-  List<Cita> get _lista {
-    final all = DB.citas(estado: _filtro.isEmpty ? null : _filtro);
-    return all;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _filtro.isEmpty ? '' : _filtro,
-                  dropdownColor: C.dark3,
-                  style: const TextStyle(color: C.textPrimary),
-                  decoration: const InputDecoration(
-                    labelText: 'Filtrar por estado',
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: '', child: Text('Todas')),
-                    DropdownMenuItem(value: 'pendiente', child: Text('Pendientes')),
-                    DropdownMenuItem(value: 'confirmada', child: Text('Confirmadas')),
-                    DropdownMenuItem(value: 'completada', child: Text('Completadas')),
-                    DropdownMenuItem(value: 'cancelada', child: Text('Canceladas')),
-                  ],
-                  onChanged: (v) => setState(() => _filtro = v ?? ''),
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(50, 48), padding: EdgeInsets.zero),
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (_) => _NuevaCitaAdminDialog(
-                      onSuccess: () => setState(() {})),
-                ),
-                child: const Icon(Icons.add),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _lista.isEmpty
-              ? const Center(child: Text('Sin citas', style: TextStyle(color: C.textMuted)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _lista.length,
-                  itemBuilder: (_, i) {
-                    final c = _lista[i];
-                    return _GoldCard(
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(c.clienteNombre,
-                                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    Text(c.servicioNombre,
-                                        style: const TextStyle(color: C.textMuted, fontSize: 13)),
-                                    Text('${DB.formatFecha(c.fecha)} · ${c.hora}',
-                                        style: const TextStyle(color: C.gold, fontSize: 12)),
-                                  ],
-                                ),
-                              ),
-                              _EstadoBadge(c.estado),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('S/ ${c.precio.toInt()}',
-                                  style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold)),
-                              Wrap(
-                                spacing: 6,
-                                children: [
-                                  if (c.estado == 'pendiente')
-                                    _accionBtn('Confirmar', C.gold, () async {
-                                      await DB.cambiarEstadoCita(c.id, 'confirmada');
-                                      setState(() {});
-                                    }),
-                                  if (c.estado == 'confirmada')
-                                    _accionBtn('Completar', C.success, () async {
-                                      await DB.completarCita(c.id);
-                                      setState(() {});
-                                      if (mounted) _snack(context, 'Completada · Puntos sumados');
-                                    }),
-                                  if (c.estado == 'pendiente')
-                                    _accionBtn('Completar', C.success, () async {
-                                      await DB.completarCita(c.id);
-                                      setState(() {});
-                                      if (mounted) _snack(context, 'Completada · Puntos sumados');
-                                    }),
-                                  if (c.estado != 'cancelada' && c.estado != 'completada')
-                                    _accionBtn('Cancelar', C.danger, () async {
-                                      await DB.cambiarEstadoCita(c.id, 'cancelada');
-                                      setState(() {});
-                                    }),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _accionBtn(String label, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color),
-        ),
-        child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-      ),
-    );
-  }
-}
-
-// ── ADMIN: CLIENTES ───────────────────────────────
-class _AdminClientesTab extends StatefulWidget {
-  final VoidCallback onRefresh;
-  const _AdminClientesTab({required this.onRefresh});
-
-  @override
-  State<_AdminClientesTab> createState() => _AdminClientesTabState();
-}
-
-class _AdminClientesTabState extends State<_AdminClientesTab> {
-  String _q = '';
-
-  List<Usuario> get _lista {
-    final todos = DB.usuarios().where((u) => u.rol == 'cliente').toList();
-    if (_q.isEmpty) return todos;
-    return todos.where((u) =>
-        u.nombre.toLowerCase().contains(_q.toLowerCase()) ||
-        u.celular.contains(_q)).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  style: const TextStyle(color: C.textPrimary),
-                  decoration: const InputDecoration(
-                    hintText: 'Buscar por nombre o celular...',
-                    prefixIcon: Icon(Icons.search, color: C.textMuted),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                  onChanged: (v) => setState(() => _q = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(50, 48), padding: EdgeInsets.zero),
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (_) => _NuevoClienteDialog(onSuccess: () => setState(() {})),
-                ),
-                child: const Icon(Icons.person_add),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _lista.isEmpty
-              ? const Center(child: Text('Sin clientes', style: TextStyle(color: C.textMuted)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _lista.length,
-                  itemBuilder: (_, i) {
-                    final u = _lista[i];
-                    return _GoldCard(
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: C.gold,
-                            child: Text(u.iniciales,
-                                style: const TextStyle(color: C.black, fontWeight: FontWeight.bold)),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(u.nombre,
-                                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                                Text('+51 ${u.celular}',
-                                    style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                                if (u.email != null)
-                                  Text(u.email!,
-                                      style: const TextStyle(color: C.textDim, fontSize: 11)),
-                                const SizedBox(height: 4),
-                                Wrap(spacing: 6, children: [
-                                  _chipBadge(
-                                    u.membresia != 'Ninguna' ? '👑 ${u.membresia}' : 'Sin membresía',
-                                    u.esVIP ? C.gold : C.textMuted,
-                                  ),
-                                  _chipBadge('⭐ ${u.puntos} pts', C.info),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: C.danger),
-                            onPressed: () async {
-                              final ok = await showDialog<bool>(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  backgroundColor: C.dark2,
-                                  title: const Text('Eliminar cliente',
-                                      style: TextStyle(color: C.gold)),
-                                  content: const Text('¿Confirmas la eliminación?'),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false),
-                                        child: const Text('No')),
-                                    TextButton(onPressed: () => Navigator.pop(context, true),
-                                        child: const Text('Sí', style: TextStyle(color: C.danger))),
-                                  ],
-                                ),
-                              );
-                              if (ok == true) {
-                                await DB.eliminarUsuario(u.id);
-                                setState(() {});
-                                if (mounted) _snack(context, 'Cliente eliminado', error: true);
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _chipBadge(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(label, style: TextStyle(color: color, fontSize: 10)),
-    );
-  }
-}
-
-// ── ADMIN: SERVICIOS ──────────────────────────────
-class _AdminServiciosTab extends StatefulWidget {
-  final VoidCallback onRefresh;
-  const _AdminServiciosTab({required this.onRefresh});
-
-  @override
-  State<_AdminServiciosTab> createState() => _AdminServiciosTabState();
-}
-
-class _AdminServiciosTabState extends State<_AdminServiciosTab> {
-  @override
-  Widget build(BuildContext context) {
-    final lista = DB.servicios();
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('Nuevo Servicio'),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (_) => _NuevoServicioDialog(onSuccess: () => setState(() {})),
-            ),
-          ),
-        ),
-        Expanded(
-          child: lista.isEmpty
-              ? const Center(child: Text('Sin servicios', style: TextStyle(color: C.textMuted)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: lista.length,
-                  itemBuilder: (_, i) {
-                    final s = lista[i];
-                    return _GoldCard(
-                      child: Row(
-                        children: [
-                          Text(s.icono, style: const TextStyle(fontSize: 32)),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(s.nombre,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                Text(s.descripcion,
-                                    style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                                const SizedBox(height: 6),
-                                Wrap(spacing: 6, children: [
-                                  _badge('S/${s.precio.toInt()}', C.gold),
-                                  _badge('⏱ ${s.duracion}min', C.textMuted),
-                                  _badge('⭐ ${s.puntos}pts', C.info),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: C.danger),
-                            onPressed: () async {
-                              await DB.eliminarServicio(s.id);
-                              setState(() {});
-                              if (mounted) _snack(context, 'Servicio eliminado', error: true);
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _badge(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(label, style: TextStyle(color: color, fontSize: 11)),
-    );
-  }
-}
-
-// ── ADMIN: PROMOCIONES ────────────────────────────
-class _AdminPromocionesTab extends StatefulWidget {
-  final VoidCallback onRefresh;
-  const _AdminPromocionesTab({required this.onRefresh});
-
-  @override
-  State<_AdminPromocionesTab> createState() => _AdminPromocionesTabState();
-}
-
-class _AdminPromocionesTabState extends State<_AdminPromocionesTab> {
-  @override
-  Widget build(BuildContext context) {
-    final lista = DB.promociones();
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('Nueva Promoción'),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (_) => _NuevaPromoDialog(onSuccess: () => setState(() {})),
-            ),
-          ),
-        ),
-        Expanded(
-          child: lista.isEmpty
-              ? const Center(child: Text('Sin promociones', style: TextStyle(color: C.textMuted)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: lista.length,
-                  itemBuilder: (_, i) {
-                    final p = lista[i];
-                    return _GoldCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: C.gold.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text('${p.descuento}%',
-                                    style: const TextStyle(
-                                        color: C.gold, fontWeight: FontWeight.bold, fontSize: 20)),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(p.titulo,
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                    Text(p.descripcion,
-                                        style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, color: C.danger),
-                                onPressed: () async {
-                                  await DB.eliminarPromocion(p.id);
-                                  setState(() {});
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Icon(Icons.calendar_today, size: 12, color: C.textMuted),
-                              const SizedBox(width: 6),
-                              Text('Válido hasta: ${DB.formatFecha(p.hasta)}',
-                                  style: const TextStyle(color: C.textDim, fontSize: 12)),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: (p.activa ? C.success : C.textMuted).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(p.activa ? 'Activa' : 'Inactiva',
-                                    style: TextStyle(
-                                        color: p.activa ? C.success : C.textMuted, fontSize: 11)),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── ADMIN: REPORTES ───────────────────────────────
-class _AdminReportesTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final todasCitas = DB.citas();
-    final completadas = todasCitas.where((c) => c.estado == 'completada').toList();
-    final canceladas  = todasCitas.where((c) => c.estado == 'cancelada').length;
-    final ingresos = completadas.fold<double>(0, (s, c) => s + c.precio);
-
-    final Map<String, int> conteo = {};
-    for (final c in completadas) {
-      conteo[c.servicioNombre] = (conteo[c.servicioNombre] ?? 0) + 1;
-    }
-    final sorted = conteo.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    final maxVal = sorted.isEmpty ? 1 : sorted.first.value;
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('Reportes',
-            style: TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
+  Widget build(BuildContext context) => Dialog(
+    child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+      child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _dlgHead(widget.plan == null ? 'Nuevo Plan' : 'Editar Plan', context),
+        const SizedBox(height: 14),
+        _F(c: _nom, label: 'Nombre del plan', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
+              val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null)),
+          const SizedBox(width: 10),
+          Expanded(child: _drop<String>(val: _periodo, label: 'Período',
+            items: const [
+              DropdownMenuItem(value: 'mes', child: Text('Por mes')),
+              DropdownMenuItem(value: 'año', child: Text('Por año')),
+            ], onChange: (v) => setState(() => _periodo = v ?? 'mes'))),
+        ]),
+        const SizedBox(height: 10),
+        _F(c: _des, label: 'Descripción (opcional)', lines: 2),
+        const SizedBox(height: 10),
+        _F(c: _ord, label: 'Orden de visualización', kb: TextInputType.number),
+        const SizedBox(height: 14),
+        const Text('BENEFICIOS (uno por línea)', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 8),
+        ..._benCtrls.asMap().entries.map((e) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            Expanded(child: TextFormField(
+              controller: e.value, style: const TextStyle(color: C.txt),
+              decoration: InputDecoration(labelText: 'Beneficio ${e.key+1}',
+                  suffixIcon: _benCtrls.length > 1
+                      ? IconButton(icon: const Icon(Icons.remove_circle_outline, color: C.err, size: 18),
+                          onPressed: () => setState(() { _benCtrls[e.key].dispose(); _benCtrls.removeAt(e.key); }))
+                      : null))),
+          ]))),
+        TextButton.icon(
+          onPressed: () => setState(() => _benCtrls.add(TextEditingController())),
+          icon: const Icon(Icons.add, size: 16, color: C.gold),
+          label: const Text('Agregar beneficio', style: TextStyle(color: C.gold, fontSize: 13))),
         const SizedBox(height: 16),
-        Row(children: [
-          _StatCard(icon: '📊', value: todasCitas.length.toString(), label: 'Total citas'),
-          const SizedBox(width: 12),
-          _StatCard(icon: '💰', value: 'S/${ingresos.toInt()}', label: 'Ingresos totales'),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          _StatCard(icon: '✅', value: completadas.length.toString(), label: 'Completadas'),
-          const SizedBox(width: 12),
-          _StatCard(icon: '❌', value: canceladas.toString(), label: 'Canceladas'),
-        ]),
-        const SizedBox(height: 20),
-        _GoldCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+            : ElevatedButton(onPressed: _guardar,
+                child: Text(widget.plan == null ? 'Crear plan' : 'Guardar cambios')),
+      ]))));
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN REPORTES
+// ────────────────────────────────────────────────────────────
+class ReportesScreen extends StatefulWidget {
+  const ReportesScreen({super.key});
+  @override
+  State<ReportesScreen> createState() => _ReportesState();
+}
+
+class _ReportesState extends State<ReportesScreen> {
+  Map<String, dynamic> _r = {};
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final r = await SB.reportes();
+    if (mounted) setState(() { _r = r; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pops = (_r['populares'] as List<MapEntry<String, int>>?) ?? [];
+    final maxV = pops.isEmpty ? 1 : pops.first.value;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Reportes')),
+      body: RefreshIndicator(color: C.gold, onRefresh: _load,
+        child: _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+            : ListView(padding: const EdgeInsets.all(16), children: [
+          Row(children: [
+            _stat('📊', '${_r['total'] ?? 0}', 'Total citas'),
+            const SizedBox(width: 12),
+            _stat('💰', 'S/${(_r['ingTotal'] ?? 0.0).toInt()}', 'Ingresos totales'),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _stat('✅', '${_r['completadas'] ?? 0}', 'Completadas'),
+            const SizedBox(width: 12),
+            _stat('❌', '${_r['canceladas'] ?? 0}', 'Canceladas'),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _stat('👥', '${_r['clientes'] ?? 0}', 'Clientes'),
+            const SizedBox(width: 12),
+            _stat('👑', '${_r['vip'] ?? 0}', 'VIP activos'),
+          ]),
+          const SizedBox(height: 18),
+          Container(padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('SERVICIOS MÁS POPULARES',
-                  style: TextStyle(color: C.textMuted, fontSize: 12, letterSpacing: 1)),
-              const SizedBox(height: 16),
-              if (sorted.isEmpty)
-                const Center(child: Text('Sin datos aún', style: TextStyle(color: C.textMuted)))
-              else
-                ...sorted.map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(child: Text(e.key, style: const TextStyle(fontSize: 13))),
-                          Text('${e.value}',
-                              style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: LinearProgressIndicator(
-                          value: e.value / maxVal,
-                          minHeight: 6,
-                          backgroundColor: C.dark3,
-                          valueColor: const AlwaysStoppedAnimation<Color>(C.gold),
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════
-// DIALOGS DE ADMIN
-// ══════════════════════════════════════════════════
-
-// Registrar QR / Sumar puntos manualmente
-class _RegistrarQRDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _RegistrarQRDialog({required this.onSuccess});
-
-  @override
-  State<_RegistrarQRDialog> createState() => _RegistrarQRDialogState();
-}
-
-class _RegistrarQRDialogState extends State<_RegistrarQRDialog> {
-  final _celCtrl = TextEditingController();
-  Usuario? _clienteEncontrado;
-  Servicio? _svcSel;
-
-  @override
-  void dispose() {
-    _celCtrl.dispose();
-    super.dispose();
-  }
-
-  void _buscar() {
-    final cel = _celCtrl.text.trim();
-    final found = DB.usuarios()
-        .where((u) => u.celular == cel && u.rol == 'cliente')
-        .firstOrNull;
-    setState(() => _clienteEncontrado = found);
-  }
-
-  Future<void> _registrar() async {
-    if (_clienteEncontrado == null) {
-      _snack(context, 'Cliente no encontrado', error: true); return;
-    }
-    if (_svcSel == null) {
-      _snack(context, 'Selecciona un servicio', error: true); return;
-    }
-    await DB.agregarPuntos(
-        _clienteEncontrado!.id, _svcSel!.puntos, _svcSel!.nombre);
-    if (!mounted) return;
-    Navigator.pop(context);
-    widget.onSuccess();
-    _snack(context, '+${_svcSel!.puntos} pts sumados a ${_clienteEncontrado!.nombre} ⭐');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final servicios = DB.servicios(soloActivos: true);
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.border)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Registrar Servicio por QR',
-                    style: TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
-                IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: C.textMuted)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _celCtrl,
-                    keyboardType: TextInputType.phone,
-                    maxLength: 9,
-                    style: const TextStyle(color: C.textPrimary),
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      labelText: 'Celular del cliente',
-                      counterText: '',
-                      prefixIcon: Icon(Icons.phone_android, color: C.textMuted),
-                    ),
-                    onChanged: (_) => _buscar(),
-                  ),
-                ),
-              ],
-            ),
-            if (_clienteEncontrado != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: C.success.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: C.success.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: C.gold, radius: 20,
-                      child: Text(_clienteEncontrado!.iniciales,
-                          style: const TextStyle(color: C.black, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_clienteEncontrado!.nombre,
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('⭐ ${_clienteEncontrado!.puntos} pts · ${_clienteEncontrado!.membresia}',
-                            style: const TextStyle(color: C.textMuted, fontSize: 12)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+                  style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
               const SizedBox(height: 14),
-              const Text('SERVICIO REALIZADO',
-                  style: TextStyle(color: C.textMuted, fontSize: 11, letterSpacing: 1)),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<Servicio>(
-                value: _svcSel,
-                dropdownColor: C.dark3,
-                style: const TextStyle(color: C.textPrimary),
-                hint: const Text('Selecciona un servicio',
-                    style: TextStyle(color: C.textMuted)),
-                decoration: const InputDecoration(
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                items: servicios.map((s) => DropdownMenuItem(
-                  value: s,
-                  child: Text('${s.icono} ${s.nombre} · +${s.puntos}pts'),
-                )).toList(),
-                onChanged: (v) => setState(() => _svcSel = v),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _registrar,
-                child: const Text('✅ Registrar y sumar puntos'),
-              ),
-            ] else if (_celCtrl.text.length == 9) ...[
-              const SizedBox(height: 12),
-              const Text('Cliente no encontrado',
-                  style: TextStyle(color: C.danger, fontSize: 13)),
-            ],
-          ],
-        ),
-      ),
+              if (pops.isEmpty) const Center(child: Text('Sin datos aún', style: TextStyle(color: C.muted)))
+              else ...pops.map((e) => Padding(padding: const EdgeInsets.only(bottom: 14),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text(e.key, style: const TextStyle(fontSize: 13)),
+                      Text('${e.value}', style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold)),
+                    ]),
+                    const SizedBox(height: 5),
+                    ClipRRect(borderRadius: BorderRadius.circular(20),
+                        child: LinearProgressIndicator(value: e.value / maxV,
+                            backgroundColor: C.d3, color: C.gold, minHeight: 7)),
+                  ]))),
+            ])),
+        ])),
     );
   }
 }
 
-// Nueva cita (admin)
-class _NuevaCitaAdminDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _NuevaCitaAdminDialog({required this.onSuccess});
-
+// ────────────────────────────────────────────────────────────
+// ADMIN PROMOCIONES
+// ────────────────────────────────────────────────────────────
+class AdmPromoScreen extends StatefulWidget {
+  const AdmPromoScreen({super.key});
   @override
-  State<_NuevaCitaAdminDialog> createState() => _NuevaCitaAdminDialogState();
+  State<AdmPromoScreen> createState() => _AdmPromoState();
 }
 
-class _NuevaCitaAdminDialogState extends State<_NuevaCitaAdminDialog> {
-  final _horas = ['09:00','09:30','10:00','10:30','11:00','11:30',
-      '12:00','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00'];
-
-  Usuario? _cliSel;
-  Servicio? _svcSel;
-  DateTime _fecha = DateTime.now();
-  String _hora = '09:00';
-  String _estado = 'pendiente';
+class _AdmPromoState extends State<AdmPromoScreen> {
+  List<Map<String, dynamic>> _promos = [];
 
   @override
-  Widget build(BuildContext context) {
-    final clientes = DB.usuarios().where((u) => u.rol == 'cliente').toList();
-    final servicios = DB.servicios(soloActivos: true);
+  void initState() { super.initState(); _load(); }
 
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.border)),
-      insetPadding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Nueva Cita',
-                    style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
-                IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: C.textMuted)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<Usuario>(
-              value: _cliSel,
-              dropdownColor: C.dark3,
-              style: const TextStyle(color: C.textPrimary),
-              hint: const Text('Selecciona cliente', style: TextStyle(color: C.textMuted)),
-              decoration: const InputDecoration(labelText: 'Cliente'),
-              items: clientes.map((c) => DropdownMenuItem(
-                value: c, child: Text(c.nombre),
-              )).toList(),
-              onChanged: (v) => setState(() => _cliSel = v),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<Servicio>(
-              value: _svcSel,
-              dropdownColor: C.dark3,
-              style: const TextStyle(color: C.textPrimary),
-              hint: const Text('Selecciona servicio', style: TextStyle(color: C.textMuted)),
-              decoration: const InputDecoration(labelText: 'Servicio'),
-              items: servicios.map((s) => DropdownMenuItem(
-                value: s, child: Text('${s.nombre} · S/${s.precio.toInt()}'),
-              )).toList(),
-              onChanged: (v) => setState(() => _svcSel = v),
-            ),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () async {
-                final d = await showDatePicker(
-                  context: context,
-                  initialDate: _fecha,
-                  firstDate: DateTime.now(),
-                  lastDate: DateTime.now().add(const Duration(days: 60)),
-                  builder: (ctx, child) => Theme(
-                    data: ThemeData.dark().copyWith(
-                        colorScheme: const ColorScheme.dark(primary: C.gold)),
-                    child: child!,
-                  ),
-                );
-                if (d != null) setState(() => _fecha = d);
-              },
-              child: InputDecorator(
-                decoration: const InputDecoration(labelText: 'Fecha'),
-                child: Text(DB.formatFecha(_fecha.toIso8601String().split('T')[0]),
-                    style: const TextStyle(color: C.textPrimary)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _hora,
-              dropdownColor: C.dark3,
-              style: const TextStyle(color: C.textPrimary),
-              decoration: const InputDecoration(labelText: 'Hora'),
-              items: _horas.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
-              onChanged: (v) => setState(() => _hora = v!),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _estado,
-              dropdownColor: C.dark3,
-              style: const TextStyle(color: C.textPrimary),
-              decoration: const InputDecoration(labelText: 'Estado'),
-              items: const [
-                DropdownMenuItem(value: 'pendiente', child: Text('Pendiente')),
-                DropdownMenuItem(value: 'confirmada', child: Text('Confirmada')),
-              ],
-              onChanged: (v) => setState(() => _estado = v!),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                if (_cliSel == null || _svcSel == null) {
-                  _snack(context, 'Completa todos los campos', error: true); return;
-                }
-                final cita = Cita(
-                  id: DB.genId('CIT'),
-                  clienteId: _cliSel!.id,
-                  clienteNombre: _cliSel!.nombre,
-                  clienteCelular: _cliSel!.celular,
-                  servicioId: _svcSel!.id,
-                  servicioNombre: _svcSel!.nombre,
-                  fecha: _fecha.toIso8601String().split('T')[0],
-                  hora: _hora,
-                  estado: _estado,
-                  precio: _svcSel!.precio,
-                );
-                await DB.agregarCita(cita);
-                if (!mounted) return;
-                Navigator.pop(context);
-                widget.onSuccess();
-                _snack(context, 'Cita creada ✓');
-              },
-              child: const Text('✅ Crear cita'),
-            ),
-          ],
-        ),
-      ),
-    );
+  Future<void> _load() async {
+    final p = await SB.getPromociones(); if (mounted) setState(() => _promos = p);
   }
-}
 
-// Nuevo cliente (admin)
-class _NuevoClienteDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _NuevoClienteDialog({required this.onSuccess});
-
-  @override
-  State<_NuevoClienteDialog> createState() => _NuevoClienteDialogState();
-}
-
-class _NuevoClienteDialogState extends State<_NuevoClienteDialog> {
-  final _formKey   = GlobalKey<FormState>();
-  final _nomCtrl   = TextEditingController();
-  final _celCtrl   = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
-  String _membresia = 'Ninguna';
-
-  @override
-  void dispose() {
-    _nomCtrl.dispose(); _celCtrl.dispose();
-    _emailCtrl.dispose(); _passCtrl.dispose();
-    super.dispose();
+  Future<void> _eliminar(String id) async {
+    if (!await _confirm(context, 'Eliminar promoción', '¿Confirmar?')) return;
+    await SB.deletePromocion(id); _load();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.border)),
-      insetPadding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Nuevo Cliente',
-                      style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
-                  IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close, color: C.textMuted)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nomCtrl,
-                style: const TextStyle(color: C.textPrimary),
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Nombre completo'),
-                validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _celCtrl,
-                keyboardType: TextInputType.phone,
-                maxLength: 9,
-                style: const TextStyle(color: C.textPrimary),
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Celular', counterText: ''),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Requerido';
-                  if (v.length != 9) return '9 dígitos';
-                  if (!v.startsWith('9')) return 'Empieza con 9';
-                  if (DB.celularExiste(v)) return 'Ya registrado';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Email (opcional)'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _passCtrl,
-                obscureText: true,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Clave de acceso'),
-                validator: (v) => (v == null || v.length < 4) ? 'Mínimo 4 caracteres' : null,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _membresia,
-                dropdownColor: C.dark3,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Membresía inicial'),
-                items: ['Ninguna','Básico','Premium','VIP Anual'].map((m) =>
-                    DropdownMenuItem(value: m, child: Text(m))).toList(),
-                onChanged: (v) => setState(() => _membresia = v!),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!_formKey.currentState!.validate()) return;
-                  final u = await DB.registrar(
-                    nombre: _nomCtrl.text.trim(),
-                    celular: _celCtrl.text.trim(),
-                    password: _passCtrl.text.trim(),
-                    email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
-                  );
-                  u.membresia = _membresia;
-                  await DB.actualizarUsuario(u);
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  widget.onSuccess();
-                  _snack(context, 'Cliente registrado ✓');
-                },
-                child: const Text('✅ Registrar cliente'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Promociones')),
+    floatingActionButton: FloatingActionButton(
+      backgroundColor: C.gold, foregroundColor: C.black,
+      onPressed: () => showDialog(context: context,
+          builder: (_) => NuevaPromoDialog(onOk: _load)),
+      child: const Icon(Icons.add)),
+    body: RefreshIndicator(color: C.gold, onRefresh: _load,
+      child: _promos.isEmpty
+          ? const Center(child: Text('Sin promociones', style: TextStyle(color: C.muted)))
+          : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _promos.length,
+              itemBuilder: (_, i) {
+                final p = _promos[i];
+                return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Expanded(child: Text(p['titulo'].toString(),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+                      _badge('${p['descuento']}% OFF', C.gold),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(p['descripcion']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('Hasta: ${_fmtFecha(p['valida_hasta']?.toString() ?? '')}',
+                          style: const TextStyle(color: C.muted, fontSize: 11)),
+                      IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 20),
+                          onPressed: () => _eliminar(p['id'].toString())),
+                    ]),
+                  ]));
+              })),
+  );
 }
 
-// Nuevo servicio
-class _NuevoServicioDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _NuevoServicioDialog({required this.onSuccess});
+// ────────────────────────────────────────────────────────────
+// DIALOGS CRUD: NUEVO CLIENTE, NUEVO SERVICIO, EDITAR SERVICIO,
+//               NUEVA PROMOCIÓN
+// ────────────────────────────────────────────────────────────
 
+class NuevoClienteDialog extends StatefulWidget {
+  final VoidCallback onOk;
+  const NuevoClienteDialog({super.key, required this.onOk});
   @override
-  State<_NuevoServicioDialog> createState() => _NuevoServicioDialogState();
+  State<NuevoClienteDialog> createState() => _NuevoClienteState();
 }
 
-class _NuevoServicioDialogState extends State<_NuevoServicioDialog> {
-  final _formKey    = GlobalKey<FormState>();
-  final _nomCtrl    = TextEditingController();
-  final _descCtrl   = TextEditingController();
-  final _precioCtrl = TextEditingController();
-  final _durCtrl    = TextEditingController();
-  final _ptsCtrl    = TextEditingController();
-  final _icoCtrl    = TextEditingController(text: '✂️');
+class _NuevoClienteState extends State<NuevoClienteDialog> {
+  final _fk = GlobalKey<FormState>();
+  final _nom = TextEditingController();
+  final _cel = TextEditingController();
+  final _eml = TextEditingController();
+  final _pas = TextEditingController();
+  bool _loading = false;
 
   @override
-  void dispose() {
-    _nomCtrl.dispose(); _descCtrl.dispose(); _precioCtrl.dispose();
-    _durCtrl.dispose(); _ptsCtrl.dispose(); _icoCtrl.dispose();
-    super.dispose();
+  void dispose() { for (final c in [_nom,_cel,_eml,_pas]) c.dispose(); super.dispose(); }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    setState(() => _loading = true);
+    if (await SB.celularExiste(_cel.text.trim())) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _snack(context, 'Celular ya registrado', err: true); return;
+    }
+    await SB.registrar(nombre: _nom.text.trim(), celular: _cel.text.trim(),
+        pass: _pas.text, email: _eml.text.trim());
+    if (!mounted) return;
+    Navigator.pop(context); widget.onOk();
+    _snack(context, 'Cliente registrado ✓');
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.border)),
-      insetPadding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Nuevo Servicio',
-                      style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
-                  IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close, color: C.textMuted)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _field(_nomCtrl, 'Nombre del servicio'),
-              _field(_descCtrl, 'Descripción'),
-              _field(_precioCtrl, 'Precio (S/)', isNum: true),
-              _field(_durCtrl, 'Duración (minutos)', isNum: true),
-              _field(_ptsCtrl, 'Puntos que otorga', isNum: true),
-              _field(_icoCtrl, 'Ícono (emoji)'),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!_formKey.currentState!.validate()) return;
-                  final s = Servicio(
-                    id: DB.genId('SVC'),
-                    nombre: _nomCtrl.text.trim(),
-                    descripcion: _descCtrl.text.trim(),
-                    precio: double.tryParse(_precioCtrl.text) ?? 0,
-                    duracion: int.tryParse(_durCtrl.text) ?? 30,
-                    puntos: int.tryParse(_ptsCtrl.text) ?? 5,
-                    icono: _icoCtrl.text.trim().isEmpty ? '✂️' : _icoCtrl.text.trim(),
-                  );
-                  await DB.agregarServicio(s);
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  widget.onSuccess();
-                  _snack(context, 'Servicio creado ✓');
-                },
-                child: const Text('✅ Guardar servicio'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _field(TextEditingController ctrl, String label, {bool isNum = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: ctrl,
-        keyboardType: isNum ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(color: C.textPrimary),
-        decoration: InputDecoration(labelText: label),
-        validator: (v) => (v == null || v.trim().isEmpty) ? 'Campo requerido' : null,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+    child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _dlgHead('Nuevo Cliente', context), const SizedBox(height: 14),
+      _F(c: _nom, label: 'Nombre completo', val: (v) => (v == null || v.trim().length < 3) ? 'Requerido' : null),
+      const SizedBox(height: 10),
+      _F(c: _cel, label: 'Celular', hint: '987654321', kb: TextInputType.phone,
+          fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)],
+          val: (v) {
+            if (v == null || v.isEmpty) return 'Requerido';
+            if (v.length != 9) return '9 dígitos';
+            if (!v.startsWith('9')) return 'Empieza con 9';
+            return null;
+          }),
+      const SizedBox(height: 10),
+      _F(c: _eml, label: 'Email (opcional)', kb: TextInputType.emailAddress),
+      const SizedBox(height: 10),
+      _F(c: _pas, label: 'Contraseña inicial', obs: true,
+          val: (v) => (v == null || v.length < 6) ? 'Mín. 6 caracteres' : null),
+      const SizedBox(height: 18),
+      _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
+          : ElevatedButton(onPressed: _guardar, child: const Text('Registrar cliente')),
+    ]))));
 }
 
-// Nueva promoción
-class _NuevaPromoDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _NuevaPromoDialog({required this.onSuccess});
-
+class NuevoServicioDialog extends StatefulWidget {
+  final VoidCallback onOk;
+  const NuevoServicioDialog({super.key, required this.onOk});
   @override
-  State<_NuevaPromoDialog> createState() => _NuevaPromoDialogState();
+  State<NuevoServicioDialog> createState() => _NuevoSvcState();
 }
 
-class _NuevaPromoDialogState extends State<_NuevaPromoDialog> {
-  final _formKey   = GlobalKey<FormState>();
-  final _titCtrl   = TextEditingController();
-  final _descCtrl  = TextEditingController();
-  final _descPCtrl = TextEditingController();
-  DateTime _hasta  = DateTime.now().add(const Duration(days: 30));
+class _NuevoSvcState extends State<NuevoServicioDialog> {
+  final _fk = GlobalKey<FormState>();
+  final _nom = TextEditingController();
+  final _des = TextEditingController();
+  final _pre = TextEditingController();
+  final _dur = TextEditingController();
+  final _pts = TextEditingController();
+  final _ico = TextEditingController(text: '✂️');
 
   @override
-  void dispose() {
-    _titCtrl.dispose(); _descCtrl.dispose(); _descPCtrl.dispose();
-    super.dispose();
+  void dispose() { for (final c in [_nom,_des,_pre,_dur,_pts,_ico]) c.dispose(); super.dispose(); }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    await SB.addServicio({
+      'nombre': _nom.text.trim(), 'descripcion': _des.text.trim(),
+      'precio': double.tryParse(_pre.text) ?? 0,
+      'duracion_min': int.tryParse(_dur.text) ?? 30,
+      'puntos_otorga': int.tryParse(_pts.text) ?? 5,
+      'icono': _ico.text.isNotEmpty ? _ico.text : '✂️', 'activo': true,
+    });
+    if (!mounted) return;
+    Navigator.pop(context); widget.onOk();
+    _snack(context, 'Servicio creado ✓');
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: C.dark2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.border)),
-      insetPadding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Nueva Promoción',
-                      style: TextStyle(color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
-                  IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close, color: C.textMuted)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _titCtrl,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Título'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descCtrl,
-                style: const TextStyle(color: C.textPrimary),
-                maxLines: 2,
-                decoration: const InputDecoration(labelText: 'Descripción'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descPCtrl,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(color: C.textPrimary),
-                decoration: const InputDecoration(labelText: 'Descuento (%)'),
-                validator: (v) => (v == null || v.isEmpty) ? 'Requerido' : null,
-              ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () async {
-                  final d = await showDatePicker(
-                    context: context,
-                    initialDate: _hasta,
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                    builder: (ctx, child) => Theme(
-                      data: ThemeData.dark().copyWith(
-                          colorScheme: const ColorScheme.dark(primary: C.gold)),
-                      child: child!,
-                    ),
-                  );
-                  if (d != null) setState(() => _hasta = d);
-                },
-                child: InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Válida hasta'),
-                  child: Text(DB.formatFecha(_hasta.toIso8601String().split('T')[0]),
-                      style: const TextStyle(color: C.textPrimary)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!_formKey.currentState!.validate()) return;
-                  final p = Promocion(
-                    id: DB.genId('PRO'),
-                    titulo: _titCtrl.text.trim(),
-                    descripcion: _descCtrl.text.trim(),
-                    descuento: int.tryParse(_descPCtrl.text) ?? 0,
-                    hasta: _hasta.toIso8601String().split('T')[0],
-                  );
-                  await DB.agregarPromocion(p);
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  widget.onSuccess();
-                  _snack(context, 'Promoción publicada ✓');
-                },
-                child: const Text('✅ Publicar promoción'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+    child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _dlgHead('Nuevo Servicio', context), const SizedBox(height: 14),
+      _F(c: _nom, label: 'Nombre', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+      const SizedBox(height: 10),
+      _F(c: _des, label: 'Descripción'),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
+            val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null)),
+        const SizedBox(width: 10),
+        Expanded(child: _F(c: _dur, label: 'Duración (min)', kb: TextInputType.number,
+            val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
+      ]),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _F(c: _pts, label: 'Puntos', kb: TextInputType.number,
+            val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
+        const SizedBox(width: 10),
+        Expanded(child: _F(c: _ico, label: 'Ícono emoji')),
+      ]),
+      const SizedBox(height: 18),
+      ElevatedButton(onPressed: _guardar, child: const Text('Guardar servicio')),
+    ]))));
 }
 
-// ══════════════════════════════════════════════════
-// EXTENSIÓN INTERNA (acceso controlado al DB)
-// ══════════════════════════════════════════════════
-extension _DBInternal on DB {
-  static Map<String, dynamic> _raw() => DB._raw();
-  static Future<void> _save(Map<String, dynamic> data) => DB._save(data);
-  static String _hash(String p) => DB._hash(p);
+class EditServicioDialog extends StatefulWidget {
+  final Map<String, dynamic> svc;
+  final VoidCallback onOk;
+  const EditServicioDialog({super.key, required this.svc, required this.onOk});
+  @override
+  State<EditServicioDialog> createState() => _EditSvcState();
+}
+
+class _EditSvcState extends State<EditServicioDialog> {
+  final _fk = GlobalKey<FormState>();
+  late final _nom = TextEditingController(text: widget.svc['nombre']?.toString() ?? '');
+  late final _des = TextEditingController(text: widget.svc['descripcion']?.toString() ?? '');
+  late final _pre = TextEditingController(text: (widget.svc['precio'] as num?)?.toInt().toString() ?? '');
+  late final _dur = TextEditingController(text: widget.svc['duracion_min']?.toString() ?? '30');
+  late final _pts = TextEditingController(text: widget.svc['puntos_otorga']?.toString() ?? '5');
+  late final _ico = TextEditingController(text: widget.svc['icono']?.toString() ?? '✂️');
+
+  @override
+  void dispose() { for (final c in [_nom,_des,_pre,_dur,_pts,_ico]) c.dispose(); super.dispose(); }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    await SB.updateServicio(widget.svc['id'].toString(), {
+      'nombre': _nom.text.trim(), 'descripcion': _des.text.trim(),
+      'precio': double.tryParse(_pre.text) ?? 0,
+      'duracion_min': int.tryParse(_dur.text) ?? 30,
+      'puntos_otorga': int.tryParse(_pts.text) ?? 5,
+      'icono': _ico.text.isNotEmpty ? _ico.text : '✂️',
+    });
+    if (!mounted) return;
+    Navigator.pop(context); widget.onOk();
+    _snack(context, 'Servicio actualizado ✓');
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+    child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _dlgHead('Editar Servicio', context), const SizedBox(height: 14),
+      _F(c: _nom, label: 'Nombre', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+      const SizedBox(height: 10),
+      _F(c: _des, label: 'Descripción'),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
+            val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null)),
+        const SizedBox(width: 10),
+        Expanded(child: _F(c: _dur, label: 'Duración (min)', kb: TextInputType.number,
+            val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
+      ]),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _F(c: _pts, label: 'Puntos', kb: TextInputType.number,
+            val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
+        const SizedBox(width: 10),
+        Expanded(child: _F(c: _ico, label: 'Ícono emoji')),
+      ]),
+      const SizedBox(height: 18),
+      ElevatedButton(onPressed: _guardar, child: const Text('Guardar cambios')),
+    ]))));
+}
+
+class NuevaPromoDialog extends StatefulWidget {
+  final VoidCallback onOk;
+  const NuevaPromoDialog({super.key, required this.onOk});
+  @override
+  State<NuevaPromoDialog> createState() => _NuevaPromoState();
+}
+
+class _NuevaPromoState extends State<NuevaPromoDialog> {
+  final _fk = GlobalKey<FormState>();
+  final _tit = TextEditingController();
+  final _des = TextEditingController();
+  final _pct = TextEditingController();
+  DateTime _hasta = DateTime.now().add(const Duration(days: 30));
+
+  @override
+  void dispose() { _tit.dispose(); _des.dispose(); _pct.dispose(); super.dispose(); }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    await SB.addPromocion({
+      'titulo': _tit.text.trim(), 'descripcion': _des.text.trim(),
+      'descuento': int.tryParse(_pct.text) ?? 0,
+      'valida_hasta': DateFormat('yyyy-MM-dd').format(_hasta), 'activa': true,
+    });
+    if (!mounted) return;
+    Navigator.pop(context); widget.onOk();
+    _snack(context, 'Promoción publicada ✓');
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
+    child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _dlgHead('Nueva Promoción', context), const SizedBox(height: 14),
+      _F(c: _tit, label: 'Título', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+      const SizedBox(height: 10),
+      _F(c: _des, label: 'Descripción', lines: 2),
+      const SizedBox(height: 10),
+      _F(c: _pct, label: 'Descuento (%)', kb: TextInputType.number,
+          val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null),
+      const SizedBox(height: 10),
+      ListTile(contentPadding: EdgeInsets.zero,
+        title: Text('Válida hasta: ${DateFormat('dd/MM/yyyy').format(_hasta)}',
+            style: const TextStyle(color: C.txt, fontSize: 14)),
+        trailing: const Icon(Icons.calendar_today, color: C.gold, size: 18),
+        onTap: () async {
+          final d = await showDatePicker(context: context, initialDate: _hasta,
+            firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)),
+            builder: (_, ch) => Theme(data: ThemeData.dark().copyWith(
+                colorScheme: const ColorScheme.dark(primary: C.gold)), child: ch!));
+          if (d != null) setState(() => _hasta = d);
+        }),
+      const SizedBox(height: 18),
+      ElevatedButton(onPressed: _guardar, child: const Text('Publicar promoción')),
+    ]))));
 }

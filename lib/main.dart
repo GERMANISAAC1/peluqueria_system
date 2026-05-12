@@ -22,18 +22,17 @@ const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
 // ────────────────────────────────────────────────────────────
 // ENTRY POINT
 // ──────────────────────────────────────────────────────────
-void main() asíncrono {
+  void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnon);
   runApp( const BarberProApp());
 }
-
-SupabaseClient obtiene _sb => Supabase.instance.client;
+SupabaseClient get _sb => Supabase.instance.client;
 
 // ──────────────────────────────────────────────────────────
 // COLORES
 // ──────────────────────────────────────────────────────────
-clase C {
+class C {
   static const gold   = Color(0xFFC9A84C);
   static const goldBg = Color(0x18C9A84C);
   static const black  = Color(0xFF0A0A0A);

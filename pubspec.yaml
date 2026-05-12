@@ -13,13 +13,15 @@ dependencies:
   # ── Base de datos y backend ──
   supabase_flutter: ^2.3.4
 
+  # ── Hash de contraseñas ──
+  crypto: ^3.0.3
+
   # ── Códigos QR ──
   qr_flutter: ^4.1.0          # Generar QR
   mobile_scanner: ^5.1.0      # Escanear QR real con cámara
 
   # ── Utilidades ──
   intl: ^0.19.0               # Formateo de fechas
-  uuid: ^4.4.0                # Generación de IDs únicos
 
 dev_dependencies:
   flutter_test:

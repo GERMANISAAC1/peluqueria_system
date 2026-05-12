@@ -16,24 +16,24 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
-const _supabaseUrl  = 'https://pvzlovbzezxouwhnaekh.supabase.co';
-const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq';
+const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
+const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
 
-// ────────────────────────────────────────────────────────────
-// ENTRY POINT
-// ────────────────────────────────────────────────────────────
-void main() async {
+// ──────────────────────────────────────────────────────────
+// PUNTO DE ENTRADA
+// ──────────────────────────────────────────────────────────
+void main() asíncrono {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnon);
-  runApp(const BarberProApp());
+  runApp( const BarberProApp());
 }
 
-SupabaseClient get _sb => Supabase.instance.client;
+SupabaseClient obtiene _sb => Supabase.instance.client;
 
-// ────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────
 // COLORES
-// ────────────────────────────────────────────────────────────
-class C {
+// ──────────────────────────────────────────────────────────
+clase C {
   static const gold   = Color(0xFFC9A84C);
   static const goldBg = Color(0x18C9A84C);
   static const black  = Color(0xFF0A0A0A);
@@ -106,8 +106,8 @@ class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
   @override
   Widget build(BuildContext context) =>
-      MaterialApp(title: 'BarberPro', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
-}
+      MaterialApp(title: 'Kety Barber & Salon ', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
+
 
 // ────────────────────────────────────────────────────────────
 // HASH DE CONTRASEÑA (sin dependencias externas pesadas)

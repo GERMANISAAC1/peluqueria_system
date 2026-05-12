@@ -12,13 +12,12 @@ import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
 
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
-const _supabaseUrl  = 'https://pvzlovbzezxouwhnaekh.supabase.co';
-const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq';
+const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
+const _supabaseAnon = 'TU_ANON_KEY';
 
 // ────────────────────────────────────────────────────────────
 // ENTRY POINT
@@ -30,7 +29,6 @@ void main() async {
 }
 
 SupabaseClient get _sb => Supabase.instance.client;
-const _uuid = Uuid();
 
 // ────────────────────────────────────────────────────────────
 // COLORES
@@ -86,7 +84,7 @@ ThemeData get kTheme => ThemeData(
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600), elevation: 0,
   )),
-  dialogTheme: DialogTheme(
+  dialogTheme: DialogThemeData(
     backgroundColor: C.d2,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.brd)),
     titleTextStyle: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold),
@@ -158,11 +156,19 @@ class SB {
       await _sb.from('usuarios').select().eq('celular', cel).maybeSingle();
 
   static Future<List<Map<String, dynamic>>> getClientes({String? q}) async {
-    var query = _sb.from('usuarios').select().eq('rol', 'cliente').order('nombre');
+    // En postgrest ^2.x los filtros deben ir ANTES de .order()
     if (q != null && q.isNotEmpty) {
-      query = query.or('nombre.ilike.%$q%,celular.ilike.%$q%');
+      return List<Map<String, dynamic>>.from(
+        await _sb.from('usuarios')
+            .select()
+            .eq('rol', 'cliente')
+            .or('nombre.ilike.%$q%,celular.ilike.%$q%')
+            .order('nombre'),
+      );
     }
-    return List<Map<String, dynamic>>.from(await query);
+    return List<Map<String, dynamic>>.from(
+      await _sb.from('usuarios').select().eq('rol', 'cliente').order('nombre'),
+    );
   }
 
   static Future<void> updateUsuario(String id, Map<String, dynamic> data) async =>
@@ -194,9 +200,13 @@ class SB {
 
   // ── SERVICIOS ──
   static Future<List<Map<String, dynamic>>> getServicios({bool soloActivos = false}) async {
-    var q = _sb.from('servicios').select().order('nombre');
-    if (soloActivos) q = q.eq('activo', true);
-    return List<Map<String, dynamic>>.from(await q);
+    // Filtro ANTES de .order() para compatibilidad con postgrest ^2.x
+    if (soloActivos) {
+      return List<Map<String, dynamic>>.from(
+          await _sb.from('servicios').select().eq('activo', true).order('nombre'));
+    }
+    return List<Map<String, dynamic>>.from(
+        await _sb.from('servicios').select().order('nombre'));
   }
 
   static Future<void> addServicio(Map<String, dynamic> s) async =>
@@ -223,15 +233,49 @@ class SB {
       await _sb.from('planes_membresia').update({'activo': false}).eq('id', id);
 
   // ── CITAS ──
+  // En postgrest ^2.x los filtros deben ir ANTES de .order()
   static Future<List<Map<String, dynamic>>> getCitas({
     String? clienteId, String? estado, String? fecha}) async {
-    var q = _sb.from('citas').select(
-      'id,cliente_id,cliente_nombre,servicio_id,servicio_nombre,fecha,hora,estado,precio,notas,creado_en'
-    ).order('fecha', ascending: false).order('hora', ascending: false);
-    if (clienteId != null) q = q.eq('cliente_id', clienteId);
-    if (estado    != null) q = q.eq('estado', estado);
-    if (fecha     != null) q = q.eq('fecha', fecha);
-    return List<Map<String, dynamic>>.from(await q);
+    const cols = 'id,cliente_id,cliente_nombre,servicio_id,servicio_nombre,fecha,hora,estado,precio,notas,creado_en';
+    const ord1 = false; // ascending: false
+    // Construir la query aplicando sólo los filtros necesarios antes del order
+    if (clienteId != null && estado != null && fecha != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('cliente_id', clienteId).eq('estado', estado).eq('fecha', fecha)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (clienteId != null && estado != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('cliente_id', clienteId).eq('estado', estado)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (clienteId != null && fecha != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('cliente_id', clienteId).eq('fecha', fecha)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (estado != null && fecha != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('estado', estado).eq('fecha', fecha)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (clienteId != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('cliente_id', clienteId)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (estado != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('estado', estado)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    if (fecha != null) {
+      return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+          .eq('fecha', fecha)
+          .order('fecha', ascending: ord1).order('hora', ascending: ord1));
+    }
+    return List<Map<String, dynamic>>.from(await _sb.from('citas').select(cols)
+        .order('fecha', ascending: ord1).order('hora', ascending: ord1));
   }
 
   static Future<List<Map<String, dynamic>>> getCitasHoy() async {
@@ -276,9 +320,13 @@ class SB {
 
   // ── PROMOCIONES ──
   static Future<List<Map<String, dynamic>>> getPromociones({bool soloActivas = false}) async {
-    var q = _sb.from('promociones').select().order('creado_en', ascending: false);
-    if (soloActivas) q = q.eq('activa', true);
-    return List<Map<String, dynamic>>.from(await q);
+    // Filtro ANTES de .order() para postgrest ^2.x
+    if (soloActivas) {
+      return List<Map<String, dynamic>>.from(await _sb.from('promociones')
+          .select().eq('activa', true).order('creado_en', ascending: false));
+    }
+    return List<Map<String, dynamic>>.from(await _sb.from('promociones')
+        .select().order('creado_en', ascending: false));
   }
 
   static Future<void> addPromocion(Map<String, dynamic> p) async =>
@@ -1678,9 +1726,19 @@ class QRScannerScreen extends StatefulWidget {
 }
 
 class _QRScannerState extends State<QRScannerScreen> {
-  final MobileScannerController _ctrl = MobileScannerController();
+  late final MobileScannerController _ctrl;
   bool _procesando = false;
   String? _resultado;
+  bool _torchOn = false; // estado linterna local
+
+  @override
+  void initState() {
+    super.initState();
+    // En mobile_scanner v5.x se puede pasar opciones al constructor
+    _ctrl = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+    );
+  }
 
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
@@ -1700,14 +1758,21 @@ class _QRScannerState extends State<QRScannerScreen> {
     backgroundColor: C.black,
     appBar: AppBar(title: const Text('Escanear QR'),
       actions: [
-        IconButton(icon: ValueListenableBuilder(
-          valueListenable: _ctrl.torchState,
-          builder: (_, state, __) => Icon(
-              state == TorchState.on ? Icons.flash_on : Icons.flash_off,
-              color: state == TorchState.on ? C.gold : C.muted),
-        ), onPressed: () => _ctrl.toggleTorch()),
-        IconButton(icon: const Icon(Icons.flip_camera_ios),
-            onPressed: () => _ctrl.switchCamera()),
+        // Linterna: en v5.x usamos estado local y llamamos toggleTorch()
+        IconButton(
+          icon: Icon(
+            _torchOn ? Icons.flash_on : Icons.flash_off,
+            color: _torchOn ? C.gold : C.muted,
+          ),
+          onPressed: () async {
+            await _ctrl.toggleTorch();
+            if (mounted) setState(() => _torchOn = !_torchOn);
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.flip_camera_ios),
+          onPressed: () => _ctrl.switchCamera(),
+        ),
       ]),
     body: Stack(children: [
       MobileScanner(controller: _ctrl, onDetect: _onDetect),

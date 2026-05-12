@@ -21,7 +21,9 @@ dependencies:
   mobile_scanner: ^5.1.0      # Escanear QR real con cámara
 
   # ── Utilidades ──
-  intl: ^0.19.0               # Formateo de fechas
+  intl: ^0.19.0     
+  image_picker: ^1.1.2
+  # Formateo de fechas
 
 dev_dependencies:
   flutter_test:

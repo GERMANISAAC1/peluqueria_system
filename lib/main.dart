@@ -106,7 +106,7 @@ class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
   @override
   Widget build(BuildContext context) =>
-      MaterialApp(title: 'BarberPro', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
+      MaterialApp(title: 'Kety Barber & Salon', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
 }
 // ────────────────────────────────────────────────────────────
 // HASH DE CONTRASEÑA (sin dependencias externas pesadas)

@@ -1,16 +1,20 @@
 // ================================================================
-// BARBERPRO — main.dart
+// KETY BARBER & SALON — main.dart
 // Flutter + Supabase (PostgreSQL)
-// Escáner QR real · Membresía editable · Accesos rápidos funcionales
+// Escáner QR real · Membresía editable · Canje de puntos · Logo personalizable
 // ================================================================
 
 import 'dart:convert';
+import 'dart:math' show min;
+import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ────────────────────────────────────────────────────────────
@@ -18,35 +22,77 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
 const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
-
 // ────────────────────────────────────────────────────────────
 // ENTRY POINT
-// ──────────────────────────────────────────────────────────
-  void main() async {
+// ────────────────────────────────────────────────────────────
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnon);
-  runApp( const BarberProApp());
+  runApp(const KetyBarberApp());
 }
+
 SupabaseClient get _sb => Supabase.instance.client;
 
-// ──────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
 // COLORES
-// ──────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// PALETA — Psicología del color para Kety Barber & Salon
+//
+//  • Negro #0D0D0D  — Elegancia, lujo, autoridad. Transmite
+//    sofisticación y exclusividad propias de un salón premium.
+//
+//  • Rosa blush #C8848C — Femineidad, calidez, ternura.
+//    Invita a la relajación y genera confianza en servicios
+//    de belleza. Activa la emoción positiva en clientas.
+//
+//  • Rosa oscuro #8B3A52 — Sofisticación, pasión controlada.
+//    Da identidad fuerte sin agresividad. Color primario de marca.
+//
+//  • Crema/marfil #F5EDD8 — Limpieza, pureza, calidad premium.
+//    Asociado con cuidado personal y bienestar.
+//
+//  • Dorado suave #C9A065 — Éxito, calidad, premium.
+//    Refuerza la percepción de valor y exclusividad.
+//
+//  • Menta #6ABFAD — Bienestar, frescura, confirmación positiva.
+//    Calma y transmite confianza en acciones de éxito.
+//
+//  • Coral #E8635A — Urgencia moderada, acción, error. Llama la
+//    atención sin generar ansiedad extrema.
+// ══════════════════════════════════════════════════════════
 class C {
-  static const gold   = Color(0xFFC9A84C);
-  static const goldBg = Color(0x18C9A84C);
-  static const black  = Color(0xFF0A0A0A);
-  static const d1     = Color(0xFF111111);
-  static const d2     = Color(0xFF1A1A1A);
-  static const d3     = Color(0xFF222222);
-  static const brd    = Color(0x33C9A84C);
-  static const brdS   = Color(0x80C9A84C);
-  static const txt    = Color(0xFFF5F0E8);
-  static const muted  = Color(0xFF888888);
-  static const dim    = Color(0xFF555555);
-  static const ok     = Color(0xFF4CAF82);
-  static const err    = Color(0xFFE05A5A);
-  static const info   = Color(0xFF5A9CE0);
+  // ── Primarios de marca ──
+  static const rose     = Color(0xFFC8848C);   // rosa blush — CTA principal, accent
+  static const roseDark = Color(0xFF8B3A52);   // rosa oscuro — botones primarios, header
+  static const roseBg   = Color(0x1AC8848C);   // rosa translúcido — fondos de tarjetas
+  static const cream    = Color(0xFFF5EDD8);   // crema — texto sobre oscuro, highlight
+  static const gold     = Color(0xFFC9A065);   // dorado — premium, estrellas, puntos
+  static const goldBg   = Color(0x18C9A065);   // dorado bg
+
+  // ── Fondos oscuros (elegancia) ──
+  static const black    = Color(0xFF0D0D0D);   // negro profundo
+  static const d1       = Color(0xFF151515);   // surface 1
+  static const d2       = Color(0xFF1E1218);   // surface 2 — tono ligeramente rosado
+  static const d3       = Color(0xFF261820);   // surface 3
+
+  // ── Bordes ──
+  static const brd      = Color(0x33C8848C);   // borde suave rosa
+  static const brdS     = Color(0x80C8848C);   // borde rosa fuerte
+
+  // ── Texto ──
+  static const txt      = Color(0xFFF5EDD8);   // crema — lectura cómoda
+  static const muted    = Color(0xFF9E8A8F);   // gris rosado
+  static const dim      = Color(0xFF5E4A50);   // oscuro
+
+  // ── Semánticos ──
+  static const ok       = Color(0xFF6ABFAD);   // menta — éxito, confirmación
+  static const err      = Color(0xFFE8635A);   // coral — error, cancelar
+  static const info     = Color(0xFF7BAED4);   // azul suave — información
+  static const warn     = Color(0xFFE4A85A);   // ámbar — advertencia
+
+  // Alias compatibilidad
+  static const primary  = roseDark;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -101,12 +147,13 @@ OutlineInputBorder _ob(Color c, {double w = 1}) =>
 // ────────────────────────────────────────────────────────────
 // APP
 // ────────────────────────────────────────────────────────────
-class BarberProApp extends StatelessWidget {
-  const BarberProApp({super.key});
+class KetyBarberApp extends StatelessWidget {
+  const KetyBarberApp({super.key});
   @override
   Widget build(BuildContext context) =>
       MaterialApp(title: 'Kety Barber & Salon', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
 }
+
 // ────────────────────────────────────────────────────────────
 // HASH DE CONTRASEÑA (sin dependencias externas pesadas)
 // ────────────────────────────────────────────────────────────
@@ -362,6 +409,86 @@ class SB {
       'clientes': usuarios.length, 'vip': vip, 'populares': pops,
     };
   }
+
+  // ── RECOMPENSAS ──
+  static Future<List<Map<String, dynamic>>> getRecompensas({bool soloActivas = false}) async {
+    if (soloActivas) {
+      return List<Map<String, dynamic>>.from(await _sb
+          .from('recompensas').select().eq('activa', true).order('costo_puntos'));
+    }
+    return List<Map<String, dynamic>>.from(
+        await _sb.from('recompensas').select().order('costo_puntos'));
+  }
+
+  static Future<void> addRecompensa(Map<String, dynamic> r) async =>
+      await _sb.from('recompensas').insert(r);
+
+  static Future<void> updateRecompensa(String id, Map<String, dynamic> r) async =>
+      await _sb.from('recompensas').update(r).eq('id', id);
+
+  static Future<void> deleteRecompensa(String id) async =>
+      await _sb.from('recompensas').delete().eq('id', id);
+
+  /// Canjea una recompensa: descuenta puntos y registra canje.
+  /// Retorna null si OK, o un String con el error.
+  static Future<String?> canjearRecompensa({
+    required String usuarioId,
+    required Map<String, dynamic> recompensa,
+  }) async {
+    final u = await getUsuario(usuarioId);
+    if (u == null) return 'Usuario no encontrado';
+    final ptsActuales = (u['puntos'] as int?) ?? 0;
+    final costo       = (recompensa['costo_puntos'] as int?) ?? 0;
+    if (ptsActuales < costo) return 'No tienes suficientes puntos (necesitas $costo, tienes $ptsActuales)';
+    await _sb.from('usuarios').update({'puntos': ptsActuales - costo}).eq('id', usuarioId);
+    await _sb.from('historial_puntos').insert({
+      'usuario_id': usuarioId,
+      'concepto'  : 'Canje: ${recompensa['nombre']}',
+      'puntos'    : -costo,
+    });
+    await _sb.from('canjes').insert({
+      'usuario_id'   : usuarioId,
+      'recompensa_id': recompensa['id'],
+      'nombre'       : recompensa['nombre'],
+      'costo_puntos' : costo,
+      'estado'       : 'pendiente',
+    });
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> getMisCanjes(String usuarioId) async =>
+      List<Map<String, dynamic>>.from(await _sb.from('canjes')
+          .select().eq('usuario_id', usuarioId).order('creado_en', ascending: false));
+
+  static Future<List<Map<String, dynamic>>> getTodosCanjes() async =>
+      List<Map<String, dynamic>>.from(await _sb
+          .from('canjes').select('*, usuarios(nombre, celular)')
+          .order('creado_en', ascending: false));
+
+  static Future<void> aprobarCanje(String id) async =>
+      await _sb.from('canjes').update({'estado': 'entregado'}).eq('id', id);
+
+  // ── APP CONFIG ──
+  static Future<Map<String, dynamic>?> getAppConfig() async =>
+      await _sb.from('app_config').select().eq('id', 'main').maybeSingle();
+
+  static Future<void> updateAppConfig(Map<String, dynamic> data) async {
+    final existing = await getAppConfig();
+    if (existing == null) {
+      await _sb.from('app_config').insert({'id': 'main', ...data});
+    } else {
+      await _sb.from('app_config').update(data).eq('id', 'main');
+    }
+  }
+
+  static Future<String> subirLogo(Uint8List bytes, String ext) async {
+    final path = 'logo/logo_kety.$ext';
+    await _sb.storage.from('app-assets').uploadBinary(
+      path, bytes,
+      fileOptions: FileOptions(contentType: 'image/$ext', upsert: true),
+    );
+    return _sb.storage.from('app-assets').getPublicUrl(path);
+  }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -515,10 +642,10 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
               border: Border.all(color: C.gold, width: 2), color: C.goldBg),
           child: const Center(child: Text('✂️', style: TextStyle(fontSize: 50)))),
         const SizedBox(height: 18),
-        const Text('BARBERPRO', style: TextStyle(
+        const Text('KETY BARBER & SALON', style: TextStyle(
             color: C.gold, fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: 5)),
         const SizedBox(height: 6),
-        const Text('Sistema de gestion profesional', style: TextStyle(color: C.muted, fontSize: 13)),
+        const Text('Barber & Salon Profesional', style: TextStyle(color: C.muted, fontSize: 13)),
         const SizedBox(height: 40),
         const SizedBox(width: 22, height: 22,
             child: CircularProgressIndicator(color: C.gold, strokeWidth: 2)),
@@ -575,7 +702,7 @@ class _LoginState extends State<LoginScreen> {
                 border: Border.all(color: C.gold, width: 2), color: C.goldBg),
             child: const Center(child: Text('✂️', style: TextStyle(fontSize: 44)))),
           const SizedBox(height: 16),
-          const Text('BarberPro', style: TextStyle(color: C.gold, fontSize: 36, fontWeight: FontWeight.bold)),
+          const Text('Kety Barber & Salon', style: TextStyle(color: C.gold, fontSize: 36, fontWeight: FontWeight.bold)),
           const Text('Ingresa a tu cuenta', style: TextStyle(color: C.muted, fontSize: 13)),
           const SizedBox(height: 36),
           _F(c: _cel, label: 'Número de celular', hint: '987654321',
@@ -746,7 +873,7 @@ class _ClienteMainState extends State<ClienteMain> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('✂️ BarberPro'),
+        title: const Text('✂️ Kety Barber & Salon'),
         actions: [Padding(
           padding: const EdgeInsets.only(right: 14),
           child: Center(child: Container(
@@ -1361,100 +1488,423 @@ class CliPuntosTab extends StatefulWidget {
 class _CliPuntosState extends State<CliPuntosTab> {
   Map<String, dynamic>? _u;
   List<Map<String, dynamic>> _hist = [];
+  List<Map<String, dynamic>> _recompensas = [];
+  List<Map<String, dynamic>> _misCanjes = [];
+  int _tabIdx = 0; // 0=puntos, 1=canjear, 2=mis canjes
 
   @override
   void initState() { super.initState(); _u = widget.u; _reload(); }
 
   Future<void> _reload() async {
-    final u = await SB.getUsuario(widget.u['id'].toString());
-    final h = await SB.getHistorial(widget.u['id'].toString());
-    if (mounted && u != null) setState(() { _u = u; _hist = h; });
+    final results = await Future.wait([
+      SB.getUsuario(widget.u['id'].toString()),
+      SB.getHistorial(widget.u['id'].toString()),
+      SB.getRecompensas(soloActivas: true),
+      SB.getMisCanjes(widget.u['id'].toString()),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _u         = (results[0] as Map<String, dynamic>?) ?? _u;
+      _hist      = (results[1] as List).cast<Map<String, dynamic>>();
+      _recompensas = (results[2] as List).cast<Map<String, dynamic>>();
+      _misCanjes = (results[3] as List).cast<Map<String, dynamic>>();
+    });
   }
 
-  int get _pts => (_u ?? widget.u)['puntos'] as int? ?? 0;
+  int    get _pts   => (_u ?? widget.u)['puntos'] as int? ?? 0;
   String get _nivel { if (_pts >= 500) return '🥇 Oro'; if (_pts >= 200) return '🥈 Plata'; return '🥉 Bronce'; }
-  double get _prog { if (_pts >= 500) return 1.0; if (_pts >= 200) return (_pts-200)/300.0; return _pts/200.0; }
-  int get _falt { if (_pts >= 500) return 0; if (_pts >= 200) return 500-_pts; return 200-_pts; }
-  double get _desc { if (_pts >= 500) return 20; if (_pts >= 200) return 10; return 5; }
+  double get _prog  { if (_pts >= 500) return 1.0; if (_pts >= 200) return (_pts-200)/300.0; return _pts/200.0; }
+  int    get _falt  { if (_pts >= 500) return 0; if (_pts >= 200) return 500-_pts; return 200-_pts; }
+  double get _desc  { if (_pts >= 500) return 20; if (_pts >= 200) return 10; return 5; }
+
+  Future<void> _canjear(Map<String, dynamic> recompensa) async {
+    final costo = (recompensa['costo_puntos'] as int?) ?? 0;
+    if (_pts < costo) {
+      _snack(context, 'Necesitas $costo pts, tienes $_pts', err: true); return;
+    }
+    // Confirmación visual
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirmar canje'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(recompensa['icono']?.toString() ?? '🎁',
+              style: const TextStyle(fontSize: 40)),
+          const SizedBox(height: 8),
+          Text(recompensa['nombre'].toString(),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 6),
+          Text('Se descontarán $costo puntos de tus $_pts puntos actuales.',
+              style: const TextStyle(color: C.muted, fontSize: 13),
+              textAlign: TextAlign.center),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+              child: Text('Canjear', style: TextStyle(
+                color: C.rose, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final err = await SB.canjearRecompensa(
+        usuarioId: (_u ?? widget.u)['id'].toString(),
+        recompensa: recompensa);
+
+    if (!mounted) return;
+    if (err != null) {
+      _snack(context, err, err: true); return;
+    }
+    await _reload();
+    widget.onReload();
+    if (!mounted) return;
+
+    // Animación de éxito
+    showDialog(context: context, builder: (_) => AlertDialog(
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.check_circle, color: C.ok, size: 64),
+        const SizedBox(height: 12),
+        const Text('¡Canje exitoso!',
+            style: TextStyle(color: C.ok, fontSize: 18, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center),
+        const SizedBox(height: 6),
+        Text('Recoge "${recompensa['nombre']}" en el salón con tu barbero.',
+            style: const TextStyle(color: C.muted, fontSize: 13),
+            textAlign: TextAlign.center),
+        const SizedBox(height: 4),
+        Text('Nuevos puntos: $_pts',
+            style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold)),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context),
+            child: const Text('Entendido')),
+      ],
+    ));
+  }
 
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
-    color: C.gold, onRefresh: () async { await _reload(); widget.onReload(); },
-    child: ListView(padding: const EdgeInsets.all(16), children: [
-      Container(padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF1A1200), Color(0xFF2A1F00)]),
-          borderRadius: BorderRadius.circular(16), border: Border.all(color: C.gold)),
-        child: Column(children: [
-          Container(width: 100, height: 100,
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.gold, width: 3)),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text('$_pts', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: C.gold)),
-              const Text('PUNTOS', style: TextStyle(color: C.muted, fontSize: 9, letterSpacing: 1)),
-            ])),
-          const SizedBox(height: 12),
-          _badge(_nivel, C.gold),
-          const SizedBox(height: 10),
-          if (_falt > 0) Text('$_falt puntos para siguiente nivel',
-              style: const TextStyle(color: C.muted, fontSize: 12)),
-          const SizedBox(height: 8),
-          ClipRRect(borderRadius: BorderRadius.circular(20),
-              child: LinearProgressIndicator(value: _prog.clamp(0.0, 1.0),
-                  backgroundColor: C.d3, color: C.gold, minHeight: 8)),
+  Widget build(BuildContext context) => Column(children: [
+    // ── Tab selector interno ──
+    Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: C.brd)),
+      child: Row(children: [
+        _tab('Mis puntos', 0, Icons.star_outline),
+        _tab('Canjear', 1, Icons.card_giftcard_outlined),
+        _tab('Mis canjes', 2, Icons.history_outlined),
+      ]),
+    ),
+    Expanded(child: RefreshIndicator(color: C.rose,
+      onRefresh: () async { await _reload(); widget.onReload(); },
+      child: IndexedStack(index: _tabIdx, children: [
+        _buildPuntos(),
+        _buildCanjear(),
+        _buildMisCanjes(),
+      ]),
+    )),
+  ]);
+
+  Widget _tab(String label, int idx, IconData icon) => Expanded(child: GestureDetector(
+    onTap: () => setState(() => _tabIdx = idx),
+    child: AnimatedContainer(duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: _tabIdx == idx ? C.roseDark : Colors.transparent,
+        borderRadius: BorderRadius.circular(8)),
+      child: Column(children: [
+        Icon(icon, size: 16,
+            color: _tabIdx == idx ? C.cream : C.muted),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(
+          color: _tabIdx == idx ? C.cream : C.muted,
+          fontSize: 11, fontWeight: _tabIdx == idx ? FontWeight.w700 : FontWeight.normal)),
+      ]),
+    ),
+  ));
+
+  // ── Sub-página: MIS PUNTOS ──
+  Widget _buildPuntos() => ListView(padding: const EdgeInsets.all(16), children: [
+    // Tarjeta hero de puntos
+    Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: C.roseDark, width: 1.5),
+        boxShadow: [BoxShadow(color: C.roseDark.withOpacity(.3), blurRadius: 20, offset: const Offset(0,6))]),
+      child: Column(children: [
+        // Círculo de puntos
+        Container(width: 110, height: 110,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: C.gold, width: 3),
+            color: C.d3),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Text('$_pts', style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: C.gold)),
+            const Text('PUNTOS', style: TextStyle(color: C.muted, fontSize: 9, letterSpacing: 2)),
+          ])),
+        const SizedBox(height: 14),
+        _badge(_nivel, C.gold),
+        const SizedBox(height: 12),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _miniStat('🎁', 'Canjear', '$_pts pts'),
+          Container(width: 1, height: 30, color: C.brd),
+          _miniStat('💸', 'Descuento', '${_desc.toInt()}% OFF'),
+          Container(width: 1, height: 30, color: C.brd),
+          _miniStat('🏆', 'Siguiente', _falt > 0 ? '+$_falt pts' : '¡Máximo!'),
+        ]),
+        const SizedBox(height: 14),
+        // Barra de progreso con gradiente
+        ClipRRect(borderRadius: BorderRadius.circular(20),
+          child: LinearProgressIndicator(
+            value: _prog.clamp(0.0, 1.0),
+            minHeight: 10,
+            backgroundColor: C.d3,
+            valueColor: const AlwaysStoppedAnimation<Color>(C.gold))),
+        const SizedBox(height: 6),
+        Text('${(_prog * 100).toInt()}% completado para ${_nivel.contains('Oro') ? '¡nivel máximo!' : 'siguiente nivel'}',
+            style: const TextStyle(color: C.muted, fontSize: 11)),
+      ])),
+    const SizedBox(height: 14),
+
+    // Descuento actual
+    Container(padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: C.goldBg, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: C.gold.withOpacity(.4))),
+      child: Row(children: [
+        const Text('💸', style: TextStyle(fontSize: 28)),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('TU DESCUENTO', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 2),
+          const Text('En todos los servicios del salón',
+              style: TextStyle(color: C.txt, fontSize: 13)),
         ])),
-      const SizedBox(height: 14),
-      Container(padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('DESCUENTO ACTUAL', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
-            SizedBox(height: 4),
-            Text('En todos los servicios', style: TextStyle(color: C.txt, fontSize: 13)),
-          ]),
-          Text('${_desc.toInt()}% OFF', style: const TextStyle(color: C.gold, fontSize: 22, fontWeight: FontWeight.bold)),
-        ])),
-      const SizedBox(height: 14),
-      Container(padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('BENEFICIOS POR NIVEL', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
-          const SizedBox(height: 12),
-          _nv('🥉', 'Bronce — 0 a 199 pts', '5% descuento'),
-          const Divider(color: C.brd, height: 20),
-          _nv('🥈', 'Plata — 200 a 499 pts', '10% descuento + 1 corte gratis/mes'),
-          const Divider(color: C.brd, height: 20),
-          _nv('🥇', 'Oro — 500+ pts', '20% descuento + prioridad de cita'),
-        ])),
-      const SizedBox(height: 14),
-      Container(padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('HISTORIAL DE PUNTOS', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
-          const SizedBox(height: 12),
-          if (_hist.isEmpty) const Center(child: Text('Sin historial aún', style: TextStyle(color: C.muted)))
-          else ..._hist.map((h) => Padding(padding: const EdgeInsets.only(bottom: 10),
+        Text('${_desc.toInt()}%', style: const TextStyle(
+          color: C.gold, fontSize: 28, fontWeight: FontWeight.bold)),
+      ])),
+    const SizedBox(height: 14),
+
+    // Niveles
+    Container(padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('PROGRAMA DE LEALTAD', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 14),
+        _nivelRow('🥉', 'Bronce', '0 — 199 pts', '5% descuento en todos los servicios', _pts < 200),
+        const SizedBox(height: 10),
+        _nivelRow('🥈', 'Plata',  '200 — 499 pts', '10% descuento + 1 corte gratis/mes', _pts >= 200 && _pts < 500),
+        const SizedBox(height: 10),
+        _nivelRow('🥇', 'Oro',    '500+ pts', '20% descuento + prioridad de cita', _pts >= 500),
+      ])),
+    const SizedBox(height: 14),
+
+    // Historial
+    Container(padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('HISTORIAL DE PUNTOS', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 12),
+        if (_hist.isEmpty)
+          const Center(child: Text('Sin historial aún', style: TextStyle(color: C.muted)))
+        else
+          ..._hist.map((h) {
+            final pts   = (h['puntos'] as int?) ?? 0;
+            final isNeg = pts < 0;
+            return Padding(padding: const EdgeInsets.only(bottom: 10),
               child: Row(children: [
                 Container(width: 36, height: 36,
-                  decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(8)),
-                  child: const Center(child: Text('⭐', style: TextStyle(fontSize: 18)))),
+                  decoration: BoxDecoration(
+                    color: isNeg ? C.err.withOpacity(.15) : C.goldBg,
+                    borderRadius: BorderRadius.circular(8)),
+                  child: Center(child: Text(isNeg ? '🎁' : '⭐',
+                      style: const TextStyle(fontSize: 18)))),
                 const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(h['concepto'].toString(), style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-                  Text(DateFormat('dd/MM/yyyy').format(DateTime.parse(h['fecha'].toString())),
+                  Text(h['concepto'].toString(),
+                      style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+                  Text(
+                    () {
+                      try { return DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(h['fecha'].toString())); }
+                      catch (_) { return h['fecha'].toString(); }
+                    }(),
+                    style: const TextStyle(color: C.muted, fontSize: 11)),
+                ])),
+                _badge(isNeg ? '$pts pts' : '+$pts pts', isNeg ? C.err : C.gold),
+              ]));
+          }),
+      ])),
+  ]);
+
+  // ── Sub-página: CANJEAR ──
+  Widget _buildCanjear() => _recompensas.isEmpty
+      ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Text('🎁', style: TextStyle(fontSize: 48)),
+          const SizedBox(height: 12),
+          const Text('Sin recompensas disponibles', style: TextStyle(color: C.muted, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text('El salón publicará recompensas pronto', style: TextStyle(color: C.dim, fontSize: 12)),
+        ]))
+      : ListView(padding: const EdgeInsets.all(16), children: [
+          // Banner puntos disponibles
+          Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: C.roseDark)),
+            child: Row(children: [
+              const Text('⭐', style: TextStyle(fontSize: 28)),
+              const SizedBox(width: 12),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Puntos disponibles', style: TextStyle(color: C.muted, fontSize: 11)),
+                Text('$_pts puntos', style: const TextStyle(
+                  color: C.gold, fontSize: 20, fontWeight: FontWeight.bold)),
+              ]),
+            ])),
+          ..._recompensas.map((r) => _recompensaCard(r)),
+        ]);
+
+  Widget _recompensaCard(Map<String, dynamic> r) {
+    final costo     = (r['costo_puntos'] as int?) ?? 0;
+    final puedeCanjear = _pts >= costo;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: puedeCanjear ? C.d2 : C.d1,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: puedeCanjear ? C.roseDark.withOpacity(.6) : C.brd,
+          width: puedeCanjear ? 1.5 : 1),
+        boxShadow: puedeCanjear ? [
+          BoxShadow(color: C.rose.withOpacity(.08), blurRadius: 12, offset: const Offset(0,4))
+        ] : [],
+      ),
+      child: Row(children: [
+        // Ícono
+        Container(width: 56, height: 56,
+          decoration: BoxDecoration(
+            color: puedeCanjear ? C.roseBg : C.d3,
+            borderRadius: BorderRadius.circular(12)),
+          child: Center(child: Text(r['icono']?.toString() ?? '🎁',
+              style: const TextStyle(fontSize: 28)))),
+        const SizedBox(width: 12),
+        // Info
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(r['nombre'].toString(),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15,
+                  color: puedeCanjear ? C.txt : C.muted)),
+          if ((r['descripcion'] ?? '').toString().isNotEmpty)
+            Text(r['descripcion'].toString(),
+                style: const TextStyle(color: C.muted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Row(children: [
+            _badge('$costo pts', puedeCanjear ? C.gold : C.muted),
+            if (!puedeCanjear) ...[
+              const SizedBox(width: 6),
+              Text('Faltan ${costo - _pts} pts',
+                  style: const TextStyle(color: C.err, fontSize: 10)),
+            ],
+          ]),
+        ])),
+        const SizedBox(width: 8),
+        // Botón canjear
+        AnimatedOpacity(
+          opacity: puedeCanjear ? 1.0 : 0.35,
+          duration: const Duration(milliseconds: 200),
+          child: ElevatedButton(
+            onPressed: puedeCanjear ? () => _canjear(r) : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: C.roseDark,
+              foregroundColor: C.cream,
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('Canjear', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+        ),
+      ]),
+    );
+  }
+
+  // ── Sub-página: MIS CANJES ──
+  Widget _buildMisCanjes() => _misCanjes.isEmpty
+      ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Text('📋', style: TextStyle(fontSize: 48)),
+          const SizedBox(height: 12),
+          const Text('Sin canjes realizados', style: TextStyle(color: C.muted)),
+          const SizedBox(height: 6),
+          const Text('Tus canjes aparecerán aquí', style: TextStyle(color: C.dim, fontSize: 12)),
+        ]))
+      : ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: _misCanjes.length,
+          itemBuilder: (_, i) {
+            final c = _misCanjes[i];
+            final estado = c['estado']?.toString() ?? 'pendiente';
+            final col = estado == 'entregado' ? C.ok : estado == 'cancelado' ? C.err : C.warn;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: C.brd)),
+              child: Row(children: [
+                Container(width: 42, height: 42,
+                  decoration: BoxDecoration(color: C.goldBg, borderRadius: BorderRadius.circular(10)),
+                  child: const Center(child: Text('🎁', style: TextStyle(fontSize: 22)))),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(c['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text('-${c['costo_puntos']} puntos · ${_fmtFechaHora(c['creado_en']?.toString() ?? '')}',
                       style: const TextStyle(color: C.muted, fontSize: 11)),
                 ])),
-                _badge('+${h['puntos']} pts', C.gold),
-              ]))),
-        ])),
-    ]),
-  );
-  Widget _nv(String e, String t, String b) => Row(children: [
-    Text(e, style: const TextStyle(fontSize: 22)), const SizedBox(width: 12),
-    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(t, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-      Text(b, style: const TextStyle(color: C.muted, fontSize: 11)),
-    ])),
+                _badge(estado == 'entregado' ? '✓ Entregado' : estado == 'cancelado' ? 'Cancelado' : '⏳ Pendiente', col),
+              ]),
+            );
+          });
+
+  Widget _miniStat(String icon, String label, String val) => Column(children: [
+    Text(icon, style: const TextStyle(fontSize: 20)),
+    const SizedBox(height: 2),
+    Text(val, style: const TextStyle(color: C.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+    Text(label, style: const TextStyle(color: C.muted, fontSize: 10)),
   ]);
+
+  Widget _nivelRow(String emoji, String nivel, String rango, String beneficio, bool activo) =>
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: activo ? C.roseBg : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: activo ? C.roseDark : C.brd)),
+        child: Row(children: [
+          Text(emoji, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(nivel, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13,
+                  color: activo ? C.rose : C.txt)),
+              const SizedBox(width: 6),
+              if (activo) _badge('ACTUAL', C.rose),
+            ]),
+            Text(rango, style: const TextStyle(color: C.muted, fontSize: 11)),
+            Text(beneficio, style: const TextStyle(color: C.muted, fontSize: 11)),
+          ])),
+        ]),
+      );
+}
+
+String _fmtFechaHora(String s) {
+  try { return DateFormat('dd/MM/yy HH:mm').format(DateTime.parse(s)); }
+  catch (_) { return s.substring(0, min(10, s.length)); }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1564,7 +2014,7 @@ class _AdminMainState extends State<AdminMain> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('✂️ Admin Panel'),
+        title: const Text('✂️ Admin — Kety B&S'),
         actions: [
           IconButton(icon: const Icon(Icons.bar_chart, color: C.muted),
               onPressed: () => Navigator.push(context,
@@ -1638,17 +2088,7 @@ class _AdmDashState extends State<AdmDashTab> {
       const SizedBox(height: 20),
       const _T('ACCIONES RÁPIDAS'),
       ElevatedButton.icon(
-        onPressed: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => QRScannerScreen(onScanned: (data) async {
-              // data = "id|celular|nombre"
-              final parts = data.split('|');
-              if (parts.isEmpty) return;
-              final uid = parts[0];
-              final u = await SB.getUsuario(uid);
-              if (u == null || !mounted) return;
-              if (!mounted) return;
-              _showQRResult(u);
-            }))),
+        onPressed: _openQRScanner,
         icon: const Icon(Icons.qr_code_scanner),
         label: const Text('Escanear QR de cliente'),
         style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
@@ -1708,55 +2148,173 @@ class _AdmDashState extends State<AdmDashTab> {
     await SB.setCitaEstado(id, est); _load();
   }
 
-  void _showQRResult(Map<String, dynamic> u) {
-    showDialog(context: context, builder: (_) => _QRResultDialog(u: u, onOk: _load));
+  // Abre el escáner QR. El scanner:
+  // 1. Escanea el QR → busca el cliente → muestra _QRConfirmSheet
+  // 2. _QRConfirmSheet suma los puntos y hace pop(context, true)
+  // 3. QRScannerScreen recibe true y hace pop(context, usuarioMap)
+  // 4. Aquí recibimos el usuarioMap ANTES de sumar puntos
+  //    → recargamos el usuario para mostrar puntos actualizados
+  Future<void> _openQRScanner() async {
+    final usuarioAntes = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const QRScannerScreen()),
+    );
+    if (usuarioAntes == null || !mounted) return;
+
+    // Recargar el usuario desde Supabase para tener puntos actualizados
+    final usuarioActual = await SB.getUsuario(usuarioAntes['id'].toString());
+    if (!mounted) return;
+
+    // Mostrar diálogo de éxito con el context activo del dashboard
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _QRResultDialog(
+        u: usuarioActual ?? usuarioAntes,
+        onOk: _load,
+      ),
+    );
   }
 }
 
 // ────────────────────────────────────────────────────────────
-// ESCÁNER QR REAL (mobile_scanner)
+// ESCÁNER QR REAL — autónomo, sin callbacks externos
+// Flujo: escanea → busca cliente en Supabase → muestra bottom
+//        sheet de confirmación → al confirmar hace pop con el
+//        Map del usuario para que el padre muestre el diálogo
+//        de puntos con su propio context seguro.
 // ────────────────────────────────────────────────────────────
 class QRScannerScreen extends StatefulWidget {
-  final Future<void> Function(String data) onScanned;
-  const QRScannerScreen({super.key, required this.onScanned});
+  const QRScannerScreen({super.key});
   @override
   State<QRScannerScreen> createState() => _QRScannerState();
 }
 
 class _QRScannerState extends State<QRScannerScreen> {
   late final MobileScannerController _ctrl;
-  bool _procesando = false;
-  String? _resultado;
-  bool _torchOn = false; // estado linterna local
+  bool _bloqueado  = false;  // evita procesar múltiples lecturas
+  bool _torchOn    = false;
+  String _estado   = 'Apunta la cámara al código QR del cliente';
+  String _tipo     = 'idle'; // idle | buscando | encontrado | error
 
   @override
   void initState() {
     super.initState();
-    // En mobile_scanner v5.x se puede pasar opciones al constructor
     _ctrl = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
+      autoStart: true,
     );
   }
 
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
 
+  // ── Procesa el QR detectado ──
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_procesando) return;
-    final barcode = capture.barcodes.firstOrNull;
-    if (barcode == null || barcode.rawValue == null) return;
-    setState(() { _procesando = true; _resultado = barcode.rawValue; });
+    if (_bloqueado) return;
+    final raw = capture.barcodes.firstOrNull?.rawValue;
+    if (raw == null || raw.isEmpty) return;
+
+    setState(() {
+      _bloqueado = true;
+      _tipo      = 'buscando';
+      _estado    = 'Leyendo código...';
+    });
+
+    // Detener cámara inmediatamente para no releer
     await _ctrl.stop();
-    await widget.onScanned(barcode.rawValue!);
-    if (mounted) Navigator.pop(context);
+
+    // Parsear datos del QR: formato "uuid|celular|nombre"
+    Map<String, dynamic>? usuario;
+    try {
+      final parts = raw.split('|');
+      final uid   = parts.isNotEmpty ? parts[0].trim() : '';
+
+      if (uid.isEmpty) throw Exception('QR inválido');
+
+      setState(() => _estado = 'Buscando cliente...');
+      usuario = await SB.getUsuario(uid);
+
+      // Si no encontramos por UUID, intentar por celular (parte[1])
+      if (usuario == null && parts.length > 1) {
+        usuario = await SB.getUsuarioCelular(parts[1].trim());
+      }
+    } catch (e) {
+      usuario = null;
+    }
+
+    if (!mounted) return;
+
+    if (usuario == null) {
+      // Cliente no encontrado — mostrar error y reanudar escaneo
+      setState(() {
+        _tipo   = 'error';
+        _estado = 'Cliente no encontrado. Intenta de nuevo.';
+      });
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() {
+        _bloqueado = false;
+        _tipo      = 'idle';
+        _estado    = 'Apunta la cámara al código QR del cliente';
+      });
+      await _ctrl.start();
+      return;
+    }
+
+    // Cliente encontrado — mostrar bottom sheet SIN salir del screen
+    setState(() {
+      _tipo   = 'encontrado';
+      _estado = 'Cliente encontrado: ${usuario!['nombre']}';
+    });
+
+    if (!mounted) return;
+
+    // Mostrar sheet de confirmación dentro del QRScannerScreen
+    final confirmar = await showModalBottomSheet<bool>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: C.d2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _QRConfirmSheet(usuario: usuario!),
+    );
+
+    if (!mounted) return;
+
+    if (confirmar == true) {
+      // Devolver el usuario al padre via pop — el padre muestra el diálogo de puntos
+      Navigator.pop(context, usuario);
+    } else {
+      // Cancelado — reanudar escaneo
+      setState(() {
+        _bloqueado = false;
+        _tipo      = 'idle';
+        _estado    = 'Apunta la cámara al código QR del cliente';
+      });
+      await _ctrl.start();
+    }
+  }
+
+  // ── Color del indicador de estado ──
+  Color get _estadoColor {
+    if (_tipo == 'buscando')  return C.gold;
+    if (_tipo == 'encontrado') return C.ok;
+    if (_tipo == 'error')      return C.err;
+    return C.txt;
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: C.black,
-    appBar: AppBar(title: const Text('Escanear QR'),
+    appBar: AppBar(
+      title: const Text('Escanear QR'),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => Navigator.pop(context),
+      ),
       actions: [
-        // Linterna: en v5.x usamos estado local y llamamos toggleTorch()
         IconButton(
           icon: Icon(
             _torchOn ? Icons.flash_on : Icons.flash_off,
@@ -1771,118 +2329,352 @@ class _QRScannerState extends State<QRScannerScreen> {
           icon: const Icon(Icons.flip_camera_ios),
           onPressed: () => _ctrl.switchCamera(),
         ),
-      ]),
+      ],
+    ),
     body: Stack(children: [
-      MobileScanner(controller: _ctrl, onDetect: _onDetect),
-      // Marco de escaneo
-      Center(child: Container(
-        width: 260, height: 260,
-        decoration: BoxDecoration(
-          border: Border.all(color: C.gold, width: 2.5),
-          borderRadius: BorderRadius.circular(16)),
+
+      // ── Cámara ──
+      MobileScanner(
+        controller: _ctrl,
+        onDetect: _onDetect,
+        errorBuilder: (ctx, err, child) => Center(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.camera_alt_outlined, color: C.muted, size: 60),
+            const SizedBox(height: 12),
+            Text('Error de cámara: ${err.errorDetails?.message ?? err.errorCode.name}',
+                style: const TextStyle(color: C.err, fontSize: 13),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () async {
+                await _ctrl.stop();
+                await Future.delayed(const Duration(milliseconds: 300));
+                await _ctrl.start();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reintentar'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(160, 44)),
+            ),
+          ]),
+        ),
+      ),
+
+      // ── Overlay oscuro en los bordes ──
+      ColorFiltered(
+        colorFilter: const ColorFilter.mode(Colors.transparent, BlendMode.srcOver),
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _ScanOverlayPainter(),
+        ),
+      ),
+
+      // ── Marco de escaneo animado ──
+      Center(child: SizedBox(
+        width: 270, height: 270,
         child: Stack(children: [
-          Positioned(top: 0, left: 0,   child: _corner(true,  true)),
-          Positioned(top: 0, right: 0,  child: _corner(true,  false)),
-          Positioned(bottom: 0, left: 0,  child: _corner(false, true)),
-          Positioned(bottom: 0, right: 0, child: _corner(false, false)),
+          // Borde exterior del frame
+          Container(decoration: BoxDecoration(
+            border: Border.all(
+              color: _tipo == 'encontrado' ? C.ok
+                   : _tipo == 'error'      ? C.err
+                   : C.gold,
+              width: 2,
+            ),
+            borderRadius: BorderRadius.circular(16),
+          )),
+          // Esquinas gruesas
+          Positioned(top: 0,    left: 0,   child: _corner(true,  true)),
+          Positioned(top: 0,    right: 0,  child: _corner(true,  false)),
+          Positioned(bottom: 0, left: 0,   child: _corner(false, true)),
+          Positioned(bottom: 0, right: 0,  child: _corner(false, false)),
+          // Ícono central cuando se está procesando
+          if (_tipo == 'buscando')
+            const Center(child: CircularProgressIndicator(color: C.gold, strokeWidth: 3)),
+          if (_tipo == 'encontrado')
+            const Center(child: Icon(Icons.check_circle, color: C.ok, size: 64)),
+          if (_tipo == 'error')
+            const Center(child: Icon(Icons.error_outline, color: C.err, size: 64)),
         ]),
       )),
-      Positioned(bottom: 40, left: 0, right: 0,
-        child: Center(child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          decoration: BoxDecoration(color: C.black.withOpacity(.7), borderRadius: BorderRadius.circular(20)),
-          child: Text(
-            _procesando ? 'Procesando: ${_resultado ?? '...'}' : 'Apunta la cámara al código QR',
-            style: TextStyle(color: _procesando ? C.gold : C.txt, fontSize: 14)),
-        ))),
-      if (_procesando) const Center(child: CircularProgressIndicator(color: C.gold)),
+
+      // ── Texto de estado abajo ──
+      Positioned(bottom: 50, left: 24, right: 24,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: C.black.withOpacity(.75),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _estadoColor.withOpacity(.4)),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (_tipo == 'buscando')
+              const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(color: C.gold, strokeWidth: 2)),
+            if (_tipo == 'buscando') const SizedBox(width: 10),
+            Flexible(child: Text(_estado,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _estadoColor, fontSize: 14, fontWeight: FontWeight.w500))),
+          ]),
+        )),
+
+      // ── Botón manual: buscar por celular ──
+      Positioned(bottom: 120, left: 24, right: 24,
+        child: OutlinedButton.icon(
+          onPressed: _bloqueado ? null : _buscarManual,
+          icon: const Icon(Icons.phone_android, size: 16),
+          label: const Text('Buscar por número de celular'),
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: C.brd),
+            foregroundColor: C.muted,
+            minimumSize: const Size(double.infinity, 42),
+          ),
+        )),
     ]),
   );
 
-  Widget _corner(bool top, bool left) => Container(
-    width: 28, height: 28,
-    decoration: BoxDecoration(
-      border: Border(
-        top:    top  ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
-        bottom: !top ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
-        left:   left  ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
-        right:  !left ? const BorderSide(color: C.gold, width: 4) : BorderSide.none,
+  // ── Búsqueda manual por celular (fallback sin QR) ──
+  Future<void> _buscarManual() async {
+    await _ctrl.stop();
+    if (!mounted) return;
+    final celCtrl = TextEditingController();
+    final usuario = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Buscar cliente'),
+        content: TextFormField(
+          controller: celCtrl,
+          autofocus: true,
+          style: const TextStyle(color: C.txt),
+          keyboardType: TextInputType.phone,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(9)],
+          decoration: const InputDecoration(labelText: 'Número de celular'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () async {
+              final u = await SB.getUsuarioCelular(celCtrl.text.trim());
+              if (!context.mounted) return;
+              Navigator.pop(context, u);
+            },
+            child: const Text('Buscar'),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+    celCtrl.dispose();
+
+    if (!mounted) return;
+    if (usuario == null) {
+      // No encontrado → reanudar cámara
+      setState(() { _tipo = 'error'; _estado = 'Cliente no encontrado'; });
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() { _bloqueado = false; _tipo = 'idle'; _estado = 'Apunta la cámara al código QR del cliente'; });
+      await _ctrl.start();
+      return;
+    }
+
+    // Encontrado → mostrar sheet de confirmación
+    final confirmar = await showModalBottomSheet<bool>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: C.d2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _QRConfirmSheet(usuario: usuario),
+    );
+
+    if (!mounted) return;
+    if (confirmar == true) {
+      Navigator.pop(context, usuario);
+    } else {
+      setState(() { _bloqueado = false; _tipo = 'idle'; _estado = 'Apunta la cámara al código QR del cliente'; });
+      await _ctrl.start();
+    }
+  }
+
+  Widget _corner(bool top, bool left) {
+    const size = 28.0;
+    const thickness = 4.0;
+    final col = _tipo == 'encontrado' ? C.ok : _tipo == 'error' ? C.err : C.gold;
+    return Container(width: size, height: size,
+      decoration: BoxDecoration(border: Border(
+        top:    top  ? BorderSide(color: col, width: thickness) : BorderSide.none,
+        bottom: !top ? BorderSide(color: col, width: thickness) : BorderSide.none,
+        left:   left  ? BorderSide(color: col, width: thickness) : BorderSide.none,
+        right:  !left ? BorderSide(color: col, width: thickness) : BorderSide.none,
+      )));
+  }
+}
+
+// ── Overlay oscuro alrededor del recuadro de escaneo ──
+class _ScanOverlayPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.black.withOpacity(.55);
+    const frameW = 270.0;
+    const frameH = 270.0;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final rect = Rect.fromCenter(center: Offset(cx, cy), width: frameW, height: frameH);
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)))
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(path, paint);
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+// ── Bottom sheet: confirmar cliente escaneado ──
+class _QRConfirmSheet extends StatefulWidget {
+  final Map<String, dynamic> usuario;
+  const _QRConfirmSheet({required this.usuario});
+  @override
+  State<_QRConfirmSheet> createState() => _QRConfirmSheetState();
+}
+
+class _QRConfirmSheetState extends State<_QRConfirmSheet> {
+  List<Map<String, dynamic>> _svcs = [];
+  Map<String, dynamic>? _svcSel;
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _loadSvcs(); }
+
+  Future<void> _loadSvcs() async {
+    final s = await SB.getServicios(soloActivos: true);
+    if (mounted) setState(() { _svcs = s; if (s.isNotEmpty) _svcSel = s.first; _loading = false; });
+  }
+
+  Future<void> _confirmar() async {
+    if (_svcSel == null) return;
+    await SB.addPuntosDirecto(
+        widget.usuario['id'].toString(),
+        _svcSel!['puntos_otorga'] as int,
+        _svcSel!['nombre'].toString());
+    if (!mounted) return;
+    Navigator.pop(context, true); // true = confirmar
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = widget.usuario;
+    final mem = u['membresia']?.toString() ?? 'Ninguna';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 16),
+
+        // Encabezado
+        const Text('Cliente encontrado', style: TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 14),
+
+        // Tarjeta del cliente
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: C.ok.withOpacity(.4))),
+          child: Row(children: [
+            Container(width: 48, height: 48,
+              decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
+              child: Center(child: Text(
+                (u['nombre']?.toString() ?? 'C').isNotEmpty
+                    ? u['nombre'].toString()[0].toUpperCase() : 'C',
+                style: const TextStyle(color: C.black, fontSize: 20, fontWeight: FontWeight.bold)))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(u['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Text(u['celular']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
+              const SizedBox(height: 4),
+              Row(children: [
+                _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía',
+                    mem != 'Ninguna' ? C.gold : C.muted),
+                const SizedBox(width: 8),
+                _badge('⭐ ${u['puntos']} pts', C.info),
+              ]),
+            ])),
+            const Icon(Icons.check_circle, color: C.ok, size: 28),
+          ]),
+        ),
+        const SizedBox(height: 16),
+
+        // Selector de servicio
+        if (_loading)
+          const Center(child: CircularProgressIndicator(color: C.gold))
+        else ...[
+          const Text('Servicio realizado', style: TextStyle(color: C.muted, fontSize: 12)),
+          const SizedBox(height: 8),
+          _drop<Map<String, dynamic>>(
+            val: _svcSel, label: 'Servicio',
+            items: _svcs.map((s) => DropdownMenuItem(
+              value: s,
+              child: Text('${s['icono']} ${s['nombre']}  (+${s['puntos_otorga']} pts)',
+                  overflow: TextOverflow.ellipsis))).toList(),
+            onChange: (v) => setState(() => _svcSel = v)),
+          const SizedBox(height: 16),
+
+          // Botones
+          Row(children: [
+            Expanded(child: OutlinedButton(
+              onPressed: () => Navigator.pop(context, false),
+              style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: C.brd),
+                  foregroundColor: C.muted,
+                  minimumSize: const Size(0, 48)),
+              child: const Text('Cancelar'))),
+            const SizedBox(width: 12),
+            Expanded(child: ElevatedButton(
+              onPressed: _confirmar,
+              style: ElevatedButton.styleFrom(minimumSize: const Size(0, 48)),
+              child: Text('✅  +${_svcSel?['puntos_otorga'] ?? 0} pts'))),
+          ]),
+        ],
+      ]),
+    );
+  }
 }
 
 // ────────────────────────────────────────────────────────────
-// RESULTADO QR → SUMAR PUNTOS
+// _QRResultDialog — diálogo de éxito post-escaneo
+// Se muestra DESPUÉS de que _QRConfirmSheet suma los puntos.
+// Informa al admin el resultado y permite recargar.
 // ────────────────────────────────────────────────────────────
-class _QRResultDialog extends StatefulWidget {
+class _QRResultDialog extends StatelessWidget {
   final Map<String, dynamic> u;
   final VoidCallback onOk;
   const _QRResultDialog({required this.u, required this.onOk});
-  @override
-  State<_QRResultDialog> createState() => _QRResultDialogState();
-}
-
-class _QRResultDialogState extends State<_QRResultDialog> {
-  List<Map<String, dynamic>> _svcs = [];
-  Map<String, dynamic>? _svc;
-  bool _loading = false;
 
   @override
-  void initState() { super.initState(); _load(); }
-
-  Future<void> _load() async {
-    final s = await SB.getServicios(soloActivos: true);
-    if (mounted) setState(() { _svcs = s; if (s.isNotEmpty) _svc = s.first; });
+  Widget build(BuildContext context) {
+    final mem = u['membresia']?.toString() ?? 'Ninguna';
+    return Dialog(child: Padding(padding: const EdgeInsets.all(20),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+        const Icon(Icons.check_circle, color: C.ok, size: 56),
+        const SizedBox(height: 12),
+        const Text('¡Puntos registrados!',
+            style: TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text(u['nombre']?.toString() ?? '',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía',
+              mem != 'Ninguna' ? C.gold : C.muted),
+          const SizedBox(width: 8),
+          _badge('⭐ ${u['puntos']} pts', C.info),
+        ]),
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: () { Navigator.pop(context); onOk(); },
+          child: const Text('Listo')),
+      ])));
   }
-
-  Future<void> _registrar() async {
-    if (_svc == null) { _snack(context, 'Selecciona servicio', err: true); return; }
-    setState(() => _loading = true);
-    await SB.addPuntosDirecto(
-        widget.u['id'].toString(), _svc!['puntos_otorga'] as int, _svc!['nombre'].toString());
-    if (!mounted) return;
-    Navigator.pop(context);
-    widget.onOk();
-    _snack(context, '+${_svc!['puntos_otorga']} pts a ${widget.u['nombre']} ⭐');
-  }
-
-  @override
-  Widget build(BuildContext context) => Dialog(child: Padding(padding: const EdgeInsets.all(20),
-    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _dlgHead('Cliente encontrado', context),
-      const SizedBox(height: 14),
-      Container(padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: C.ok.withOpacity(.08), borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: C.ok.withOpacity(.3))),
-        child: Row(children: [
-          Container(width: 38, height: 38,
-            decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
-            child: Center(child: Text(
-              (widget.u['nombre']?.toString() ?? 'C').isNotEmpty
-                  ? (widget.u['nombre']?.toString() ?? 'C')[0].toUpperCase() : 'C',
-              style: const TextStyle(color: C.black, fontWeight: FontWeight.bold)))),
-          const SizedBox(width: 10),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(widget.u['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('${widget.u['puntos']} pts  ·  ${widget.u['membresia']}',
-                style: const TextStyle(color: C.muted, fontSize: 11)),
-          ]),
-        ])),
-      const SizedBox(height: 14),
-      if (_svcs.isNotEmpty) ...[
-        const Text('Servicio realizado', style: TextStyle(color: C.muted, fontSize: 12)),
-        const SizedBox(height: 6),
-        _drop<Map<String, dynamic>>(
-          val: _svc, label: 'Servicio',
-          items: _svcs.map((s) => DropdownMenuItem(value: s,
-              child: Text('${s['icono']} ${s['nombre']}  (+${s['puntos_otorga']}pts)'))).toList(),
-          onChange: (v) => setState(() => _svc = v)),
-      ],
-      const SizedBox(height: 18),
-      _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
-          : ElevatedButton(onPressed: _registrar, child: const Text('✅  Registrar y sumar puntos')),
-    ])));
 }
 
 // ────────────────────────────────────────────────────────────

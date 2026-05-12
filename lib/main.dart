@@ -104,11 +104,17 @@ OutlineInputBorder _ob(Color c, {double w = 1}) =>
 // ────────────────────────────────────────────────────────────
 class BarberProApp extends StatelessWidget {
   const BarberProApp({super.key});
+
   @override
-  Widget build(BuildContext context) =>
-      MaterialApp(title: 'Kety Barber & Salon ', debugShowCheckedModeBanner: false, theme: kTheme, home: const SplashScreen());
-
-
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: "Kety Barber & Salon",
+      debugShowCheckedModeBanner: false,
+      theme: kTheme,
+      home: const SplashScreen(),
+    );
+  }
+}
 // ────────────────────────────────────────────────────────────
 // HASH DE CONTRASEÑA (sin dependencias externas pesadas)
 // ────────────────────────────────────────────────────────────

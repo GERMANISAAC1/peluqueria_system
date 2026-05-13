@@ -20,8 +20,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
-const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
-const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
+const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
+const _supabaseAnon = 'TU_ANON_KEY';
+
 // ────────────────────────────────────────────────────────────
 // ENTRY POINT
 // ────────────────────────────────────────────────────────────
@@ -2009,13 +2010,17 @@ class _AdminMainState extends State<AdminMain> {
       AdmDashTab(onLogout: _logout),
       const AdmCitasTab(),
       const AdmClientesTab(),
-      const AdmServiciosTab(),
+      const AdmPuntosTab(),      // ← Gestión de puntos, recompensas y canjes
       const AdmMembresiaTab(),   // ← Planes editables
     ];
     return Scaffold(
       appBar: AppBar(
         title: const Text('✂️ Admin — Kety B&S'),
         actions: [
+          IconButton(icon: const Icon(Icons.content_cut, color: C.muted),
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const AdmServiciosScreen())),
+              tooltip: 'Servicios'),
           IconButton(icon: const Icon(Icons.bar_chart, color: C.muted),
               onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const ReportesScreen())),
@@ -2028,11 +2033,11 @@ class _AdminMainState extends State<AdminMain> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tab, onTap: (i) => setState(() => _tab = i),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),     activeIcon: Icon(Icons.dashboard),    label: 'Panel'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined), activeIcon: Icon(Icons.calendar_today),label: 'Citas'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_outline),         activeIcon: Icon(Icons.people),       label: 'Clientes'),
-          BottomNavigationBarItem(icon: Icon(Icons.cut_outlined),           activeIcon: Icon(Icons.cut),          label: 'Servicios'),
-          BottomNavigationBarItem(icon: Icon(Icons.workspace_premium_outlined), activeIcon: Icon(Icons.workspace_premium), label: 'Membresía'),
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),      activeIcon: Icon(Icons.dashboard),         label: 'Panel'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined),  activeIcon: Icon(Icons.calendar_today),    label: 'Citas'),
+          BottomNavigationBarItem(icon: Icon(Icons.people_outline),           activeIcon: Icon(Icons.people),            label: 'Clientes'),
+          BottomNavigationBarItem(icon: Icon(Icons.card_giftcard_outlined),   activeIcon: Icon(Icons.card_giftcard),     label: 'Puntos'),
+          BottomNavigationBarItem(icon: Icon(Icons.workspace_premium_outlined),activeIcon: Icon(Icons.workspace_premium),label: 'Membresía'),
         ],
       ),
     );

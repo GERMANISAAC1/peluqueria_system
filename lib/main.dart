@@ -20,10 +20,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
+const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
+const _supabaseAnon = 'TU_ANON_KEY';
 
-
-const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
-const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
+// ────────────────────────────────────────────────────────────
 // ENTRY POINT
 // ────────────────────────────────────────────────────────────
 void main() async {
@@ -468,6 +468,26 @@ class SB {
 
   static Future<void> aprobarCanje(String id) async =>
       await _sb.from('canjes').update({'estado': 'entregado'}).eq('id', id);
+
+  /// Cancela un canje y devuelve los puntos al cliente
+  static Future<void> cancelarCanje(String id) async {
+    final canje = await _sb.from('canjes').select().eq('id', id).maybeSingle();
+    if (canje == null) return;
+    final costo = (canje['costo_puntos'] as int?) ?? 0;
+    final uid   = canje['usuario_id']?.toString() ?? '';
+    await _sb.from('canjes').update({'estado': 'cancelado'}).eq('id', id);
+    if (uid.isNotEmpty && costo > 0) {
+      await addPuntosDirecto(uid, costo, 'Devolucion: ${canje['nombre']}');
+    }
+  }
+
+  /// Historial de TODOS los clientes (para admin, limite 200)
+  static Future<List<Map<String, dynamic>>> getTodoHistorial() async =>
+      List<Map<String, dynamic>>.from(await _sb
+          .from('historial_puntos')
+          .select('*, usuarios(nombre, celular)')
+          .order('fecha', ascending: false)
+          .limit(200));
 
   // ── APP CONFIG ──
   static Future<Map<String, dynamic>?> getAppConfig() async =>
@@ -3084,6 +3104,680 @@ class _AdmServiciosState extends State<AdmServiciosTab> {
             ]));
         }))),
   ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN PUNTOS — 3 sub-tabs: Recompensas | Canjes | Historial
+// ────────────────────────────────────────────────────────────
+class AdmPuntosTab extends StatefulWidget {
+  const AdmPuntosTab({super.key});
+  @override
+  State<AdmPuntosTab> createState() => _AdmPuntosTabState();
+}
+
+class _AdmPuntosTabState extends State<AdmPuntosTab>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tc = TabController(length: 3, vsync: this);
+
+  @override
+  void dispose() { _tc.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    // ── Tab bar ──
+    Container(
+      color: C.d1,
+      child: TabBar(
+        controller: _tc,
+        indicatorColor: C.rose,
+        indicatorWeight: 2,
+        labelColor: C.rose,
+        unselectedLabelColor: C.muted,
+        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+        tabs: const [
+          Tab(icon: Icon(Icons.card_giftcard, size: 18), text: 'Recompensas'),
+          Tab(icon: Icon(Icons.swap_horiz,    size: 18), text: 'Canjes'),
+          Tab(icon: Icon(Icons.people,        size: 18), text: 'Historial'),
+        ],
+      ),
+    ),
+    Expanded(child: TabBarView(controller: _tc, children: const [
+      _AdmRecompensasPage(),
+      _AdmCanjesPage(),
+      _AdmHistorialPuntosPage(),
+    ])),
+  ]);
+}
+
+// ══════════════════════════════════════════════════════════
+// 1. RECOMPENSAS — CRUD completo
+// ══════════════════════════════════════════════════════════
+class _AdmRecompensasPage extends StatefulWidget {
+  const _AdmRecompensasPage();
+  @override
+  State<_AdmRecompensasPage> createState() => _AdmRecompensasPageState();
+}
+
+class _AdmRecompensasPageState extends State<_AdmRecompensasPage> {
+  List<Map<String, dynamic>> _recompensas = [];
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final r = await SB.getRecompensas();
+    if (mounted) setState(() { _recompensas = r; _loading = false; });
+  }
+
+  Future<void> _toggleActiva(Map<String, dynamic> r) async {
+    final nueva = !(r['activa'] as bool? ?? true);
+    await SB.updateRecompensa(r['id'].toString(), {'activa': nueva});
+    _load();
+    if (mounted) _snack(context, nueva ? 'Recompensa publicada' : 'Recompensa pausada');
+  }
+
+  Future<void> _eliminar(String id) async {
+    if (!await _confirm(context, 'Eliminar recompensa', '¿Confirmar? No se podrá deshacer.')) return;
+    await SB.deleteRecompensa(id);
+    _load();
+    if (mounted) _snack(context, 'Recompensa eliminada', err: true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: C.black,
+    floatingActionButton: FloatingActionButton.extended(
+      backgroundColor: C.roseDark,
+      foregroundColor: C.cream,
+      icon: const Icon(Icons.add),
+      label: const Text('Nueva recompensa'),
+      onPressed: () => showDialog(context: context,
+          builder: (_) => _RecompensaDialog(onOk: _load)),
+    ),
+    body: _loading
+        ? const Center(child: CircularProgressIndicator(color: C.rose))
+        : RefreshIndicator(color: C.rose, onRefresh: _load,
+            child: _recompensas.isEmpty
+                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Text('🎁', style: TextStyle(fontSize: 52)),
+                    const SizedBox(height: 12),
+                    const Text('Sin recompensas creadas',
+                        style: TextStyle(color: C.muted, fontSize: 15)),
+                    const SizedBox(height: 6),
+                    const Text('Pulsa + para crear la primera',
+                        style: TextStyle(color: C.dim, fontSize: 12)),
+                  ]))
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16,16,16,96),
+                    itemCount: _recompensas.length,
+                    itemBuilder: (_, i) {
+                      final r = _recompensas[i];
+                      final activa = r['activa'] as bool? ?? true;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: C.d2,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: activa ? C.roseDark.withOpacity(.6) : C.brd,
+                            width: activa ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          // ── Cabecera ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                            child: Row(children: [
+                              Container(width: 52, height: 52,
+                                decoration: BoxDecoration(
+                                  color: activa ? C.roseBg : C.d3,
+                                  borderRadius: BorderRadius.circular(12)),
+                                child: Center(child: Text(
+                                  r['icono']?.toString() ?? '🎁',
+                                  style: const TextStyle(fontSize: 26)))),
+                              const SizedBox(width: 12),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(r['nombre']?.toString() ?? '',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(r['descripcion']?.toString() ?? '',
+                                    style: const TextStyle(color: C.muted, fontSize: 12),
+                                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                              ])),
+                              // Puntos costo
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: C.goldBg,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: C.gold.withOpacity(.4))),
+                                child: Column(children: [
+                                  Text('${r['costo_puntos']}',
+                                      style: const TextStyle(color: C.gold, fontWeight: FontWeight.bold, fontSize: 16)),
+                                  const Text('pts', style: TextStyle(color: C.muted, fontSize: 9)),
+                                ]),
+                              ),
+                            ]),
+                          ),
+                          // ── Tipo / Stock ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                            child: Wrap(spacing: 6, runSpacing: 4, children: [
+                              _badge(_tipoLabel(r['tipo']?.toString() ?? ''), C.rose),
+                              if ((r['stock'] as int?) != null && (r['stock'] as int) > 0)
+                                _badge('Stock: ${r['stock']}', C.info),
+                              if ((r['stock'] as int?) != null && (r['stock'] as int) == 0)
+                                _badge('AGOTADO', C.err),
+                              _badge(activa ? 'PUBLICADA' : 'PAUSADA',
+                                  activa ? C.ok : C.muted),
+                            ]),
+                          ),
+                          // ── Acciones ──
+                          Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(children: [
+                              Expanded(child: OutlinedButton.icon(
+                                onPressed: () => showDialog(context: context,
+                                    builder: (_) => _RecompensaDialog(recompensa: r, onOk: _load)),
+                                icon: const Icon(Icons.edit_outlined, size: 14),
+                                label: const Text('Editar', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: C.brd),
+                                  foregroundColor: C.txt,
+                                  minimumSize: const Size(0, 36)),
+                              )),
+                              const SizedBox(width: 8),
+                              Expanded(child: OutlinedButton.icon(
+                                onPressed: () => _toggleActiva(r),
+                                icon: Icon(activa ? Icons.pause_outlined : Icons.play_arrow_outlined, size: 14),
+                                label: Text(activa ? 'Pausar' : 'Publicar',
+                                    style: const TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: activa ? C.warn : C.ok),
+                                  foregroundColor: activa ? C.warn : C.ok,
+                                  minimumSize: const Size(0, 36)),
+                              )),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                onPressed: () => _eliminar(r['id'].toString()),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: C.err),
+                                  foregroundColor: C.err,
+                                  minimumSize: const Size(0, 36),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10)),
+                                child: const Icon(Icons.delete_outline, size: 16),
+                              ),
+                            ]),
+                          ),
+                        ]),
+                      );
+                    }),
+          ),
+  );
+
+  String _tipoLabel(String tipo) => switch (tipo) {
+    'descuento'       => '% Descuento',
+    'servicio_gratis' => '✂️ Servicio gratis',
+    'producto'        => '🛍️ Producto',
+    'efectivo'        => '💵 Efectivo',
+    _                 => '🎁 Recompensa',
+  };
+}
+
+// ══════════════════════════════════════════════════════════
+// DIALOG: CREAR / EDITAR RECOMPENSA
+// ══════════════════════════════════════════════════════════
+class _RecompensaDialog extends StatefulWidget {
+  final Map<String, dynamic>? recompensa;
+  final VoidCallback onOk;
+  const _RecompensaDialog({this.recompensa, required this.onOk});
+  @override
+  State<_RecompensaDialog> createState() => _RecompensaDialogState();
+}
+
+class _RecompensaDialogState extends State<_RecompensaDialog> {
+  final _fk  = GlobalKey<FormState>();
+  late final _nom  = TextEditingController(text: widget.recompensa?['nombre']?.toString()       ?? '');
+  late final _des  = TextEditingController(text: widget.recompensa?['descripcion']?.toString()  ?? '');
+  late final _ico  = TextEditingController(text: widget.recompensa?['icono']?.toString()        ?? '🎁');
+  late final _cos  = TextEditingController(text: widget.recompensa?['costo_puntos']?.toString() ?? '');
+  late final _stk  = TextEditingController(text: widget.recompensa?['stock']?.toString()        ?? '');
+  late String _tipo = widget.recompensa?['tipo']?.toString() ?? 'descuento';
+  late bool   _activa = widget.recompensa?['activa'] as bool? ?? true;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    for (final c in [_nom, _des, _ico, _cos, _stk]) c.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (!_fk.currentState!.validate()) return;
+    setState(() => _loading = true);
+    final data = {
+      'nombre':       _nom.text.trim(),
+      'descripcion':  _des.text.trim(),
+      'icono':        _ico.text.trim().isEmpty ? '🎁' : _ico.text.trim(),
+      'costo_puntos': int.tryParse(_cos.text) ?? 0,
+      'tipo':         _tipo,
+      'activa':       _activa,
+      if (_stk.text.isNotEmpty) 'stock': int.tryParse(_stk.text),
+    };
+    if (widget.recompensa == null) {
+      await SB.addRecompensa(data);
+    } else {
+      await SB.updateRecompensa(widget.recompensa!['id'].toString(), data);
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+    Navigator.pop(context);
+    widget.onOk();
+    _snack(context, widget.recompensa == null ? 'Recompensa creada ✓' : 'Recompensa actualizada ✓');
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Form(key: _fk, child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _dlgHead(widget.recompensa == null ? 'Nueva Recompensa' : 'Editar Recompensa', context),
+          const SizedBox(height: 14),
+
+          // Ícono + Nombre
+          Row(children: [
+            SizedBox(width: 80, child: _F(c: _ico, label: 'Icono')),
+            const SizedBox(width: 10),
+            Expanded(child: _F(c: _nom, label: 'Nombre *',
+                val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null)),
+          ]),
+          const SizedBox(height: 10),
+
+          // Descripción
+          _F(c: _des, label: 'Descripción', lines: 2),
+          const SizedBox(height: 10),
+
+          // Tipo
+          const Text('Tipo de recompensa',
+              style: TextStyle(color: C.muted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            for (final t in ['descuento', 'servicio_gratis', 'producto', 'efectivo'])
+              GestureDetector(
+                onTap: () => setState(() => _tipo = t),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _tipo == t ? C.roseDark : C.d3,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _tipo == t ? C.rose : C.brd)),
+                  child: Text(_tipoLabel(t), style: TextStyle(
+                    color: _tipo == t ? C.cream : C.muted,
+                    fontSize: 12, fontWeight: _tipo == t ? FontWeight.bold : FontWeight.normal)),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 10),
+
+          // Costo y Stock
+          Row(children: [
+            Expanded(child: _F(c: _cos, label: 'Costo (pts) *',
+                kb: TextInputType.number,
+                val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
+            const SizedBox(width: 10),
+            Expanded(child: _F(c: _stk, label: 'Stock (vacío = ∞)',
+                kb: TextInputType.number)),
+          ]),
+          const SizedBox(height: 10),
+
+          // Activa toggle
+          Row(children: [
+            Switch(
+              value: _activa,
+              onChanged: (v) => setState(() => _activa = v),
+              activeColor: C.rose,
+            ),
+            Text(_activa ? 'Publicada (visible para clientes)' : 'Pausada (oculta)',
+                style: TextStyle(color: _activa ? C.rose : C.muted, fontSize: 13)),
+          ]),
+          const SizedBox(height: 16),
+
+          _loading
+              ? const Center(child: CircularProgressIndicator(color: C.rose))
+              : ElevatedButton(
+                  onPressed: _guardar,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: C.roseDark, foregroundColor: C.cream),
+                  child: Text(widget.recompensa == null ? 'Crear recompensa' : 'Guardar cambios')),
+        ],
+      )),
+    ),
+  );
+
+  String _tipoLabel(String t) => switch (t) {
+    'descuento'       => '% Descuento',
+    'servicio_gratis' => '✂️ Gratis',
+    'producto'        => '🛍️ Producto',
+    'efectivo'        => '💵 Efectivo',
+    _                 => '🎁 Otro',
+  };
+}
+
+// ══════════════════════════════════════════════════════════
+// 2. CANJES — ver y aprobar/rechazar canjes de clientes
+// ══════════════════════════════════════════════════════════
+class _AdmCanjesPage extends StatefulWidget {
+  const _AdmCanjesPage();
+  @override
+  State<_AdmCanjesPage> createState() => _AdmCanjesPageState();
+}
+
+class _AdmCanjesPageState extends State<_AdmCanjesPage> {
+  List<Map<String, dynamic>> _canjes = [];
+  bool _loading = true;
+  String _filtro = ''; // '', 'pendiente', 'entregado', 'cancelado'
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final c = await SB.getTodosCanjes();
+    if (mounted) setState(() { _canjes = c; _loading = false; });
+  }
+
+  List<Map<String, dynamic>> get _filtrados =>
+      _filtro.isEmpty ? _canjes : _canjes.where((c) => c['estado'] == _filtro).toList();
+
+  Future<void> _aprobar(Map<String, dynamic> canje) async {
+    final ok = await _confirm(context, 'Entregar recompensa',
+        '¿Marcar "${canje['nombre']}" como entregado a ${canje['usuarios']?['nombre'] ?? 'cliente'}?');
+    if (!ok) return;
+    await SB.aprobarCanje(canje['id'].toString());
+    _load();
+    if (mounted) _snack(context, 'Canje marcado como entregado ✓');
+  }
+
+  Future<void> _cancelar(Map<String, dynamic> canje) async {
+    final ok = await _confirm(context, 'Cancelar canje',
+        '¿Cancelar y devolver ${canje['costo_puntos']} pts al cliente?');
+    if (!ok) return;
+    await SB.cancelarCanje(canje['id'].toString());
+    _load();
+    if (mounted) _snack(context, 'Canje cancelado y puntos devueltos');
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    // Filtro de estado
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          for (final f in [
+            ('', 'Todos'),
+            ('pendiente',  'Pendientes'),
+            ('entregado',  'Entregados'),
+            ('cancelado',  'Cancelados'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => setState(() => _filtro = f.$1),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _filtro == f.$1 ? C.roseDark : C.d3,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _filtro == f.$1 ? C.rose : C.brd)),
+                  child: Text(f.$2, style: TextStyle(
+                    color: _filtro == f.$1 ? C.cream : C.muted,
+                    fontSize: 12, fontWeight: _filtro == f.$1 ? FontWeight.bold : FontWeight.normal)),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    ),
+    const SizedBox(height: 8),
+    Expanded(child: _loading
+        ? const Center(child: CircularProgressIndicator(color: C.rose))
+        : RefreshIndicator(color: C.rose, onRefresh: _load,
+            child: _filtrados.isEmpty
+                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Text('📋', style: TextStyle(fontSize: 48)),
+                    const SizedBox(height: 10),
+                    Text(_filtro.isEmpty ? 'Sin canjes registrados' : 'Sin canjes $_filtro',
+                        style: const TextStyle(color: C.muted)),
+                  ]))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _filtrados.length,
+                    itemBuilder: (_, i) {
+                      final c     = _filtrados[i];
+                      final est   = c['estado']?.toString() ?? 'pendiente';
+                      final col   = _colEstado(est);
+                      final cliNm = (c['usuarios'] as Map?)?['nombre']?.toString() ?? 'Cliente';
+                      final cliCel = (c['usuarios'] as Map?)?['celular']?.toString() ?? '';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: C.d2,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: C.brd)),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Container(width: 42, height: 42,
+                              decoration: BoxDecoration(
+                                color: C.roseBg, borderRadius: BorderRadius.circular(10)),
+                              child: const Center(child: Text('🎁', style: TextStyle(fontSize: 22)))),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(c['nombre']?.toString() ?? '',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              Text('$cliNm • $cliCel',
+                                  style: const TextStyle(color: C.muted, fontSize: 11)),
+                            ])),
+                            _badge(est.toUpperCase(), col),
+                          ]),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('-${c['costo_puntos']} pts',
+                                    style: const TextStyle(color: C.err, fontWeight: FontWeight.bold, fontSize: 13)),
+                                Text(_fmtFechaHora(c['creado_en']?.toString() ?? ''),
+                                    style: const TextStyle(color: C.dim, fontSize: 11)),
+                              ]),
+                              if (est == 'pendiente') Row(children: [
+                                OutlinedButton(
+                                  onPressed: () => _cancelar(c),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: C.err),
+                                    foregroundColor: C.err,
+                                    minimumSize: Size.zero,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
+                                  child: const Text('Cancelar', style: TextStyle(fontSize: 11))),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  onPressed: () => _aprobar(c),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: C.ok, foregroundColor: C.black,
+                                    minimumSize: Size.zero,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+                                  child: const Text('✓ Entregar', style: TextStyle(fontSize: 11))),
+                              ]),
+                              if (est == 'entregado')
+                                _badge('✓ Listo', C.ok),
+                            ],
+                          ),
+                        ]),
+                      );
+                    }),
+          )),
+  ]);
+
+  Color _colEstado(String e) => switch (e) {
+    'pendiente'  => C.warn,
+    'entregado'  => C.ok,
+    'cancelado'  => C.err,
+    _            => C.muted,
+  };
+}
+
+// ══════════════════════════════════════════════════════════
+// 3. HISTORIAL DE PUNTOS — todos los clientes
+// ══════════════════════════════════════════════════════════
+class _AdmHistorialPuntosPage extends StatefulWidget {
+  const _AdmHistorialPuntosPage();
+  @override
+  State<_AdmHistorialPuntosPage> createState() => _AdmHistorialPuntosPageState();
+}
+
+class _AdmHistorialPuntosPageState extends State<_AdmHistorialPuntosPage> {
+  List<Map<String, dynamic>> _historial = [];
+  List<Map<String, dynamic>> _clientes  = [];
+  String _clienteId = '';
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _loadAll(); }
+
+  Future<void> _loadAll() async {
+    setState(() => _loading = true);
+    final results = await Future.wait([
+      SB.getTodoHistorial(),
+      SB.getClientes(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _historial = (results[0] as List).cast<Map<String, dynamic>>();
+      _clientes  = (results[1] as List).cast<Map<String, dynamic>>();
+      _loading   = false;
+    });
+  }
+
+  List<Map<String, dynamic>> get _filtrado => _clienteId.isEmpty
+      ? _historial
+      : _historial.where((h) => h['usuario_id'] == _clienteId).toList();
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    // Filtro por cliente
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: DropdownButtonFormField<String>(
+        value: _clienteId.isEmpty ? null : _clienteId,
+        dropdownColor: C.d3,
+        style: const TextStyle(color: C.txt),
+        decoration: const InputDecoration(
+          labelText: 'Filtrar por cliente',
+          prefixIcon: Icon(Icons.person, color: C.muted, size: 18)),
+        hint: const Text('Todos los clientes'),
+        items: [
+          const DropdownMenuItem(value: '', child: Text('Todos los clientes')),
+          ..._clientes.map((c) => DropdownMenuItem(
+            value: c['id'].toString(),
+            child: Text('${c['nombre']} (${c['celular']})'))),
+        ],
+        onChanged: (v) => setState(() => _clienteId = v ?? ''),
+      ),
+    ),
+    const SizedBox(height: 8),
+    // Resumen rápido
+    if (_clienteId.isNotEmpty) ...[
+      Builder(builder: (_) {
+        final ganados   = _filtrado.where((h) => (h['puntos'] as int? ?? 0) > 0).fold<int>(0, (s, h) => s + (h['puntos'] as int));
+        final canjeados = _filtrado.where((h) => (h['puntos'] as int? ?? 0) < 0).fold<int>(0, (s, h) => s + (h['puntos'] as int));
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(children: [
+            Expanded(child: _miniResumen('⭐', 'Ganados', '+$ganados', C.gold)),
+            const SizedBox(width: 8),
+            Expanded(child: _miniResumen('🎁', 'Canjeados', '$canjeados', C.err)),
+            const SizedBox(width: 8),
+            Expanded(child: _miniResumen('💰', 'Saldo', '${ganados + canjeados}', C.rose)),
+          ]),
+        );
+      }),
+      const SizedBox(height: 8),
+    ],
+    Expanded(child: _loading
+        ? const Center(child: CircularProgressIndicator(color: C.rose))
+        : RefreshIndicator(color: C.rose, onRefresh: _loadAll,
+            child: _filtrado.isEmpty
+                ? const Center(child: Text('Sin historial', style: TextStyle(color: C.muted)))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _filtrado.length,
+                    itemBuilder: (_, i) {
+                      final h   = _filtrado[i];
+                      final pts = (h['puntos'] as int?) ?? 0;
+                      final neg = pts < 0;
+                      final cliNm = (h['usuarios'] as Map?)?['nombre']?.toString() ?? '';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: C.d2, borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: C.brd)),
+                        child: Row(children: [
+                          Container(width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: neg ? C.err.withOpacity(.12) : C.goldBg,
+                              borderRadius: BorderRadius.circular(8)),
+                            child: Center(child: Text(neg ? '🎁' : '⭐',
+                                style: const TextStyle(fontSize: 18)))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            if (cliNm.isNotEmpty && _clienteId.isEmpty)
+                              Text(cliNm, style: const TextStyle(color: C.rose, fontSize: 11, fontWeight: FontWeight.w600)),
+                            Text(h['concepto']?.toString() ?? '',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                            Text(_fmtFechaHora(h['fecha']?.toString() ?? ''),
+                                style: const TextStyle(color: C.muted, fontSize: 10)),
+                          ])),
+                          _badge(neg ? '$pts pts' : '+$pts pts', neg ? C.err : C.gold),
+                        ]),
+                      );
+                    }),
+          )),
+  ]);
+
+  Widget _miniResumen(String icon, String label, String val, Color col) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+    decoration: BoxDecoration(
+      color: col.withOpacity(.08),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: col.withOpacity(.3))),
+    child: Column(children: [
+      Text(icon, style: const TextStyle(fontSize: 18)),
+      const SizedBox(height: 2),
+      Text(val, style: TextStyle(color: col, fontWeight: FontWeight.bold, fontSize: 14)),
+      Text(label, style: const TextStyle(color: C.muted, fontSize: 10)),
+    ]),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// ADMIN SERVICIOS como pantalla completa (navegación desde AppBar)
+// ────────────────────────────────────────────────────────────
+class AdmServiciosScreen extends StatelessWidget {
+  const AdmServiciosScreen({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Servicios')),
+    body: const AdmServiciosTab(),
+  );
 }
 
 // ────────────────────────────────────────────────────────────

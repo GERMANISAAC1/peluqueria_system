@@ -20,10 +20,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
-const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
-const _supabaseAnon = 'TU_ANON_KEY';
 
-// ────────────────────────────────────────────────────────────
+
+const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
+const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
 // ENTRY POINT
 // ────────────────────────────────────────────────────────────
 void main() async {

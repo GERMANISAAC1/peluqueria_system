@@ -20,9 +20,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
 // ────────────────────────────────────────────────────────────
-
-const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
-const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
+const _supabaseUrl  = 'https://TU_PROYECTO.supabase.co';
+const _supabaseAnon = 'TU_ANON_KEY';
 
 // ────────────────────────────────────────────────────────────
 // ENTRY POINT
@@ -511,6 +510,33 @@ class SB {
     );
     return _sb.storage.from('app-assets').getPublicUrl(path);
   }
+
+  // ── LOYALTY CONFIG ──
+  static Map<String, dynamic> get _loyaltyDefault => {
+    'id': 'main',
+    'nivel1_nombre': 'Bronce', 'nivel1_desde': 0,   'nivel1_hasta': 199,   'nivel1_descuento': 5,  'nivel1_beneficio': '5% descuento en todos los servicios',
+    'nivel2_nombre': 'Plata',  'nivel2_desde': 200,  'nivel2_hasta': 499,   'nivel2_descuento': 10, 'nivel2_beneficio': '10% descuento + 1 corte gratis al mes',
+    'nivel3_nombre': 'Oro',    'nivel3_desde': 500,  'nivel3_hasta': 99999, 'nivel3_descuento': 20, 'nivel3_beneficio': '20% descuento + prioridad de cita',
+  };
+
+  static Future<Map<String, dynamic>> getLoyaltyConfig() async {
+    try {
+      final r = await _sb.from('loyalty_config').select().eq('id', 'main').maybeSingle();
+      return r ?? _loyaltyDefault;
+    } catch (_) { return _loyaltyDefault; }
+  }
+
+  static Future<void> updateLoyaltyConfig(Map<String, dynamic> data) async {
+    try {
+      final ex = await _sb.from('loyalty_config').select('id').eq('id', 'main').maybeSingle();
+      if (ex == null) {
+        await _sb.from('loyalty_config').insert({'id': 'main', ...data});
+      } else {
+        await _sb.from('loyalty_config').update(data).eq('id', 'main');
+      }
+    } catch (_) {}
+  }
+
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1509,10 +1535,11 @@ class CliPuntosTab extends StatefulWidget {
 
 class _CliPuntosState extends State<CliPuntosTab> {
   Map<String, dynamic>? _u;
+  Map<String, dynamic> _lcfg = {};          // loyalty config
   List<Map<String, dynamic>> _hist = [];
   List<Map<String, dynamic>> _recompensas = [];
   List<Map<String, dynamic>> _misCanjes = [];
-  int _tabIdx = 0; // 0=puntos, 1=canjear, 2=mis canjes
+  int _tabIdx = 0;
 
   @override
   void initState() { super.initState(); _u = widget.u; _reload(); }
@@ -1523,21 +1550,66 @@ class _CliPuntosState extends State<CliPuntosTab> {
       SB.getHistorial(widget.u['id'].toString()),
       SB.getRecompensas(soloActivas: true),
       SB.getMisCanjes(widget.u['id'].toString()),
+      SB.getLoyaltyConfig(),
     ]);
     if (!mounted) return;
     setState(() {
-      _u         = (results[0] as Map<String, dynamic>?) ?? _u;
-      _hist      = (results[1] as List).cast<Map<String, dynamic>>();
+      _u           = (results[0] as Map<String, dynamic>?) ?? _u;
+      _hist        = (results[1] as List).cast<Map<String, dynamic>>();
       _recompensas = (results[2] as List).cast<Map<String, dynamic>>();
-      _misCanjes = (results[3] as List).cast<Map<String, dynamic>>();
+      _misCanjes   = (results[3] as List).cast<Map<String, dynamic>>();
+      _lcfg        = results[4] as Map<String, dynamic>;
     });
   }
 
   int    get _pts   => (_u ?? widget.u)['puntos'] as int? ?? 0;
-  String get _nivel { if (_pts >= 500) return '🥇 Oro'; if (_pts >= 200) return '🥈 Plata'; return '🥉 Bronce'; }
-  double get _prog  { if (_pts >= 500) return 1.0; if (_pts >= 200) return (_pts-200)/300.0; return _pts/200.0; }
-  int    get _falt  { if (_pts >= 500) return 0; if (_pts >= 200) return 500-_pts; return 200-_pts; }
-  double get _desc  { if (_pts >= 500) return 20; if (_pts >= 200) return 10; return 5; }
+
+  // Helpers dinámicos basados en loyalty config
+  int get _n1desde => (_lcfg['nivel1_desde']  as int?) ?? 0;
+  int get _n1hasta => (_lcfg['nivel1_hasta']  as int?) ?? 199;
+  int get _n2desde => (_lcfg['nivel2_desde']  as int?) ?? 200;
+  int get _n2hasta => (_lcfg['nivel2_hasta']  as int?) ?? 499;
+  int get _n3desde => (_lcfg['nivel3_desde']  as int?) ?? 500;
+  int get _n1dsc   => (_lcfg['nivel1_descuento'] as int?) ?? 5;
+  int get _n2dsc   => (_lcfg['nivel2_descuento'] as int?) ?? 10;
+  int get _n3dsc   => (_lcfg['nivel3_descuento'] as int?) ?? 20;
+  String get _n1nom => _lcfg['nivel1_nombre']?.toString() ?? 'Bronce';
+  String get _n2nom => _lcfg['nivel2_nombre']?.toString() ?? 'Plata';
+  String get _n3nom => _lcfg['nivel3_nombre']?.toString() ?? 'Oro';
+  String get _n1ben => _lcfg['nivel1_beneficio']?.toString() ?? '';
+  String get _n2ben => _lcfg['nivel2_beneficio']?.toString() ?? '';
+  String get _n3ben => _lcfg['nivel3_beneficio']?.toString() ?? '';
+
+  String get _nivel {
+    if (_pts >= _n3desde) return '🥇 $_n3nom';
+    if (_pts >= _n2desde) return '🥈 $_n2nom';
+    return '🥉 $_n1nom';
+  }
+
+  double get _prog {
+    if (_pts >= _n3desde) return 1.0;
+    if (_pts >= _n2desde) {
+      final rango = _n3desde - _n2desde;
+      return rango > 0 ? (_pts - _n2desde) / rango : 1.0;
+    }
+    return _n1hasta > 0 ? (_pts / _n1hasta).clamp(0.0, 1.0) : 0.0;
+  }
+
+  int get _falt {
+    if (_pts >= _n3desde) return 0;
+    if (_pts >= _n2desde) return _n3desde - _pts;
+    return _n1hasta + 1 - _pts;
+  }
+
+  double get _desc {
+    if (_pts >= _n3desde) return _n3dsc.toDouble();
+    if (_pts >= _n2desde) return _n2dsc.toDouble();
+    return _n1dsc.toDouble();
+  }
+
+  bool get _esNivel1 => _pts < _n2desde;
+  bool get _esNivel2 => _pts >= _n2desde && _pts < _n3desde;
+  bool get _esNivel3 => _pts >= _n3desde;
 
   Future<void> _canjear(Map<String, dynamic> recompensa) async {
     final costo = (recompensa['costo_puntos'] as int?) ?? 0;
@@ -1720,11 +1792,11 @@ class _CliPuntosState extends State<CliPuntosTab> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('PROGRAMA DE LEALTAD', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 14),
-        _nivelRow('🥉', 'Bronce', '0 — 199 pts', '5% descuento en todos los servicios', _pts < 200),
+        _nivelRow('🥉', _n1nom, '$_n1desde — $_n1hasta pts', _n1ben.isNotEmpty ? _n1ben : '$_n1dsc% descuento', _esNivel1),
         const SizedBox(height: 10),
-        _nivelRow('🥈', 'Plata',  '200 — 499 pts', '10% descuento + 1 corte gratis/mes', _pts >= 200 && _pts < 500),
+        _nivelRow('🥈', _n2nom, '$_n2desde — $_n2hasta pts', _n2ben.isNotEmpty ? _n2ben : '$_n2dsc% descuento', _esNivel2),
         const SizedBox(height: 10),
-        _nivelRow('🥇', 'Oro',    '500+ pts', '20% descuento + prioridad de cita', _pts >= 500),
+        _nivelRow('🥇', _n3nom, '$_n3desde+ pts', _n3ben.isNotEmpty ? _n3ben : '$_n3dsc% descuento', _esNivel3),
       ])),
     const SizedBox(height: 14),
 
@@ -2031,34 +2103,32 @@ class _AdminMainState extends State<AdminMain> {
       AdmDashTab(onLogout: _logout),
       const AdmCitasTab(),
       const AdmClientesTab(),
-      const AdmPuntosTab(),      // ← Gestión de puntos, recompensas y canjes
-      const AdmMembresiaTab(),   // ← Planes editables
+      const AdmPuntosTab(),
+      const AdmConfigTab(),   // ← servicios + lealtad + logo + membresía
     ];
     return Scaffold(
       appBar: AppBar(
         title: const Text('✂️ Admin — Kety B&S'),
         actions: [
-          IconButton(icon: const Icon(Icons.content_cut, color: C.muted),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const AdmServiciosScreen())),
-              tooltip: 'Servicios'),
-          IconButton(icon: const Icon(Icons.bar_chart, color: C.muted),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ReportesScreen())),
-              tooltip: 'Reportes'),
-          IconButton(icon: const Icon(Icons.logout, color: C.muted),
-              onPressed: _logout, tooltip: 'Salir'),
+          IconButton(
+            icon: const Icon(Icons.bar_chart, color: C.muted),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ReportesScreen())),
+            tooltip: 'Reportes'),
+          IconButton(
+            icon: const Icon(Icons.logout, color: C.muted),
+            onPressed: _logout, tooltip: 'Salir'),
         ],
       ),
       body: IndexedStack(index: _tab, children: tabs),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tab, onTap: (i) => setState(() => _tab = i),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),      activeIcon: Icon(Icons.dashboard),         label: 'Panel'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined),  activeIcon: Icon(Icons.calendar_today),    label: 'Citas'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_outline),           activeIcon: Icon(Icons.people),            label: 'Clientes'),
-          BottomNavigationBarItem(icon: Icon(Icons.card_giftcard_outlined),   activeIcon: Icon(Icons.card_giftcard),     label: 'Puntos'),
-          BottomNavigationBarItem(icon: Icon(Icons.workspace_premium_outlined),activeIcon: Icon(Icons.workspace_premium),label: 'Membresía'),
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined),     activeIcon: Icon(Icons.dashboard),     label: 'Panel'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_today_outlined), activeIcon: Icon(Icons.calendar_today),label: 'Citas'),
+          BottomNavigationBarItem(icon: Icon(Icons.people_outline),          activeIcon: Icon(Icons.people),        label: 'Clientes'),
+          BottomNavigationBarItem(icon: Icon(Icons.card_giftcard_outlined),  activeIcon: Icon(Icons.card_giftcard), label: 'Puntos'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined),       activeIcon: Icon(Icons.settings),      label: 'Config'),
         ],
       ),
     );
@@ -3055,55 +3125,140 @@ class AdmServiciosTab extends StatefulWidget {
 
 class _AdmServiciosState extends State<AdmServiciosTab> {
   List<Map<String, dynamic>> _svcs = [];
+  bool _mostrarInactivos = false;
 
   @override
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    final s = await SB.getServicios(); if (mounted) setState(() => _svcs = s);
+    final s = await SB.getServicios(); // trae todos (activos e inactivos)
+    if (mounted) setState(() => _svcs = s);
   }
 
   Future<void> _eliminar(String id) async {
-    if (!await _confirm(context, 'Eliminar servicio', '¿Confirmar eliminación?')) return;
+    if (!await _confirm(context, 'Eliminar servicio',
+        'El servicio se ocultará del catálogo y no podrá seleccionarse en nuevas citas.')) return;
     await SB.deleteServicio(id); _load();
-    if (mounted) _snack(context, 'Servicio eliminado', err: true);
+    if (mounted) _snack(context, 'Servicio desactivado', err: true);
   }
+
+  Future<void> _toggleActivo(Map<String, dynamic> s) async {
+    final nuevoEstado = !(s['activo'] as bool? ?? true);
+    await SB.updateServicio(s['id'].toString(), {'activo': nuevoEstado});
+    _load();
+    if (mounted) _snack(context,
+        nuevoEstado ? '${s['nombre']} activado ✓' : '${s['nombre']} desactivado');
+  }
+
+  List<Map<String, dynamic>> get _filtrados => _mostrarInactivos
+      ? _svcs
+      : _svcs.where((s) => s['activo'] as bool? ?? true).toList();
 
   @override
   Widget build(BuildContext context) => Column(children: [
     Padding(padding: const EdgeInsets.fromLTRB(16,12,16,8),
-      child: ElevatedButton.icon(onPressed: () => showDialog(context: context,
-          builder: (_) => NuevoServicioDialog(onOk: _load)),
-          icon: const Icon(Icons.add), label: const Text('Nuevo Servicio'))),
-    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
-      child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: _svcs.length,
-        itemBuilder: (_, i) {
-          final s = _svcs[i];
-          return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-            child: Row(children: [
-              Text(s['icono']?.toString() ?? '✂️', style: const TextStyle(fontSize: 30)),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                Text(s['descripcion']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
-                const SizedBox(height: 5),
-                Wrap(spacing: 6, children: [
-                  _badge('S/${(s['precio'] as num).toInt()}', C.gold),
-                  _badge('${s['duracion_min']}min', C.muted),
-                  _badge('+${s['puntos_otorga']}pts', C.info),
-                ]),
-              ])),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(icon: const Icon(Icons.edit_outlined, color: C.gold, size: 18),
-                    onPressed: () => showDialog(context: context,
-                        builder: (_) => EditServicioDialog(svc: s, onOk: _load))),
-                IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 18),
-                    onPressed: () => _eliminar(s['id'].toString())),
-              ]),
-            ]));
-        }))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ElevatedButton.icon(
+          onPressed: () => showDialog(context: context,
+              builder: (_) => NuevoServicioDialog(onOk: _load)),
+          icon: const Icon(Icons.add), label: const Text('Nuevo Servicio')),
+        const SizedBox(height: 8),
+        // Toggle mostrar inactivos
+        Row(children: [
+          Switch(
+            value: _mostrarInactivos,
+            onChanged: (v) => setState(() => _mostrarInactivos = v),
+            activeColor: C.rose,
+          ),
+          const SizedBox(width: 6),
+          Text('Mostrar inactivos (${_svcs.where((s) => !(s['activo'] as bool? ?? true)).length})',
+              style: const TextStyle(color: C.muted, fontSize: 13)),
+        ]),
+      ])),
+    Expanded(child: RefreshIndicator(color: C.rose, onRefresh: _load,
+      child: _filtrados.isEmpty
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Text('✂️', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 8),
+              const Text('Sin servicios', style: TextStyle(color: C.muted)),
+            ]))
+          : ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _filtrados.length,
+              itemBuilder: (_, i) {
+                final s = _filtrados[i];
+                final activo = s['activo'] as bool? ?? true;
+                return Opacity(
+                  opacity: activo ? 1.0 : 0.5,
+                  child: Container(margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: activo ? C.d2 : C.d1,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: activo ? C.brd : C.brd.withOpacity(.4))),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Text(s['icono']?.toString() ?? '✂️', style: const TextStyle(fontSize: 28)),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Expanded(child: Text(s['nombre'].toString(),
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15,
+                                    color: activo ? C.txt : C.muted))),
+                            if (!activo) _badge('INACTIVO', C.err),
+                          ]),
+                          if ((s['descripcion'] ?? '').toString().isNotEmpty)
+                            Text(s['descripcion']?.toString() ?? '',
+                                style: const TextStyle(color: C.muted, fontSize: 12)),
+                          const SizedBox(height: 6),
+                          Wrap(spacing: 6, children: [
+                            _badge('S/${(s['precio'] as num).toInt()}', C.gold),
+                            _badge('${s['duracion_min']}min', C.muted),
+                            _badge('+${s['puntos_otorga']}pts', C.info),
+                          ]),
+                        ])),
+                      ]),
+                      const Divider(height: 14, color: C.brd),
+                      // Acciones en fila completa
+                      Row(children: [
+                        // Toggle activo/inactivo
+                        Expanded(child: GestureDetector(
+                          onTap: () => _toggleActivo(s),
+                          child: Row(children: [
+                            Icon(activo ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                color: activo ? C.ok : C.err, size: 18),
+                            const SizedBox(width: 6),
+                            Text(activo ? 'Activo' : 'Inactivo',
+                                style: TextStyle(color: activo ? C.ok : C.err, fontSize: 13)),
+                            Switch(
+                              value: activo, onChanged: (_) => _toggleActivo(s),
+                              activeColor: C.ok, inactiveThumbColor: C.err,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ]),
+                        )),
+                        // Editar
+                        OutlinedButton.icon(
+                          onPressed: () => showDialog(context: context,
+                              builder: (_) => EditServicioDialog(svc: s, onOk: _load)),
+                          icon: const Icon(Icons.edit_outlined, size: 15),
+                          label: const Text('Editar', style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: C.gold), foregroundColor: C.gold,
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7))),
+                        const SizedBox(width: 8),
+                        // Eliminar
+                        OutlinedButton.icon(
+                          onPressed: () => _eliminar(s['id'].toString()),
+                          icon: const Icon(Icons.delete_outline, size: 15),
+                          label: const Text('Quitar', style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: C.err), foregroundColor: C.err,
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7))),
+                      ]),
+                    ])));
+              }))),
   ]);
 }
 
@@ -3769,6 +3924,412 @@ class _AdmHistorialPuntosPageState extends State<_AdmHistorialPuntosPage> {
   );
 }
 
+// ════════════════════════════════════════════════════════════
+// ADMIN CONFIG TAB — Servicios · Lealtad · Membresía · Logo
+// ════════════════════════════════════════════════════════════
+class AdmConfigTab extends StatefulWidget {
+  const AdmConfigTab({super.key});
+  @override
+  State<AdmConfigTab> createState() => _AdmConfigTabState();
+}
+
+class _AdmConfigTabState extends State<AdmConfigTab>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tc = TabController(length: 4, vsync: this);
+
+  @override
+  void dispose() { _tc.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Container(
+      color: C.d1,
+      child: TabBar(
+        controller: _tc,
+        indicatorColor: C.rose,
+        indicatorWeight: 2,
+        labelColor: C.rose,
+        unselectedLabelColor: C.muted,
+        isScrollable: true,
+        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+        tabs: const [
+          Tab(icon: Icon(Icons.cut,             size: 18), text: 'Servicios'),
+          Tab(icon: Icon(Icons.star_outline,    size: 18), text: 'Lealtad'),
+          Tab(icon: Icon(Icons.workspace_premium_outlined, size: 18), text: 'Membresía'),
+          Tab(icon: Icon(Icons.image_outlined,  size: 18), text: 'Logo & App'),
+        ],
+      ),
+    ),
+    Expanded(child: TabBarView(controller: _tc, children: const [
+      AdmServiciosTab(),
+      _AdmLoyaltyConfigPage(),
+      AdmMembresiaTab(),
+      _AdmLogoConfigPage(),
+    ])),
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────
+// LEALTAD CONFIG — niveles, puntos y descuentos editables
+// ────────────────────────────────────────────────────────────
+class _AdmLoyaltyConfigPage extends StatefulWidget {
+  const _AdmLoyaltyConfigPage();
+  @override
+  State<_AdmLoyaltyConfigPage> createState() => _AdmLoyaltyConfigPageState();
+}
+
+class _AdmLoyaltyConfigPageState extends State<_AdmLoyaltyConfigPage> {
+  Map<String, dynamic> _cfg = {};
+  bool _loading = true, _saving = false;
+
+  // Controllers para los 3 niveles
+  final _n1nom = TextEditingController();
+  final _n1des = TextEditingController(); // desde
+  final _n1has = TextEditingController(); // hasta
+  final _n1dsc = TextEditingController(); // descuento %
+  final _n1ben = TextEditingController(); // beneficio texto
+
+  final _n2nom = TextEditingController();
+  final _n2des = TextEditingController();
+  final _n2has = TextEditingController();
+  final _n2dsc = TextEditingController();
+  final _n2ben = TextEditingController();
+
+  final _n3nom = TextEditingController();
+  final _n3des = TextEditingController();
+  final _n3dsc = TextEditingController();
+  final _n3ben = TextEditingController();
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  @override
+  void dispose() {
+    for (final c in [_n1nom,_n1des,_n1has,_n1dsc,_n1ben,
+                     _n2nom,_n2des,_n2has,_n2dsc,_n2ben,
+                     _n3nom,_n3des,_n3dsc,_n3ben]) c.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final cfg = await SB.getLoyaltyConfig();
+    if (!mounted) return;
+    setState(() {
+      _cfg = cfg;
+      _n1nom.text = cfg['nivel1_nombre']?.toString() ?? 'Bronce';
+      _n1des.text = cfg['nivel1_desde']?.toString() ?? '0';
+      _n1has.text = cfg['nivel1_hasta']?.toString() ?? '199';
+      _n1dsc.text = cfg['nivel1_descuento']?.toString() ?? '5';
+      _n1ben.text = cfg['nivel1_beneficio']?.toString() ?? '';
+
+      _n2nom.text = cfg['nivel2_nombre']?.toString() ?? 'Plata';
+      _n2des.text = cfg['nivel2_desde']?.toString() ?? '200';
+      _n2has.text = cfg['nivel2_hasta']?.toString() ?? '499';
+      _n2dsc.text = cfg['nivel2_descuento']?.toString() ?? '10';
+      _n2ben.text = cfg['nivel2_beneficio']?.toString() ?? '';
+
+      _n3nom.text = cfg['nivel3_nombre']?.toString() ?? 'Oro';
+      _n3des.text = cfg['nivel3_desde']?.toString() ?? '500';
+      _n3dsc.text = cfg['nivel3_descuento']?.toString() ?? '20';
+      _n3ben.text = cfg['nivel3_beneficio']?.toString() ?? '';
+      _loading = false;
+    });
+  }
+
+  Future<void> _guardar() async {
+    setState(() => _saving = true);
+    try {
+      await SB.updateLoyaltyConfig({
+        'nivel1_nombre'   : _n1nom.text.trim(),
+        'nivel1_desde'    : int.tryParse(_n1des.text) ?? 0,
+        'nivel1_hasta'    : int.tryParse(_n1has.text) ?? 199,
+        'nivel1_descuento': int.tryParse(_n1dsc.text) ?? 5,
+        'nivel1_beneficio': _n1ben.text.trim(),
+
+        'nivel2_nombre'   : _n2nom.text.trim(),
+        'nivel2_desde'    : int.tryParse(_n2des.text) ?? 200,
+        'nivel2_hasta'    : int.tryParse(_n2has.text) ?? 499,
+        'nivel2_descuento': int.tryParse(_n2dsc.text) ?? 10,
+        'nivel2_beneficio': _n2ben.text.trim(),
+
+        'nivel3_nombre'   : _n3nom.text.trim(),
+        'nivel3_desde'    : int.tryParse(_n3des.text) ?? 500,
+        'nivel3_hasta'    : 99999,
+        'nivel3_descuento': int.tryParse(_n3dsc.text) ?? 20,
+        'nivel3_beneficio': _n3ben.text.trim(),
+      });
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _snack(context, 'Programa de lealtad actualizado ✓');
+    } catch (e) {
+      if (mounted) { setState(() => _saving = false); _snack(context, 'Error: $e', err: true); }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator(color: C.rose));
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Banner informativo
+        Container(
+          padding: const EdgeInsets.all(14),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: C.roseBg, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: C.roseDark.withOpacity(.5))),
+          child: Row(children: [
+            const Text('💡', style: TextStyle(fontSize: 20)),
+            const SizedBox(width: 10),
+            const Expanded(child: Text(
+              'Define los 3 niveles del programa de lealtad. '
+              'Los descuentos y beneficios se aplican automáticamente al cliente según sus puntos.',
+              style: TextStyle(color: C.muted, fontSize: 12))),
+          ])),
+
+        _nivelCard('🥉', 'Nivel 1 (más bajo)', C.warn,
+          nomCtrl: _n1nom, desdeCtrl: _n1des, hastaCtrl: _n1has,
+          dscCtrl: _n1dsc, benCtrl: _n1ben, mostrarHasta: true),
+
+        _nivelCard('🥈', 'Nivel 2 (intermedio)', C.info,
+          nomCtrl: _n2nom, desdeCtrl: _n2des, hastaCtrl: _n2has,
+          dscCtrl: _n2dsc, benCtrl: _n2ben, mostrarHasta: true),
+
+        _nivelCard('🥇', 'Nivel 3 (premium)', C.gold,
+          nomCtrl: _n3nom, desdeCtrl: _n3des, hastaCtrl: null,
+          dscCtrl: _n3dsc, benCtrl: _n3ben, mostrarHasta: false),
+
+        const SizedBox(height: 8),
+        _saving
+          ? const Center(child: CircularProgressIndicator(color: C.rose))
+          : SizedBox(width: double.infinity, child: ElevatedButton.icon(
+              onPressed: _guardar,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Guardar configuración de lealtad'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 52)))),
+      ]),
+    );
+  }
+
+  Widget _nivelCard(String emoji, String title, Color accent, {
+    required TextEditingController nomCtrl,
+    required TextEditingController desdeCtrl,
+    required TextEditingController? hastaCtrl,
+    required TextEditingController dscCtrl,
+    required TextEditingController benCtrl,
+    required bool mostrarHasta,
+  }) =>
+    Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: C.d2, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(.4), width: 1.5)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Cabecera coloreada
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(.12),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12))),
+          child: Row(children: [
+            Text(emoji, style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 10),
+            Text(title, style: TextStyle(
+              color: accent, fontSize: 14, fontWeight: FontWeight.bold)),
+          ])),
+        Padding(padding: const EdgeInsets.all(14), child: Column(children: [
+          // Nombre del nivel
+          _F(c: nomCtrl, label: 'Nombre del nivel', hint: 'Ej: Bronce'),
+          const SizedBox(height: 10),
+          // Rango de puntos
+          Row(children: [
+            Expanded(child: _F(c: desdeCtrl, label: 'Desde (pts)',
+                kb: TextInputType.number,
+                fmt: [FilteringTextInputFormatter.digitsOnly])),
+            if (mostrarHasta && hastaCtrl != null) ...[
+              const SizedBox(width: 10),
+              Expanded(child: _F(c: hastaCtrl, label: 'Hasta (pts)',
+                  kb: TextInputType.number,
+                  fmt: [FilteringTextInputFormatter.digitsOnly])),
+            ] else
+              const SizedBox(width: 0),
+            if (!mostrarHasta) ...[
+              const SizedBox(width: 10),
+              Expanded(child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: C.brd)),
+                child: const Text('En adelante', style: TextStyle(color: C.muted, fontSize: 13)))),
+            ],
+          ]),
+          const SizedBox(height: 10),
+          // Descuento
+          Row(children: [
+            Expanded(flex: 2, child: _F(c: dscCtrl, label: 'Descuento (%)',
+                kb: TextInputType.number,
+                fmt: [FilteringTextInputFormatter.digitsOnly])),
+            const SizedBox(width: 10),
+            Expanded(flex: 3, child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: dscCtrl,
+              builder: (_, val, __) => Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: accent.withOpacity(.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: accent.withOpacity(.3))),
+                child: Row(children: [
+                  Text('${val.text.isEmpty ? '0' : val.text}% OFF',
+                      style: TextStyle(color: accent, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 6),
+                  Text('en servicios', style: TextStyle(color: accent.withOpacity(.7), fontSize: 11)),
+                ])))),
+          ]),
+          const SizedBox(height: 10),
+          // Beneficio texto
+          _F(c: benCtrl, label: 'Descripción del beneficio',
+              hint: 'Ej: Corte gratis al mes', lines: 2),
+        ])),
+      ]),
+    );
+}
+
+// ────────────────────────────────────────────────────────────
+// LOGO & APP CONFIG
+// ────────────────────────────────────────────────────────────
+class _AdmLogoConfigPage extends StatefulWidget {
+  const _AdmLogoConfigPage();
+  @override
+  State<_AdmLogoConfigPage> createState() => _AdmLogoConfigPageState();
+}
+
+class _AdmLogoConfigPageState extends State<_AdmLogoConfigPage> {
+  Map<String, dynamic>? _cfg;
+  bool _loading = true, _uploading = false;
+  final _appNameCtrl = TextEditingController();
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  @override
+  void dispose() { _appNameCtrl.dispose(); super.dispose(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final cfg = await SB.getAppConfig();
+    if (!mounted) return;
+    setState(() {
+      _cfg = cfg;
+      _appNameCtrl.text = cfg?['app_name']?.toString() ?? 'Kety Barber & Salon';
+      _loading = false;
+    });
+  }
+
+  Future<void> _subirLogo() async {
+    final picker = ImagePicker();
+    final xfile = await picker.pickImage(
+        source: ImageSource.gallery, imageQuality: 80, maxWidth: 512);
+    if (xfile == null || !mounted) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await xfile.readAsBytes();
+      final ext   = xfile.name.split('.').last.toLowerCase();
+      final url   = await SB.subirLogo(bytes, ext.isEmpty ? 'png' : ext);
+      await SB.updateAppConfig({'logo_url': url, 'app_name': _appNameCtrl.text.trim()});
+      if (!mounted) return;
+      setState(() => _uploading = false);
+      await _load();
+      _snack(context, 'Logo actualizado ✓');
+    } catch (e) {
+      if (mounted) { setState(() => _uploading = false); _snack(context, 'Error: $e', err: true); }
+    }
+  }
+
+  Future<void> _guardarNombre() async {
+    try {
+      await SB.updateAppConfig({'app_name': _appNameCtrl.text.trim()});
+      if (!mounted) return;
+      _snack(context, 'Nombre actualizado ✓');
+    } catch (e) {
+      _snack(context, 'Error: $e', err: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator(color: C.rose));
+    final logoUrl = _cfg?['logo_url']?.toString();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Vista previa del logo ──
+        Center(child: Column(children: [
+          const _T('LOGO DEL SALÓN'),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: _uploading ? null : _subirLogo,
+            child: Stack(alignment: Alignment.bottomRight, children: [
+              Container(
+                width: 130, height: 130,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: C.roseDark, width: 2.5),
+                  color: C.d3),
+                child: ClipOval(child: logoUrl != null && logoUrl.isNotEmpty
+                    ? Image.network(logoUrl, fit: BoxFit.cover,
+                        loadingBuilder: (_, ch, prog) => prog == null ? ch
+                            : const Center(child: CircularProgressIndicator(color: C.rose, strokeWidth: 2)),
+                        errorBuilder: (_, __, ___) => const Center(
+                            child: Text('✂️', style: TextStyle(fontSize: 50))))
+                    : const Center(child: Text('✂️', style: TextStyle(fontSize: 50)))),
+              ),
+              Container(
+                width: 36, height: 36,
+                decoration: const BoxDecoration(color: C.roseDark, shape: BoxShape.circle),
+                child: _uploading
+                    ? const Padding(padding: EdgeInsets.all(8),
+                        child: CircularProgressIndicator(color: C.cream, strokeWidth: 2))
+                    : const Icon(Icons.camera_alt, color: C.cream, size: 18)),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text(_uploading ? 'Subiendo...' : 'Toca para cambiar el logo',
+              style: const TextStyle(color: C.muted, fontSize: 12)),
+        ])),
+        const SizedBox(height: 24),
+
+        // ── Nombre de la app ──
+        const _T('NOMBRE DE LA APP'),
+        const SizedBox(height: 8),
+        _F(c: _appNameCtrl, label: 'Nombre visible en la app',
+            hint: 'Kety Barber & Salon'),
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: ElevatedButton.icon(
+          onPressed: _guardarNombre,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Guardar nombre'),
+          style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 52)))),
+
+        const SizedBox(height: 24),
+        // Info de Supabase Storage
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: C.info.withOpacity(.08), borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: C.info.withOpacity(.3))),
+          child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('📦 Supabase Storage', style: TextStyle(color: C.info, fontWeight: FontWeight.bold, fontSize: 13)),
+            SizedBox(height: 6),
+            Text('El logo se guarda en el bucket "app-assets". '
+                'Asegúrate de tener el bucket creado y con política de acceso público en tu proyecto Supabase.',
+                style: TextStyle(color: C.muted, fontSize: 12)),
+          ])),
+      ]),
+    );
+  }
+}
+
 // ────────────────────────────────────────────────────────────
 // ADMIN SERVICIOS como pantalla completa (navegación desde AppBar)
 // ────────────────────────────────────────────────────────────
@@ -3782,7 +4343,10 @@ class AdmServiciosScreen extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────
-// ADMIN MEMBRESÍA (planes EDITABLES desde admin)
+// ADMIN MEMBRESÍA — CRUD completo de planes
+// Cada plan tiene: nombre, precio, período, descripción,
+// descuento %, límite de servicios/mes, beneficios, orden,
+// color de destacado y estado activo/inactivo.
 // ────────────────────────────────────────────────────────────
 class AdmMembresiaTab extends StatefulWidget {
   const AdmMembresiaTab({super.key});
@@ -3792,72 +4356,278 @@ class AdmMembresiaTab extends StatefulWidget {
 
 class _AdmMembresiaState extends State<AdmMembresiaTab> {
   List<Map<String, dynamic>> _planes = [];
+  bool _loading = true;
+  // Estadísticas de clientes por plan
+  Map<String, int> _conteo = {};
 
   @override
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    final p = await SB.getPlanes(); if (mounted) setState(() => _planes = p);
+    setState(() => _loading = true);
+    final planes   = await SB.getPlanes();
+    final clientes = await SB.getClientes();
+    // Contar cuántos clientes tienen cada plan
+    final Map<String, int> cnt = {};
+    for (final c in clientes) {
+      final m = c['membresia']?.toString() ?? 'Ninguna';
+      cnt[m] = (cnt[m] ?? 0) + 1;
+    }
+    if (mounted) setState(() { _planes = planes; _conteo = cnt; _loading = false; });
   }
 
-  Future<void> _eliminar(String id) async {
-    if (!await _confirm(context, 'Eliminar plan', '¿Confirmar eliminación?')) return;
-    await SB.deletePlan(id); _load();
+  Future<void> _eliminar(Map<String, dynamic> p) async {
+    final nombre = p['nombre']?.toString() ?? '';
+    final cnt    = _conteo[nombre] ?? 0;
+    final msg    = cnt > 0
+        ? '¿Eliminar "$nombre"? Hay $cnt cliente(s) con este plan activo. '
+          'Se les dejará con el plan pero no podrán renovarlo.'
+        : '¿Eliminar el plan "$nombre"?';
+    if (!await _confirm(context, 'Eliminar plan', msg)) return;
+    await SB.deletePlan(p['id'].toString());
+    _load();
     if (mounted) _snack(context, 'Plan eliminado', err: true);
   }
 
+  Future<void> _toggleActivo(Map<String, dynamic> p) async {
+    final nuevo = !(p['activo'] as bool? ?? true);
+    await SB.updatePlan(p['id'].toString(), {'activo': nuevo});
+    _load();
+    if (mounted) _snack(context, nuevo ? 'Plan activado ✓' : 'Plan ocultado');
+  }
+
   @override
-  Widget build(BuildContext context) => Column(children: [
-    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,8),
-      child: ElevatedButton.icon(
-        onPressed: () => showDialog(context: context,
-            builder: (_) => PlanDialog(onOk: _load)),
-        icon: const Icon(Icons.add), label: const Text('Nuevo Plan de Membresía'))),
-    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
-      child: _planes.isEmpty
-          ? const Center(child: Text('Sin planes configurados', style: TextStyle(color: C.muted)))
-          : ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _planes.length,
-              itemBuilder: (_, i) {
-                final p = _planes[i];
-                final beneficios = (p['beneficios'] as List?)?.cast<String>() ?? [];
-                return Container(margin: const EdgeInsets.only(bottom: 14), padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text(p['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Row(children: [
-                        RichText(text: TextSpan(children: [
-                          TextSpan(text: 'S/${(p['precio'] as num).toInt()}',
-                              style: const TextStyle(color: C.gold, fontSize: 18, fontWeight: FontWeight.bold)),
-                          TextSpan(text: '/${p['periodo']}',
-                              style: const TextStyle(color: C.muted, fontSize: 12)),
-                        ])),
-                        const SizedBox(width: 8),
-                        IconButton(icon: const Icon(Icons.edit_outlined, color: C.gold, size: 18),
-                            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                            onPressed: () => showDialog(context: context,
-                                builder: (_) => PlanDialog(plan: p, onOk: _load))),
-                        const SizedBox(width: 4),
-                        IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 18),
-                            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                            onPressed: () => _eliminar(p['id'].toString())),
-                      ]),
-                    ]),
-                    if ((p['descripcion'] ?? '').toString().isNotEmpty)
-                      Text(p['descripcion'].toString(), style: const TextStyle(color: C.muted, fontSize: 12)),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 6, runSpacing: 4,
-                        children: beneficios.map((b) => _badge('✅ $b', C.ok)).toList()),
-                    const SizedBox(height: 8),
-                    _badge('Orden: ${p['orden']}', C.muted),
-                  ]));
-              }))),
-  ]);
+  Widget build(BuildContext context) => _loading
+      ? const Center(child: CircularProgressIndicator(color: C.rose))
+      : Column(children: [
+          // ── Encabezado con stats ──
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            color: C.d1,
+            child: Column(children: [
+              Row(children: [
+                Expanded(child: ElevatedButton.icon(
+                  onPressed: () => _openPlanDialog(null),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Nuevo Plan'),
+                  style: ElevatedButton.styleFrom(minimumSize: const Size(0, 44)))),
+              ]),
+              const SizedBox(height: 10),
+              // Stats de suscriptores
+              Row(children: [
+                _miniStatCard('👑', '${_planes.length}',  'Planes'),
+                const SizedBox(width: 8),
+                _miniStatCard('👥', '${_conteo.values.fold(0,(a,b)=>a+b)}', 'Suscriptores'),
+                const SizedBox(width: 8),
+                _miniStatCard('✅', '${_planes.where((p) => p['activo'] as bool? ?? true).length}', 'Activos'),
+              ]),
+            ]),
+          ),
+
+          // ── Lista de planes ──
+          Expanded(child: RefreshIndicator(
+            color: C.rose, onRefresh: _load,
+            child: _planes.isEmpty
+                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Text('👑', style: TextStyle(fontSize: 48)),
+                    const SizedBox(height: 12),
+                    const Text('Sin planes configurados', style: TextStyle(color: C.muted, fontSize: 15)),
+                    const SizedBox(height: 6),
+                    TextButton.icon(
+                      onPressed: () => _openPlanDialog(null),
+                      icon: const Icon(Icons.add, color: C.rose),
+                      label: const Text('Crear primer plan', style: TextStyle(color: C.rose))),
+                  ]))
+                : ReorderableListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: _planes.length,
+                    onReorder: _reordenar,
+                    itemBuilder: (_, i) {
+                      final p = _planes[i];
+                      return _planCard(p, key: ValueKey(p['id']));
+                    }),
+          )),
+        ]);
+
+  /// Arrastra para reordenar los planes
+  Future<void> _reordenar(int oldIdx, int newIdx) async {
+    if (newIdx > oldIdx) newIdx--;
+    setState(() {
+      final item = _planes.removeAt(oldIdx);
+      _planes.insert(newIdx, item);
+    });
+    // Guardar nuevo orden en Supabase
+    for (int i = 0; i < _planes.length; i++) {
+      await SB.updatePlan(_planes[i]['id'].toString(), {'orden': i + 1});
+    }
+  }
+
+  Widget _planCard(Map<String, dynamic> p, {required Key key}) {
+    final activo      = p['activo'] as bool? ?? true;
+    final nombre      = p['nombre']?.toString() ?? '';
+    final precio      = (p['precio'] as num?)?.toDouble() ?? 0;
+    final periodo     = p['periodo']?.toString() ?? 'mes';
+    final desc        = (p['descuento_pct'] as int?) ?? 0;
+    final limServ     = p['limite_servicios'] as int?;
+    final beneficios  = (p['beneficios'] as List?)?.cast<String>() ?? [];
+    final suscriptores = _conteo[nombre] ?? 0;
+
+    // Color de acento según orden o campo color
+    final acentos = [C.rose, C.gold, C.info, C.ok, C.warn];
+    final orden   = (p['orden'] as int? ?? 1) - 1;
+    final accent  = acentos[orden.clamp(0, acentos.length - 1)];
+
+    return Container(
+      key: key,
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: activo ? C.d2 : C.d1,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: activo ? accent.withOpacity(.5) : C.brd, width: activo ? 1.5 : 1),
+        boxShadow: activo ? [BoxShadow(color: accent.withOpacity(.08), blurRadius: 12, offset: const Offset(0,4))] : [],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Cabecera con color del plan ──
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(.12),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(14))),
+          child: Row(children: [
+            // Ícono drag
+            const Icon(Icons.drag_handle, color: C.muted, size: 18),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(nombre, style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 17,
+                color: activo ? accent : C.muted)),
+              if ((p['descripcion'] ?? '').toString().isNotEmpty)
+                Text(p['descripcion'].toString(),
+                    style: const TextStyle(color: C.muted, fontSize: 12)),
+            ])),
+            // Precio
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              RichText(text: TextSpan(children: [
+                TextSpan(text: 'S/${precio.toInt()}',
+                    style: TextStyle(color: accent, fontSize: 20, fontWeight: FontWeight.bold)),
+                TextSpan(text: '/$periodo',
+                    style: const TextStyle(color: C.muted, fontSize: 12)),
+              ])),
+              if (desc > 0) _badge('$desc% DESC', C.gold),
+            ]),
+          ])),
+
+        // ── Cuerpo del plan ──
+        Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+          // Stats rápidas
+          Row(children: [
+            _miniInfoChip(Icons.people_outline, '$suscriptores suscritos', accent),
+            const SizedBox(width: 8),
+            if (limServ != null)
+              _miniInfoChip(Icons.cut_outlined, '$limServ servicios/mes', accent)
+            else
+              _miniInfoChip(Icons.all_inclusive, 'Ilimitado', accent),
+          ]),
+          const SizedBox(height: 10),
+
+          // Beneficios
+          if (beneficios.isNotEmpty) ...[
+            const Text('BENEFICIOS', style: TextStyle(color: C.muted, fontSize: 10, letterSpacing: 1)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 4,
+                children: beneficios.map((b) => _badge('✅ $b', C.ok)).toList()),
+            const SizedBox(height: 10),
+          ],
+
+          // ── Acciones ──
+          Row(children: [
+            // Toggle activo
+            GestureDetector(
+              onTap: () => _toggleActivo(p),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: activo ? C.ok.withOpacity(.1) : C.err.withOpacity(.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: activo ? C.ok.withOpacity(.4) : C.err.withOpacity(.4))),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(activo ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      size: 14, color: activo ? C.ok : C.err),
+                  const SizedBox(width: 4),
+                  Text(activo ? 'Activo' : 'Oculto',
+                      style: TextStyle(color: activo ? C.ok : C.err, fontSize: 12, fontWeight: FontWeight.w600)),
+                ])),
+            ),
+            const Spacer(),
+            // Editar
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, color: C.gold, size: 20),
+              tooltip: 'Editar plan',
+              onPressed: () => _openPlanDialog(p)),
+            // Duplicar
+            IconButton(
+              icon: const Icon(Icons.copy_outlined, color: C.muted, size: 18),
+              tooltip: 'Duplicar plan',
+              onPressed: () => _duplicar(p)),
+            // Eliminar
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: C.err, size: 20),
+              tooltip: 'Eliminar plan',
+              onPressed: () => _eliminar(p)),
+          ]),
+        ])),
+      ]),
+    );
+  }
+
+  Future<void> _duplicar(Map<String, dynamic> p) async {
+    final copia = Map<String, dynamic>.from(p)
+      ..remove('id')
+      ..['nombre'] = '${p['nombre']} (copia)'
+      ..['activo'] = false
+      ..['orden']  = _planes.length + 1;
+    await SB.addPlan(copia);
+    _load();
+    if (mounted) _snack(context, 'Plan duplicado — edítalo para activarlo');
+  }
+
+  void _openPlanDialog(Map<String, dynamic>? plan) => showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: C.d2,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => PlanDialog(plan: plan, onOk: _load),
+  );
+
+  Widget _miniStatCard(String icon, String val, String lbl) => Expanded(child: Container(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: C.brd)),
+    child: Column(children: [
+      Text(icon, style: const TextStyle(fontSize: 18)),
+      Text(val, style: const TextStyle(color: C.rose, fontWeight: FontWeight.bold, fontSize: 15)),
+      Text(lbl, style: const TextStyle(color: C.muted, fontSize: 10)),
+    ])));
+
+  Widget _miniInfoChip(IconData icon, String label, Color accent) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+        color: accent.withOpacity(.1), borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: accent.withOpacity(.3))),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 12, color: accent),
+      const SizedBox(width: 4),
+      Text(label, style: TextStyle(color: accent, fontSize: 11, fontWeight: FontWeight.w600)),
+    ]));
 }
 
 // ────────────────────────────────────────────────────────────
-// DIALOG: PLAN MEMBRESÍA (crear / editar)
+// DIALOG PLAN MEMBRESÍA — crear / editar
+// Campos: nombre, precio, período, descuento %, límite servicios/mes,
+//         descripción, beneficios (lista dinámica), orden, activo
 // ────────────────────────────────────────────────────────────
 class PlanDialog extends StatefulWidget {
   final Map<String, dynamic>? plan;
@@ -3868,99 +4638,276 @@ class PlanDialog extends StatefulWidget {
 }
 
 class _PlanDialogState extends State<PlanDialog> {
-  final _fk = GlobalKey<FormState>();
-  late final _nom = TextEditingController(text: widget.plan?['nombre']?.toString() ?? '');
-  late final _pre = TextEditingController(text: widget.plan != null ? (widget.plan!['precio'] as num).toInt().toString() : '');
-  late final _des = TextEditingController(text: widget.plan?['descripcion']?.toString() ?? '');
-  late final _ord = TextEditingController(text: widget.plan?['orden']?.toString() ?? '0');
-  late String _periodo = widget.plan?['periodo']?.toString() ?? 'mes';
-  // Beneficios como lista editable
-  final List<TextEditingController> _benCtrls = [];
-  bool _loading = false;
+  final _fk      = GlobalKey<FormState>();
+  late final _nom   = TextEditingController(text: widget.plan?['nombre']?.toString() ?? '');
+  late final _pre   = TextEditingController(
+      text: widget.plan != null ? (widget.plan!['precio'] as num).toInt().toString() : '');
+  late final _des   = TextEditingController(text: widget.plan?['descripcion']?.toString() ?? '');
+  late final _dsc   = TextEditingController(
+      text: widget.plan?['descuento_pct']?.toString() ?? '0');
+  late final _lim   = TextEditingController(
+      text: widget.plan?['limite_servicios']?.toString() ?? '');
+  late final _ord   = TextEditingController(
+      text: widget.plan?['orden']?.toString() ?? '1');
+
+  late String  _periodo  = widget.plan?['periodo']?.toString() ?? 'mes';
+  late bool    _activo   = widget.plan?['activo'] as bool? ?? true;
+  late bool    _ilimitado= (widget.plan?['limite_servicios'] == null);
+
+  final List<TextEditingController> _bens = [];
+  bool _saving = false;
+
+  // Preview en tiempo real del precio final
+  double get _precioFinal {
+    final p = double.tryParse(_pre.text) ?? 0;
+    final d = int.tryParse(_dsc.text) ?? 0;
+    return p * (1 - d / 100);
+  }
 
   @override
   void initState() {
     super.initState();
-    final bens = (widget.plan?['beneficios'] as List?)?.cast<String>() ?? [];
-    for (final b in bens) _benCtrls.add(TextEditingController(text: b));
-    if (_benCtrls.isEmpty) _benCtrls.add(TextEditingController());
+    final list = (widget.plan?['beneficios'] as List?)?.cast<String>() ?? [];
+    for (final b in list) _bens.add(TextEditingController(text: b));
+    if (_bens.isEmpty) _bens.add(TextEditingController());
   }
 
   @override
   void dispose() {
-    _nom.dispose(); _pre.dispose(); _des.dispose(); _ord.dispose();
-    for (final c in _benCtrls) c.dispose();
+    for (final c in [_nom,_pre,_des,_dsc,_lim,_ord, ..._bens]) c.dispose();
     super.dispose();
   }
 
   Future<void> _guardar() async {
     if (!_fk.currentState!.validate()) return;
-    setState(() => _loading = true);
-    final bens = _benCtrls.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
-    final data = {
-      'nombre': _nom.text.trim(), 'precio': double.tryParse(_pre.text) ?? 0,
-      'periodo': _periodo, 'descripcion': _des.text.trim(),
-      'beneficios': bens, 'activo': true, 'orden': int.tryParse(_ord.text) ?? 0,
+    setState(() => _saving = true);
+    final bens   = _bens.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
+    final lim    = _ilimitado ? null : int.tryParse(_lim.text);
+    final data   = {
+      'nombre'            : _nom.text.trim(),
+      'precio'            : double.tryParse(_pre.text) ?? 0,
+      'periodo'           : _periodo,
+      'descripcion'       : _des.text.trim(),
+      'descuento_pct'     : int.tryParse(_dsc.text) ?? 0,
+      'limite_servicios'  : lim,
+      'beneficios'        : bens,
+      'orden'             : int.tryParse(_ord.text) ?? 1,
+      'activo'            : _activo,
     };
-    if (widget.plan == null) {
-      await SB.addPlan(data);
-    } else {
-      await SB.updatePlan(widget.plan!['id'].toString(), data);
+    try {
+      if (widget.plan == null) {
+        await SB.addPlan(data);
+      } else {
+        await SB.updatePlan(widget.plan!['id'].toString(), data);
+      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onOk();
+      _snack(context, widget.plan == null ? 'Plan creado ✓' : 'Plan actualizado ✓');
+    } catch (e) {
+      if (mounted) { setState(() => _saving = false); _snack(context, 'Error: $e', err: true); }
     }
-    if (!mounted) return;
-    setState(() => _loading = false);
-    Navigator.pop(context);
-    widget.onOk();
-    _snack(context, widget.plan == null ? 'Plan creado ✓' : 'Plan actualizado ✓');
   }
 
   @override
-  Widget build(BuildContext context) => Dialog(
-    child: SingleChildScrollView(padding: const EdgeInsets.all(20),
-      child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _dlgHead(widget.plan == null ? 'Nuevo Plan' : 'Editar Plan', context),
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    initialChildSize: .92, maxChildSize: .96, minChildSize: .5, expand: false,
+    builder: (_, ctrl) => Form(key: _fk, child: ListView(
+      controller: ctrl,
+      padding: EdgeInsets.only(left: 20, right: 20, top: 16,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      children: [
+        // Handle
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
         const SizedBox(height: 14),
-        _F(c: _nom, label: 'Nombre del plan', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(widget.plan == null ? 'Nuevo Plan' : 'Editar Plan',
+              style: const TextStyle(color: C.rose, fontSize: 20, fontWeight: FontWeight.bold)),
+          IconButton(icon: const Icon(Icons.close, color: C.muted),
+              onPressed: () => Navigator.pop(context)),
+        ]),
+        const SizedBox(height: 16),
+
+        // ── NOMBRE ──
+        _section('IDENTIFICACIÓN'),
+        _F(c: _nom, label: 'Nombre del plan',
+            hint: 'Ej: Plan Premium, VIP Anual…',
+            val: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null),
         const SizedBox(height: 10),
+        _F(c: _des, label: 'Descripción corta (opcional)', lines: 2,
+            hint: 'Beneficios principales en una frase'),
+        const SizedBox(height: 16),
+
+        // ── PRECIO ──
+        _section('PRECIO'),
         Row(children: [
-          Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
-              val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null)),
+          Expanded(flex: 2, child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
+              val: (v) => (v == null || double.tryParse(v) == null || double.parse(v) <= 0)
+                  ? 'Ingresa un precio válido' : null)),
           const SizedBox(width: 10),
-          Expanded(child: _drop<String>(val: _periodo, label: 'Período',
+          Expanded(flex: 2, child: _drop<String>(
+            val: _periodo, label: 'Período',
             items: const [
-              DropdownMenuItem(value: 'mes', child: Text('Por mes')),
-              DropdownMenuItem(value: 'año', child: Text('Por año')),
-            ], onChange: (v) => setState(() => _periodo = v ?? 'mes'))),
+              DropdownMenuItem(value: 'mes',  child: Text('Por mes')),
+              DropdownMenuItem(value: 'año',  child: Text('Por año')),
+              DropdownMenuItem(value: 'semana', child: Text('Por semana')),
+              DropdownMenuItem(value: 'servicio', child: Text('Por servicio')),
+            ],
+            onChange: (v) => setState(() => _periodo = v ?? 'mes'))),
         ]),
         const SizedBox(height: 10),
-        _F(c: _des, label: 'Descripción (opcional)', lines: 2),
-        const SizedBox(height: 10),
-        _F(c: _ord, label: 'Orden de visualización', kb: TextInputType.number),
-        const SizedBox(height: 14),
-        const Text('BENEFICIOS (uno por línea)', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
-        const SizedBox(height: 8),
-        ..._benCtrls.asMap().entries.map((e) => Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(children: [
-            Expanded(child: TextFormField(
-              controller: e.value, style: const TextStyle(color: C.txt),
-              decoration: InputDecoration(labelText: 'Beneficio ${e.key+1}',
-                  suffixIcon: _benCtrls.length > 1
-                      ? IconButton(icon: const Icon(Icons.remove_circle_outline, color: C.err, size: 18),
-                          onPressed: () => setState(() { _benCtrls[e.key].dispose(); _benCtrls.removeAt(e.key); }))
-                      : null))),
-          ]))),
-        TextButton.icon(
-          onPressed: () => setState(() => _benCtrls.add(TextEditingController())),
-          icon: const Icon(Icons.add, size: 16, color: C.gold),
-          label: const Text('Agregar beneficio', style: TextStyle(color: C.gold, fontSize: 13))),
-        const SizedBox(height: 16),
-        _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
-            : ElevatedButton(onPressed: _guardar,
-                child: Text(widget.plan == null ? 'Crear plan' : 'Guardar cambios')),
-      ]))));
-}
 
+        // Descuento %
+        _F(c: _dsc, label: 'Descuento promocional (%)',
+            hint: '0 = sin descuento, 20 = 20% off',
+            kb: TextInputType.number,
+            fmt: [FilteringTextInputFormatter.digitsOnly],
+            val: (v) => null),
+        const SizedBox(height: 8),
+
+        // Preview precio final en tiempo real
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _pre,
+          builder: (_, __, ___) => ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _dsc,
+            builder: (_, __, ___) {
+              final orig  = double.tryParse(_pre.text) ?? 0;
+              final d     = int.tryParse(_dsc.text) ?? 0;
+              final final_ = orig * (1 - d / 100);
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: d > 0 ? C.goldBg : C.d3,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: d > 0 ? C.gold.withOpacity(.4) : C.brd)),
+                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(d > 0 ? 'Con descuento del $d%' : 'Sin descuento',
+                        style: const TextStyle(color: C.muted, fontSize: 11)),
+                    Text('S/${final_.toStringAsFixed(2)} / $_periodo',
+                        style: TextStyle(
+                          color: d > 0 ? C.gold : C.txt,
+                          fontSize: 16, fontWeight: FontWeight.bold)),
+                  ]),
+                  if (d > 0) ...[
+                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Text('Precio original: S/${orig.toInt()}',
+                          style: const TextStyle(color: C.muted, fontSize: 11,
+                              decoration: TextDecoration.lineThrough)),
+                      _badge('AHORRA S/${(orig - final_).toStringAsFixed(0)}', C.gold),
+                    ]),
+                  ],
+                ]),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ── SERVICIOS INCLUIDOS ──
+        _section('SERVICIOS INCLUIDOS'),
+        Row(children: [
+          Switch(value: _ilimitado,
+              onChanged: (v) => setState(() => _ilimitado = v),
+              activeColor: C.rose),
+          const SizedBox(width: 8),
+          const Text('Servicios ilimitados', style: TextStyle(fontSize: 14)),
+        ]),
+        if (!_ilimitado) ...[
+          const SizedBox(height: 8),
+          _F(c: _lim, label: 'Máximo de servicios por mes', kb: TextInputType.number,
+              fmt: [FilteringTextInputFormatter.digitsOnly],
+              val: (v) => (!_ilimitado && (v == null || int.tryParse(v) == null))
+                  ? 'Número requerido' : null),
+        ],
+        const SizedBox(height: 16),
+
+        // ── BENEFICIOS ──
+        _section('BENEFICIOS'),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: C.d3, borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: C.brd)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Lista de beneficios que verá el cliente',
+                style: TextStyle(color: C.muted, fontSize: 12)),
+            const SizedBox(height: 10),
+            ..._bens.asMap().entries.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                const Text('✅ ', style: TextStyle(fontSize: 16)),
+                Expanded(child: TextFormField(
+                  controller: e.value,
+                  style: const TextStyle(color: C.txt, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Ej: 10% descuento en todos los servicios',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    suffixIcon: _bens.length > 1
+                        ? IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, color: C.err, size: 16),
+                            onPressed: () => setState(() {
+                              _bens[e.key].dispose();
+                              _bens.removeAt(e.key);
+                            }))
+                        : null),
+                )),
+              ])),
+            ),
+            TextButton.icon(
+              onPressed: () => setState(() => _bens.add(TextEditingController())),
+              icon: const Icon(Icons.add_circle_outline, size: 16, color: C.rose),
+              label: const Text('Agregar beneficio', style: TextStyle(color: C.rose, fontSize: 13))),
+          ]),
+        ),
+        const SizedBox(height: 16),
+
+        // ── CONFIGURACIÓN ──
+        _section('CONFIGURACIÓN'),
+        Row(children: [
+          Expanded(child: _F(c: _ord, label: 'Orden de aparición',
+              kb: TextInputType.number,
+              fmt: [FilteringTextInputFormatter.digitsOnly],
+              val: (v) => null)),
+          const SizedBox(width: 16),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Visible', style: TextStyle(color: C.muted, fontSize: 12)),
+            Switch(value: _activo, onChanged: (v) => setState(() => _activo = v),
+                activeColor: C.ok),
+          ]),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+          _activo
+              ? '✅ Los clientes pueden ver y suscribirse a este plan'
+              : '⚠️ Este plan está oculto — los clientes no podrán verlo',
+          style: TextStyle(
+              color: _activo ? C.ok : C.warn, fontSize: 12)),
+        const SizedBox(height: 20),
+
+        // Guardar
+        _saving
+            ? const Center(child: CircularProgressIndicator(color: C.rose))
+            : ElevatedButton.icon(
+                onPressed: _guardar,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(widget.plan == null ? 'Crear plan' : 'Guardar cambios')),
+      ],
+    )),
+  );
+
+  Widget _section(String t) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(children: [
+      Container(width: 3, height: 14, decoration: BoxDecoration(
+          color: C.rose, borderRadius: BorderRadius.circular(2))),
+      const SizedBox(width: 8),
+      Text(t, style: const TextStyle(
+          color: C.muted, fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.w600)),
+    ]));
+}
 // ────────────────────────────────────────────────────────────
 // ADMIN REPORTES
 // ────────────────────────────────────────────────────────────
@@ -4165,25 +5112,37 @@ class NuevoServicioDialog extends StatefulWidget {
 }
 
 class _NuevoSvcState extends State<NuevoServicioDialog> {
-  final _fk = GlobalKey<FormState>();
-  final _nom = TextEditingController();
-  final _des = TextEditingController();
-  final _pre = TextEditingController();
-  final _dur = TextEditingController();
-  final _pts = TextEditingController();
-  final _ico = TextEditingController(text: '✂️');
+  final _fk    = GlobalKey<FormState>();
+  final _nom   = TextEditingController();
+  final _des   = TextEditingController();
+  final _pre   = TextEditingController();
+  final _preOferta = TextEditingController(); // precio con descuento
+  final _dur   = TextEditingController();
+  final _pts   = TextEditingController();
+  final _ico   = TextEditingController(text: '✂️');
+  bool _activo = true;
+  bool _tieneOferta = false;
 
   @override
-  void dispose() { for (final c in [_nom,_des,_pre,_dur,_pts,_ico]) c.dispose(); super.dispose(); }
+  void dispose() {
+    for (final c in [_nom,_des,_pre,_preOferta,_dur,_pts,_ico]) c.dispose();
+    super.dispose();
+  }
 
   Future<void> _guardar() async {
     if (!_fk.currentState!.validate()) return;
+    final precio = double.tryParse(_pre.text) ?? 0;
+    final preOferta = _tieneOferta ? (double.tryParse(_preOferta.text) ?? precio) : precio;
     await SB.addServicio({
-      'nombre': _nom.text.trim(), 'descripcion': _des.text.trim(),
-      'precio': double.tryParse(_pre.text) ?? 0,
-      'duracion_min': int.tryParse(_dur.text) ?? 30,
+      'nombre'       : _nom.text.trim(),
+      'descripcion'  : _des.text.trim(),
+      'precio'       : precio,
+      'precio_oferta': preOferta,
+      'tiene_oferta' : _tieneOferta,
+      'duracion_min' : int.tryParse(_dur.text) ?? 30,
       'puntos_otorga': int.tryParse(_pts.text) ?? 5,
-      'icono': _ico.text.isNotEmpty ? _ico.text : '✂️', 'activo': true,
+      'icono'        : _ico.text.isNotEmpty ? _ico.text : '✂️',
+      'activo'       : _activo,
     });
     if (!mounted) return;
     Navigator.pop(context); widget.onOk();
@@ -4193,11 +5152,14 @@ class _NuevoSvcState extends State<NuevoServicioDialog> {
   @override
   Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
     child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _dlgHead('Nuevo Servicio', context), const SizedBox(height: 14),
-      _F(c: _nom, label: 'Nombre', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+      _dlgHead('Nuevo Servicio', context),
+      const SizedBox(height: 14),
+      _F(c: _nom, label: 'Nombre del servicio',
+          val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
       const SizedBox(height: 10),
-      _F(c: _des, label: 'Descripción'),
+      _F(c: _des, label: 'Descripción (opcional)', lines: 2),
       const SizedBox(height: 10),
+      // Precio y duración
       Row(children: [
         Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
             val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null)),
@@ -4206,14 +5168,61 @@ class _NuevoSvcState extends State<NuevoServicioDialog> {
             val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
       ]),
       const SizedBox(height: 10),
+      // Puntos e ícono
       Row(children: [
-        Expanded(child: _F(c: _pts, label: 'Puntos', kb: TextInputType.number,
+        Expanded(child: _F(c: _pts, label: 'Puntos que otorga', kb: TextInputType.number,
             val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
         const SizedBox(width: 10),
-        Expanded(child: _F(c: _ico, label: 'Ícono emoji')),
+        Expanded(child: _F(c: _ico, label: 'Ícono (emoji)')),
       ]),
-      const SizedBox(height: 18),
-      ElevatedButton(onPressed: _guardar, child: const Text('Guardar servicio')),
+      const SizedBox(height: 12),
+      // Oferta / descuento
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: C.goldBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: C.gold.withOpacity(.3))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text('💸', style: TextStyle(fontSize: 18)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('¿Tiene precio de oferta?',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14))),
+            Switch(value: _tieneOferta,
+                onChanged: (v) => setState(() => _tieneOferta = v),
+                activeColor: C.gold),
+          ]),
+          if (_tieneOferta) ...[
+            const SizedBox(height: 10),
+            _F(c: _preOferta, label: 'Precio con descuento S/',
+                kb: TextInputType.number,
+                val: (v) => (v == null || double.tryParse(v) == null)
+                    ? 'Inválido' : null),
+            const SizedBox(height: 6),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _preOferta,
+              builder: (_, ofVal, __) {
+                final orig  = double.tryParse(_pre.text) ?? 0;
+                final ofer  = double.tryParse(ofVal.text) ?? 0;
+                final pct   = orig > 0 ? ((orig - ofer) / orig * 100).round() : 0;
+                return Text('Descuento: $pct% sobre precio normal',
+                    style: const TextStyle(color: C.gold, fontSize: 12));
+              },
+            ),
+          ],
+        ]),
+      ),
+      const SizedBox(height: 12),
+      // Estado activo
+      Row(children: [
+        Switch(value: _activo, onChanged: (v) => setState(() => _activo = v),
+            activeColor: C.ok),
+        const SizedBox(width: 6),
+        Text(_activo ? 'Visible en catálogo' : 'Oculto (inactivo)',
+            style: TextStyle(color: _activo ? C.ok : C.err, fontSize: 13)),
+      ]),
+      const SizedBox(height: 16),
+      ElevatedButton(onPressed: _guardar, child: const Text('Crear servicio')),
     ]))));
 }
 
@@ -4226,25 +5235,38 @@ class EditServicioDialog extends StatefulWidget {
 }
 
 class _EditSvcState extends State<EditServicioDialog> {
-  final _fk = GlobalKey<FormState>();
+  final _fk       = GlobalKey<FormState>();
   late final _nom = TextEditingController(text: widget.svc['nombre']?.toString() ?? '');
   late final _des = TextEditingController(text: widget.svc['descripcion']?.toString() ?? '');
   late final _pre = TextEditingController(text: (widget.svc['precio'] as num?)?.toInt().toString() ?? '');
+  late final _preOferta = TextEditingController(
+      text: (widget.svc['precio_oferta'] as num?)?.toInt().toString() ?? '');
   late final _dur = TextEditingController(text: widget.svc['duracion_min']?.toString() ?? '30');
   late final _pts = TextEditingController(text: widget.svc['puntos_otorga']?.toString() ?? '5');
   late final _ico = TextEditingController(text: widget.svc['icono']?.toString() ?? '✂️');
+  late bool _activo       = widget.svc['activo'] as bool? ?? true;
+  late bool _tieneOferta  = widget.svc['tiene_oferta'] as bool? ?? false;
 
   @override
-  void dispose() { for (final c in [_nom,_des,_pre,_dur,_pts,_ico]) c.dispose(); super.dispose(); }
+  void dispose() {
+    for (final c in [_nom,_des,_pre,_preOferta,_dur,_pts,_ico]) c.dispose();
+    super.dispose();
+  }
 
   Future<void> _guardar() async {
     if (!_fk.currentState!.validate()) return;
+    final precio    = double.tryParse(_pre.text) ?? 0;
+    final preOferta = _tieneOferta ? (double.tryParse(_preOferta.text) ?? precio) : precio;
     await SB.updateServicio(widget.svc['id'].toString(), {
-      'nombre': _nom.text.trim(), 'descripcion': _des.text.trim(),
-      'precio': double.tryParse(_pre.text) ?? 0,
-      'duracion_min': int.tryParse(_dur.text) ?? 30,
+      'nombre'       : _nom.text.trim(),
+      'descripcion'  : _des.text.trim(),
+      'precio'       : precio,
+      'precio_oferta': preOferta,
+      'tiene_oferta' : _tieneOferta,
+      'duracion_min' : int.tryParse(_dur.text) ?? 30,
       'puntos_otorga': int.tryParse(_pts.text) ?? 5,
-      'icono': _ico.text.isNotEmpty ? _ico.text : '✂️',
+      'icono'        : _ico.text.isNotEmpty ? _ico.text : '✂️',
+      'activo'       : _activo,
     });
     if (!mounted) return;
     Navigator.pop(context); widget.onOk();
@@ -4254,10 +5276,12 @@ class _EditSvcState extends State<EditServicioDialog> {
   @override
   Widget build(BuildContext context) => Dialog(child: SingleChildScrollView(padding: const EdgeInsets.all(20),
     child: Form(key: _fk, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _dlgHead('Editar Servicio', context), const SizedBox(height: 14),
-      _F(c: _nom, label: 'Nombre', val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
+      _dlgHead('Editar Servicio', context),
+      const SizedBox(height: 14),
+      _F(c: _nom, label: 'Nombre del servicio',
+          val: (v) => (v == null || v.isEmpty) ? 'Requerido' : null),
       const SizedBox(height: 10),
-      _F(c: _des, label: 'Descripción'),
+      _F(c: _des, label: 'Descripción (opcional)', lines: 2),
       const SizedBox(height: 10),
       Row(children: [
         Expanded(child: _F(c: _pre, label: 'Precio S/', kb: TextInputType.number,
@@ -4268,11 +5292,63 @@ class _EditSvcState extends State<EditServicioDialog> {
       ]),
       const SizedBox(height: 10),
       Row(children: [
-        Expanded(child: _F(c: _pts, label: 'Puntos', kb: TextInputType.number,
+        Expanded(child: _F(c: _pts, label: 'Puntos que otorga', kb: TextInputType.number,
             val: (v) => (v == null || int.tryParse(v) == null) ? 'Inválido' : null)),
         const SizedBox(width: 10),
-        Expanded(child: _F(c: _ico, label: 'Ícono emoji')),
+        Expanded(child: _F(c: _ico, label: 'Ícono (emoji)')),
       ]),
+      const SizedBox(height: 12),
+      // Sección oferta/descuento
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: C.goldBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: C.gold.withOpacity(.3))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text('💸', style: TextStyle(fontSize: 18)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Precio de oferta / descuento',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14))),
+            Switch(value: _tieneOferta,
+                onChanged: (v) => setState(() => _tieneOferta = v),
+                activeColor: C.gold),
+          ]),
+          if (_tieneOferta) ...[
+            const SizedBox(height: 10),
+            _F(c: _preOferta, label: 'Precio con descuento S/',
+                kb: TextInputType.number,
+                val: (v) => (v == null || double.tryParse(v) == null) ? 'Inválido' : null),
+            const SizedBox(height: 6),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _preOferta,
+              builder: (_, ofVal, __) {
+                final orig = double.tryParse(_pre.text) ?? 0;
+                final ofer = double.tryParse(ofVal.text) ?? 0;
+                final pct  = orig > 0 ? ((orig - ofer) / orig * 100).round() : 0;
+                return Text('Descuento: $pct% (S/${orig.toInt()} → S/${ofer.toInt()})',
+                    style: const TextStyle(color: C.gold, fontSize: 12, fontWeight: FontWeight.w600));
+              }),
+          ],
+        ])),
+      const SizedBox(height: 12),
+      // Estado visible
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _activo ? C.ok.withOpacity(.08) : C.err.withOpacity(.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _activo ? C.ok.withOpacity(.3) : C.err.withOpacity(.3))),
+        child: Row(children: [
+          Icon(_activo ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+              color: _activo ? C.ok : C.err, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            _activo ? 'Visible en catálogo de clientes' : 'Oculto — no aparece a clientes',
+            style: TextStyle(color: _activo ? C.ok : C.err, fontSize: 13))),
+          Switch(value: _activo, onChanged: (v) => setState(() => _activo = v),
+              activeColor: C.ok, inactiveThumbColor: C.err),
+        ])),
       const SizedBox(height: 18),
       ElevatedButton(onPressed: _guardar, child: const Text('Guardar cambios')),
     ]))));

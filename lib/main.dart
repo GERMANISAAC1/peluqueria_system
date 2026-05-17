@@ -19,7 +19,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ────────────────────────────────────────────────────────────
 // CONFIGURACIÓN SUPABASE — reemplaza con tus credenciales
-// ────────────────────────────────────────────────────────────
+
 const _supabaseUrl = 'https://pvzlovbzezxouwhnaekh.supabase.co' ;
 const _supabaseAnon = 'sb_publishable_vLLecRAe99JdkPVqCNd4-Q_ymcnZafq' ;
 
@@ -550,6 +550,119 @@ class Session {
 }
 
 // ────────────────────────────────────────────────────────────
+// APP CONFIG GLOBAL — nombre y logo reactivos en toda la app
+// ValueNotifier permite que cualquier widget se actualice
+// automáticamente cuando el admin cambia el nombre o el logo.
+// ────────────────────────────────────────────────────────────
+class AppConfig {
+  AppConfig._();
+
+  // ── Valores reactivos ──
+  static final appName  = ValueNotifier<String>('Kety Barber & Salon');
+  static final logoUrl  = ValueNotifier<String>('');
+  static final tagline  = ValueNotifier<String>('Barber & Salon Profesional');
+
+  // ── Carga desde Supabase (llamar en Splash) ──
+  static Future<void> load() async {
+    try {
+      final cfg = await SB.getAppConfig();
+      if (cfg != null) {
+        appName.value = cfg['app_name']?.toString().trim().isNotEmpty == true
+            ? cfg['app_name'].toString().trim()
+            : 'Kety Barber & Salon';
+        logoUrl.value  = cfg['logo_url']?.toString().trim() ?? '';
+        tagline.value  = cfg['tagline']?.toString().trim().isNotEmpty == true
+            ? cfg['tagline'].toString().trim()
+            : 'Barber & Salon Profesional';
+      }
+    } catch (_) {}
+  }
+
+  // ── Actualizar y persistir ──
+  static Future<void> update({
+    String? nombre,
+    String? logo,
+    String? tag,
+  }) async {
+    final data = <String, dynamic>{};
+    if (nombre != null) { appName.value  = nombre.trim(); data['app_name'] = nombre.trim(); }
+    if (logo   != null) { logoUrl.value  = logo;          data['logo_url'] = logo; }
+    if (tag    != null) { tagline.value  = tag.trim();    data['tagline']  = tag.trim(); }
+    if (data.isNotEmpty) await SB.updateAppConfig(data);
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// WIDGET: AppLogo — logo o ícono por defecto, reactivo
+// Se usa en Splash, Login, AppBar, Perfil, etc.
+// ────────────────────────────────────────────────────────────
+class AppLogo extends StatelessWidget {
+  final double size;
+  final bool showBorder;
+  const AppLogo({super.key, this.size = 80, this.showBorder = true});
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+    valueListenable: AppConfig.logoUrl,
+    builder: (_, url, __) {
+      final hasLogo = url.trim().isNotEmpty;
+      return Container(
+        width: size, height: size,
+        decoration: showBorder ? BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: C.gold, width: 2),
+          color: C.goldBg,
+          boxShadow: [BoxShadow(color: C.gold.withOpacity(.2), blurRadius: 12)],
+        ) : null,
+        clipBehavior: Clip.antiAlias,
+        child: hasLogo
+            ? ClipOval(child: Image.network(
+                url,
+                width: size, height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _defaultIcon(),
+              ))
+            : _defaultIcon(),
+      );
+    },
+  );
+
+  Widget _defaultIcon() => Center(
+    child: Text('✂️', style: TextStyle(fontSize: size * 0.48)),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// WIDGET: AppNameText — nombre reactivo para AppBar y pantallas
+// ────────────────────────────────────────────────────────────
+class AppNameText extends StatelessWidget {
+  final double fontSize;
+  final bool withIcon;
+  final Color? color;
+  const AppNameText({super.key, this.fontSize = 20, this.withIcon = true, this.color});
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+    valueListenable: AppConfig.appName,
+    builder: (_, name, __) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (withIcon) const Text('✂️ ', style: TextStyle(fontSize: 16)),
+        Flexible(child: Text(name,
+          style: TextStyle(
+            color: color ?? C.gold,
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+            letterSpacing: .5,
+          ),
+          overflow: TextOverflow.ellipsis,
+        )),
+      ],
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────
 // HELPERS UI COMUNES
 // ────────────────────────────────────────────────────────────
 Color _estadoColor(String e) => switch (e) {
@@ -671,7 +784,13 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
   void initState() { super.initState(); _go(); }
 
   Future<void> _go() async {
-    await Future.delayed(const Duration(milliseconds: 1600));
+    // Cargar AppConfig Y verificar vencimientos en paralelo
+    await Future.wait([
+      AppConfig.load(),
+      Future.delayed(const Duration(milliseconds: 1600)),
+    ]);
+    // Verificar membresías vencidas (silencioso)
+    try { await SB.verificarVencimientos(); } catch (_) {}
     if (!mounted) return;
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
@@ -685,15 +804,25 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
     body: FadeTransition(
       opacity: CurvedAnimation(parent: _ac, curve: Curves.easeIn),
       child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 100, height: 100,
-          decoration: BoxDecoration(shape: BoxShape.circle,
-              border: Border.all(color: C.gold, width: 2), color: C.goldBg),
-          child: const Center(child: Text('✂️', style: TextStyle(fontSize: 50)))),
-        const SizedBox(height: 18),
-        const Text('KETY BARBER & SALON', style: TextStyle(
-            color: C.gold, fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: 5)),
+        const AppLogo(size: 100),
+        const SizedBox(height: 20),
+        // Nombre reactivo — se actualiza cuando AppConfig.load() termina
+        ValueListenableBuilder<String>(
+          valueListenable: AppConfig.appName,
+          builder: (_, name, __) => Text(
+            name.toUpperCase(),
+            style: const TextStyle(
+              color: C.gold, fontSize: 22,
+              fontWeight: FontWeight.bold, letterSpacing: 4),
+            textAlign: TextAlign.center,
+          ),
+        ),
         const SizedBox(height: 6),
-        const Text('Barber & Salon Profesional', style: TextStyle(color: C.muted, fontSize: 13)),
+        ValueListenableBuilder<String>(
+          valueListenable: AppConfig.tagline,
+          builder: (_, tag, __) => Text(tag,
+            style: const TextStyle(color: C.muted, fontSize: 13)),
+        ),
         const SizedBox(height: 40),
         const SizedBox(width: 22, height: 22,
             child: CircularProgressIndicator(color: C.gold, strokeWidth: 2)),
@@ -745,12 +874,17 @@ class _LoginState extends State<LoginScreen> {
       child: SafeArea(child: Center(child: SingleChildScrollView(
         padding: const EdgeInsets.all(28),
         child: Form(key: _fk, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(width: 88, height: 88,
-            decoration: BoxDecoration(shape: BoxShape.circle,
-                border: Border.all(color: C.gold, width: 2), color: C.goldBg),
-            child: const Center(child: Text('✂️', style: TextStyle(fontSize: 44)))),
+          const AppLogo(size: 88),
           const SizedBox(height: 16),
-          const Text('Kety Barber & Salon', style: TextStyle(color: C.gold, fontSize: 36, fontWeight: FontWeight.bold)),
+          ValueListenableBuilder<String>(
+            valueListenable: AppConfig.appName,
+            builder: (_, name, __) => Text(name,
+              style: const TextStyle(
+                color: C.gold, fontSize: 32,
+                fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ),
           const Text('Ingresa a tu cuenta', style: TextStyle(color: C.muted, fontSize: 13)),
           const SizedBox(height: 36),
           _F(c: _cel, label: 'Número de celular', hint: '987654321',
@@ -921,7 +1055,7 @@ class _ClienteMainState extends State<ClienteMain> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('✂️ Kety Barber & Salon'),
+        title: const AppNameText(fontSize: 18),
         actions: [Padding(
           padding: const EdgeInsets.only(right: 14),
           child: Center(child: Container(
@@ -1015,6 +1149,42 @@ class _CliHomeState extends State<CliHomeTab> {
       child: _loading
           ? const Center(child: CircularProgressIndicator(color: C.gold))
           : ListView(padding: const EdgeInsets.all(16), children: [
+
+        // ── Banner salón: logo + nombre + bienvenida ──
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: C.roseDark.withOpacity(.6)),
+            boxShadow: [BoxShadow(color: C.roseDark.withOpacity(.15), blurRadius: 14, offset: const Offset(0,4))]),
+          child: Row(children: [
+            const AppLogo(size: 54, showBorder: false),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              ValueListenableBuilder<String>(
+                valueListenable: AppConfig.appName,
+                builder: (_, n, __) => Text(n,
+                  style: const TextStyle(color: C.cream, fontSize: 15, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Hola, ${(widget.u["nombre"]?.toString() ?? "").split(" ").first} 👋',
+                style: const TextStyle(color: C.muted, fontSize: 12)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              _badge('⭐ ${widget.u["puntos"] ?? 0} pts', C.gold),
+              const SizedBox(height: 4),
+              _badge(
+                (widget.u['membresia'] ?? 'Ninguna') != 'Ninguna'
+                    ? '👑 ${widget.u["membresia"]}' : 'Sin membresía',
+                (widget.u['membresia'] ?? 'Ninguna') != 'Ninguna' ? C.rose : C.muted),
+            ]),
+          ])),
+        const SizedBox(height: 12),
 
         // ── Próxima cita ──
         Container(
@@ -1480,6 +1650,14 @@ class CliQRTab extends StatelessWidget {
   Widget build(BuildContext context) => Center(
     child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(
       mainAxisAlignment: MainAxisAlignment.center, children: [
+      // Nombre del salón reactivo
+      ValueListenableBuilder<String>(
+        valueListenable: AppConfig.appName,
+        builder: (_, n, __) => Text(n,
+          style: const TextStyle(color: C.gold, fontSize: 15,
+              fontWeight: FontWeight.bold, letterSpacing: .5)),
+      ),
+      const SizedBox(height: 4),
       const _T('Mi Código QR'),
       Container(padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.brd)),
@@ -2041,6 +2219,25 @@ class _CliPerfilState extends State<CliPerfilTab> {
   Widget build(BuildContext context) {
     final u = widget.u; final mem = u['membresia']?.toString() ?? 'Ninguna';
     return SingleChildScrollView(padding: const EdgeInsets.all(16), child: Form(key: _fk, child: Column(children: [
+      // ── Banner salón ──
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: C.roseDark.withOpacity(.5))),
+        child: Row(children: [
+          const AppLogo(size: 44, showBorder: false),
+          const SizedBox(width: 10),
+          Expanded(child: ValueListenableBuilder<String>(
+            valueListenable: AppConfig.appName,
+            builder: (_, n, __) => Text(n,
+              style: const TextStyle(color: C.cream, fontSize: 14, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis),
+          )),
+        ])),
+      // ── Avatar + info del cliente ──
       Container(padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.brd)),
         child: Column(children: [
@@ -2108,7 +2305,11 @@ class _AdminMainState extends State<AdminMain> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('✂️ Admin — Kety B&S'),
+        title: Row(mainAxisSize: MainAxisSize.min, children: const [
+          AppLogo(size: 28, showBorder: false),
+          SizedBox(width: 8),
+          AppNameText(fontSize: 15, withIcon: false),
+        ]),
         actions: [
           IconButton(
             icon: const Icon(Icons.bar_chart, color: C.muted),
@@ -2165,6 +2366,56 @@ class _AdmDashState extends State<AdmDashTab> {
     color: C.gold, onRefresh: _load,
     child: _loading ? const Center(child: CircularProgressIndicator(color: C.gold))
         : ListView(padding: const EdgeInsets.all(16), children: [
+      // ── Banner salón en panel admin ──
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: C.roseDark.withOpacity(.5))),
+        child: Row(children: [
+          const AppLogo(size: 46, showBorder: false),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ValueListenableBuilder<String>(
+              valueListenable: AppConfig.appName,
+              builder: (_, n, __) => Text(n,
+                style: const TextStyle(color: C.cream, fontSize: 15, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis),
+            ),
+            Text(
+              'Panel Admin — ${DateFormat('EEEE d MMM', 'es_PE').format(DateTime.now())}',
+              style: const TextStyle(color: C.muted, fontSize: 11)),
+          ])),
+          // Alerta vencimientos próximos
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: SB.getSuscripcionesPorVencer(dias: 5),
+            builder: (_, snap) {
+              final n = snap.data?.length ?? 0;
+              if (n == 0) return const SizedBox.shrink();
+              return GestureDetector(
+                onTap: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const _VencimientosScreen())),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: C.warn.withOpacity(.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: C.warn.withOpacity(.5))),
+                  child: Column(children: [
+                    Text('$n', style: const TextStyle(
+                      color: C.warn, fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text('vencen
+pronto', style: TextStyle(
+                      color: C.warn, fontSize: 8), textAlign: TextAlign.center),
+                  ])),
+              );
+            },
+          ),
+        ])),
       Row(children: [
         _stat('📅', '${_r['citasHoy'] ?? 0}', 'Citas hoy'),
         const SizedBox(width: 12),
@@ -3069,49 +3320,764 @@ class _AdmClientesState extends State<AdmClientesTab> {
     if (mounted) _snack(context, 'Cliente eliminado', err: true);
   }
 
+  void _verDetalle(Map<String, dynamic> u) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: C.d2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => ClienteDetalleSheet(usuario: u, onReload: _load),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Column(children: [
-    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,0), child: Row(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16,12,16,8), child: Row(children: [
       Expanded(child: TextFormField(
         style: const TextStyle(color: C.txt),
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.search, color: C.muted, size: 18),
-            hintText: 'Buscar por nombre o celular...'),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.search, color: C.muted, size: 18),
+          hintText: 'Buscar por nombre o celular...'),
         onChanged: (v) { setState(() => _q = v); _load(); })),
       const SizedBox(width: 8),
-      IconButton(icon: const Icon(Icons.person_add, color: C.gold, size: 26),
-          onPressed: () => showDialog(context: context,
-              builder: (_) => NuevoClienteDialog(onOk: _load))),
+      IconButton(
+        icon: const Icon(Icons.person_add, color: C.gold, size: 26),
+        onPressed: () => showDialog(context: context,
+            builder: (_) => NuevoClienteDialog(onOk: _load))),
     ])),
-    Expanded(child: RefreshIndicator(color: C.gold, onRefresh: _load,
+    Expanded(child: RefreshIndicator(color: C.rose, onRefresh: _load,
       child: _clientes.isEmpty
           ? const Center(child: Text('Sin resultados', style: TextStyle(color: C.muted)))
-          : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _clientes.length,
+          : ListView.builder(padding: const EdgeInsets.all(16),
+              itemCount: _clientes.length,
               itemBuilder: (_, i) {
-                final u = _clientes[i]; final mem = u['membresia']?.toString() ?? 'Ninguna';
+                final u   = _clientes[i];
+                final mem = u['membresia']?.toString() ?? 'Ninguna';
                 final init = (u['nombre']?.toString() ?? 'C').isNotEmpty
-                    ? (u['nombre']?.toString() ?? 'C')[0].toUpperCase() : 'C';
-                return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: C.d2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.brd)),
-                  child: Row(children: [
-                    Container(width: 44, height: 44,
-                      decoration: const BoxDecoration(color: C.gold, shape: BoxShape.circle),
-                      child: Center(child: Text(init,
-                          style: const TextStyle(color: C.black, fontSize: 18, fontWeight: FontWeight.bold)))),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(u['nombre']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      Text(u['celular']?.toString() ?? '', style: const TextStyle(color: C.muted, fontSize: 12)),
-                      const SizedBox(height: 4),
-                      Wrap(spacing: 6, children: [
-                        _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía', mem != 'Ninguna' ? C.gold : C.muted),
-                        _badge('⭐ ${u['puntos']} pts', C.info),
+                    ? u['nombre'].toString()[0].toUpperCase() : 'C';
+                final venc = u['membresia_vencimiento']?.toString();
+                final dias = venc != null
+                    ? DateTime.tryParse(venc)?.difference(DateTime.now()).inDays
+                    : null;
+                final proxVencer = dias != null && dias >= 0 && dias <= 5;
+
+                return GestureDetector(
+                  onTap: () => _verDetalle(u),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: C.d2,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: proxVencer ? C.warn.withOpacity(.6) : C.brd,
+                        width: proxVencer ? 1.5 : 1)),
+                    child: Row(children: [
+                      // Avatar
+                      Container(width: 46, height: 46,
+                        decoration: BoxDecoration(
+                          color: mem != 'Ninguna' ? C.roseDark : C.d3,
+                          shape: BoxShape.circle),
+                        child: Center(child: Text(init,
+                            style: TextStyle(
+                              color: mem != 'Ninguna' ? C.cream : C.muted,
+                              fontSize: 18, fontWeight: FontWeight.bold)))),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(u['nombre']?.toString() ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(u['celular']?.toString() ?? '',
+                            style: const TextStyle(color: C.muted, fontSize: 12)),
+                        const SizedBox(height: 5),
+                        Wrap(spacing: 6, runSpacing: 4, children: [
+                          _badge(mem != 'Ninguna' ? '👑 $mem' : 'Sin membresía',
+                              mem != 'Ninguna' ? C.gold : C.muted),
+                          _badge('⭐ ${u['puntos'] ?? 0} pts', C.info),
+                          if (dias != null && dias >= 0)
+                            _badge(
+                              dias == 0 ? 'Vence hoy' : 'Vence en $dias días',
+                              dias <= 2 ? C.err : dias <= 5 ? C.warn : C.ok),
+                          if (dias != null && dias < 0)
+                            _badge('Vencido', C.err),
+                        ]),
+                      ])),
+                      // Botón membresía rápido
+                      Column(children: [
+                        IconButton(
+                          icon: const Icon(Icons.workspace_premium, color: C.gold, size: 22),
+                          tooltip: 'Gestionar membresía',
+                          onPressed: () => _verDetalle(u)),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: C.err, size: 20),
+                          onPressed: () => _eliminar(u['id'].toString())),
                       ]),
-                    ])),
-                    IconButton(icon: const Icon(Icons.delete_outline, color: C.err, size: 20),
-                        onPressed: () => _eliminar(u['id'].toString())),
-                  ]));
+                    ]));
               }))),
   ]);
+}
+
+// ════════════════════════════════════════════════════════════
+// CLIENTE DETALLE SHEET — info completa + gestión membresía
+// El admin toca un cliente y ve TODO sobre él desde aquí:
+// info personal, suscripción activa, historial y acciones.
+// ════════════════════════════════════════════════════════════
+class ClienteDetalleSheet extends StatefulWidget {
+  final Map<String, dynamic> usuario;
+  final VoidCallback onReload;
+  const ClienteDetalleSheet({super.key, required this.usuario, required this.onReload});
+  @override
+  State<ClienteDetalleSheet> createState() => _ClienteDetalleSheetState();
+}
+
+class _ClienteDetalleSheetState extends State<ClienteDetalleSheet> {
+  Map<String, dynamic>?       _u;
+  Map<String, dynamic>?       _suscActiva;
+  List<Map<String, dynamic>>  _historialSusc  = [];
+  List<Map<String, dynamic>>  _citasCliente   = [];
+  List<Map<String, dynamic>>  _planes         = [];
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _u = widget.usuario; _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final uid = _u!['id'].toString();
+    final results = await Future.wait([
+      SB.getUsuario(uid),
+      SB.getSuscripcionActiva(uid),
+      SB.getHistorialSuscripciones(uid),
+      SB.getCitas(clienteId: uid),
+      SB.getPlanes(),
+    ]);
+    if (mounted) setState(() {
+      _u             = (results[0] as Map<String, dynamic>?) ?? _u;
+      _suscActiva    = results[1] as Map<String, dynamic>?;
+      _historialSusc = (results[2] as List).cast<Map<String, dynamic>>();
+      _citasCliente  = (results[3] as List).cast<Map<String, dynamic>>();
+      _planes        = (results[4] as List).cast<Map<String, dynamic>>();
+      _loading       = false;
+    });
+  }
+
+  int get _diasRestantes {
+    final venc = _suscActiva?['fecha_vencimiento']?.toString() ??
+        _u?['membresia_vencimiento']?.toString();
+    if (venc == null) return -1;
+    return DateTime.tryParse(venc)?.difference(DateTime.now()).inDays ?? -1;
+  }
+
+  Color get _vencColor {
+    final d = _diasRestantes;
+    if (d < 0)  return C.muted;
+    if (d <= 2) return C.err;
+    if (d <= 7) return C.warn;
+    return C.ok;
+  }
+
+  // ── Abre el sheet de asignación de membresía ──
+  void _abrirAsignar() => showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: C.d2,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => AsignarMembresiaSheet(
+      usuario    : _u!,
+      planes     : _planes,
+      suscActiva : _suscActiva,
+      onOk       : () async { await _load(); widget.onReload(); },
+    ),
+  );
+
+  // ── Cancelar suscripción ──
+  Future<void> _cancelar() async {
+    if (_suscActiva == null) return;
+    final motivo = await _inputDialog(
+      context, 'Cancelar membresía',
+      '¿Por qué se cancela la membresía de ${_u!['nombre']}?',
+      hint: 'Motivo (opcional)',
+    );
+    if (motivo == null) return;
+    await SB.cancelarSuscripcion(
+      suscripcionId : _suscActiva!['id'].toString(),
+      clienteId     : _u!['id'].toString(),
+      motivo        : motivo.isEmpty ? 'Cancelado por admin' : motivo,
+    );
+    await _load(); widget.onReload();
+    if (mounted) _snack(context, 'Membresía cancelada', err: true);
+  }
+
+  // ── Renovar suscripción ──
+  Future<void> _renovar() async {
+    if (_suscActiva == null || _planes.isEmpty) return;
+    final planActual = _planes.firstWhere(
+      (p) => p['id'] == _suscActiva!['plan_id'],
+      orElse: () => _planes.first);
+    await AsignarMembresiaSheet.confirmarYAsignar(
+      context    : context,
+      usuario    : _u!,
+      plan       : planActual,
+      suscActiva : _suscActiva,
+      esRenovacion: true,
+      onOk       : () async { await _load(); widget.onReload(); },
+    );
+  }
+
+  // ── Extender N días ──
+  Future<void> _extender() async {
+    if (_suscActiva == null) return;
+    final diasStr = await _inputDialog(
+      context, 'Extender membresía',
+      'Días adicionales a agregar:',
+      hint: 'Ej: 7, 15, 30',
+      numerico: true,
+    );
+    if (diasStr == null || diasStr.isEmpty) return;
+    final dias = int.tryParse(diasStr);
+    if (dias == null || dias <= 0) {
+      _snack(context, 'Ingresa un número válido', err: true); return;
+    }
+    await SB.extenderSuscripcion(
+      suscripcionId : _suscActiva!['id'].toString(),
+      clienteId     : _u!['id'].toString(),
+      diasExtra     : dias,
+      motivo        : 'Extendido por admin',
+    );
+    await _load(); widget.onReload();
+    if (mounted) _snack(context, '+$dias días agregados ✓');
+  }
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    initialChildSize: .92, maxChildSize: .96, minChildSize: .5, expand: false,
+    builder: (_, ctrl) => _loading
+        ? const Center(child: CircularProgressIndicator(color: C.rose))
+        : ListView(controller: ctrl, padding: const EdgeInsets.fromLTRB(20,12,20,32),
+            children: [
+          // ── Handle ──
+          Center(child: Container(width: 36, height: 4,
+              decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 14),
+
+          // ── Header cliente ──
+          Row(children: [
+            Container(width: 56, height: 56,
+              decoration: BoxDecoration(
+                color: (_u!['membresia'] ?? 'Ninguna') != 'Ninguna' ? C.roseDark : C.d3,
+                shape: BoxShape.circle),
+              child: Center(child: Text(
+                (_u!['nombre']?.toString() ?? 'C').isNotEmpty
+                    ? _u!['nombre'].toString()[0].toUpperCase() : 'C',
+                style: const TextStyle(color: C.cream, fontSize: 22, fontWeight: FontWeight.bold)))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_u!['nombre']?.toString() ?? '',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(_u!['celular']?.toString() ?? '',
+                  style: const TextStyle(color: C.muted, fontSize: 13)),
+              if ((_u!['email'] ?? '').toString().isNotEmpty)
+                Text(_u!['email'].toString(),
+                    style: const TextStyle(color: C.muted, fontSize: 12)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              _badge('⭐ ${_u!['puntos'] ?? 0} pts', C.gold),
+              const SizedBox(height: 4),
+              _badge('${_citasCliente.length} citas', C.info),
+            ]),
+          ]),
+          const SizedBox(height: 16),
+          const Divider(color: C.brd),
+          const SizedBox(height: 12),
+
+          // ── TARJETA MEMBRESÍA ACTUAL ──
+          const Text('MEMBRESÍA ACTUAL',
+              style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 8),
+          _suscActiva != null ? _suscripcionCard(_suscActiva!) : _sinMembresia(),
+          const SizedBox(height: 16),
+
+          // ── ACCIONES DE MEMBRESÍA ──
+          const Text('ACCIONES', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            // Asignar / Cambiar
+            _accionBtn(
+              icon: Icons.workspace_premium,
+              label: _suscActiva != null ? 'Cambiar plan' : 'Asignar plan',
+              color: C.gold,
+              onTap: _abrirAsignar),
+            // Renovar (solo si hay activa)
+            if (_suscActiva != null)
+              _accionBtn(
+                icon: Icons.refresh,
+                label: 'Renovar',
+                color: C.ok,
+                onTap: _renovar),
+            // Extender
+            if (_suscActiva != null)
+              _accionBtn(
+                icon: Icons.calendar_today_outlined,
+                label: 'Extender días',
+                color: C.info,
+                onTap: _extender),
+            // Cancelar
+            if (_suscActiva != null)
+              _accionBtn(
+                icon: Icons.cancel_outlined,
+                label: 'Cancelar membresía',
+                color: C.err,
+                onTap: _cancelar),
+          ]),
+          const SizedBox(height: 20),
+          const Divider(color: C.brd),
+
+          // ── HISTORIAL DE SUSCRIPCIONES ──
+          if (_historialSusc.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('HISTORIAL DE SUSCRIPCIONES',
+                style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+            const SizedBox(height: 10),
+            ..._historialSusc.map((s) {
+              final col = _estadoSuscColor(s['estado']?.toString() ?? '');
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: C.d3,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: col.withOpacity(.3))),
+                child: Row(children: [
+                  Icon(_estadoSuscIcon(s['estado']?.toString() ?? ''), color: col, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(s['plan_nombre']?.toString() ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    Text(
+                      '${_fmtFecha(s['fecha_inicio']?.toString() ?? '')} → '
+                      '${_fmtFecha(s['fecha_vencimiento']?.toString() ?? '')}',
+                      style: const TextStyle(color: C.muted, fontSize: 11)),
+                    if ((s['notas_admin'] ?? '').toString().isNotEmpty)
+                      Text(s['notas_admin'].toString(),
+                          style: const TextStyle(color: C.dim, fontSize: 10)),
+                  ])),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    _badge(s['estado']?.toString() ?? '', col),
+                    const SizedBox(height: 4),
+                    Text('S/${(s['precio_pagado'] as num?)?.toInt() ?? 0}',
+                        style: const TextStyle(color: C.gold, fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                  ]),
+                ]));
+            }),
+          ],
+        ]));
+
+  Widget _suscripcionCard(Map<String, dynamic> s) {
+    final dias   = _diasRestantes;
+    final col    = _vencColor;
+    final planDatos = s['planes_membresia'] as Map?;
+    final bens   = (planDatos?['beneficios'] as List?)?.cast<String>() ?? [];
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF2A0D18), Color(0xFF1A0D1A)]),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: col.withOpacity(.6), width: 1.5),
+        boxShadow: [BoxShadow(color: col.withOpacity(.1), blurRadius: 12)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('👑', style: TextStyle(fontSize: 26)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(s['plan_nombre']?.toString() ?? '',
+                style: const TextStyle(color: C.cream, fontSize: 16, fontWeight: FontWeight.bold)),
+            Text('Inicio: ${_fmtFecha(s['fecha_inicio']?.toString() ?? '')}',
+                style: const TextStyle(color: C.muted, fontSize: 11)),
+          ])),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(dias >= 0 ? '$dias días' : 'Vencido',
+                style: TextStyle(color: col, fontSize: 20, fontWeight: FontWeight.bold)),
+            Text('Vence: ${_fmtFecha(s['fecha_vencimiento']?.toString() ?? '')}',
+                style: TextStyle(color: col.withOpacity(.8), fontSize: 10)),
+          ]),
+        ]),
+        if (dias >= 0) ...[
+          const SizedBox(height: 10),
+          ClipRRect(borderRadius: BorderRadius.circular(20),
+            child: LinearProgressIndicator(
+              value: _progSusc(s),
+              backgroundColor: C.d3,
+              color: col, minHeight: 6)),
+        ],
+        if (bens.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 4,
+              children: bens.map((b) => _badge('✓ $b', C.ok)).toList()),
+        ],
+        const SizedBox(height: 8),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          if ((s['metodo_pago'] ?? '').toString().isNotEmpty)
+            Text('Pago: ${s['metodo_pago']}  ·  S/${(s['precio_pagado'] as num?)?.toInt() ?? 0}',
+                style: const TextStyle(color: C.muted, fontSize: 11)),
+          _badge(s['estado']?.toString() ?? '', _estadoSuscColor(s['estado']?.toString() ?? '')),
+        ]),
+      ]));
+  }
+
+  double _progSusc(Map<String, dynamic> s) {
+    final ini  = DateTime.tryParse(s['fecha_inicio']?.toString() ?? '');
+    final venc = DateTime.tryParse(s['fecha_vencimiento']?.toString() ?? '');
+    if (ini == null || venc == null) return 0;
+    final total = venc.difference(ini).inDays;
+    final trans = DateTime.now().difference(ini).inDays;
+    if (total <= 0) return 1;
+    return (trans / total).clamp(0.0, 1.0);
+  }
+
+  Widget _sinMembresia() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: C.d3,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: C.brd, style: BorderStyle.solid)),
+    child: Row(children: [
+      const Text('😶', style: TextStyle(fontSize: 28)),
+      const SizedBox(width: 12),
+      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Sin membresía activa', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        Text('Asigna un plan para que el cliente acceda a los beneficios',
+            style: TextStyle(color: C.muted, fontSize: 12)),
+      ])),
+    ]));
+
+  Widget _accionBtn({required IconData icon, required String label,
+      required Color color, required VoidCallback onTap}) =>
+      GestureDetector(onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(.1),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withOpacity(.4))),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          ])));
+}
+
+Color _estadoSuscColor(String e) => switch (e) {
+  'activa'          => C.ok,
+  'vencida'         => C.err,
+  'cancelada'       => C.muted,
+  'pendiente_pago'  => C.warn,
+  _                 => C.muted,
+};
+
+IconData _estadoSuscIcon(String e) => switch (e) {
+  'activa'          => Icons.check_circle_outline,
+  'vencida'         => Icons.timer_off_outlined,
+  'cancelada'       => Icons.cancel_outlined,
+  'pendiente_pago'  => Icons.payment_outlined,
+  _                 => Icons.circle_outlined,
+};
+
+// ════════════════════════════════════════════════════════════
+// ASIGNAR MEMBRESÍA SHEET — formulario completo para admin
+// ════════════════════════════════════════════════════════════
+class AsignarMembresiaSheet extends StatefulWidget {
+  final Map<String, dynamic>  usuario;
+  final List<Map<String, dynamic>> planes;
+  final Map<String, dynamic>? suscActiva;
+  final VoidCallback onOk;
+  final bool esRenovacion;
+
+  const AsignarMembresiaSheet({
+    super.key,
+    required this.usuario,
+    required this.planes,
+    this.suscActiva,
+    required this.onOk,
+    this.esRenovacion = false,
+  });
+
+  /// Método estático para abrir el sheet directamente y esperar confirmación.
+  static Future<void> confirmarYAsignar({
+    required BuildContext context,
+    required Map<String, dynamic> usuario,
+    required Map<String, dynamic> plan,
+    Map<String, dynamic>? suscActiva,
+    bool esRenovacion = false,
+    required VoidCallback onOk,
+  }) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: C.d2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => AsignarMembresiaSheet(
+        usuario     : usuario,
+        planes      : [plan],
+        suscActiva  : suscActiva,
+        esRenovacion: esRenovacion,
+        onOk        : onOk,
+      ),
+    );
+  }
+
+  @override
+  State<AsignarMembresiaSheet> createState() => _AsignarMembresiaSheetState();
+}
+
+class _AsignarMembresiaSheetState extends State<AsignarMembresiaSheet> {
+  final _fk          = GlobalKey<FormState>();
+  final _notasCtrl   = TextEditingController();
+  final _precioCtrl  = TextEditingController();
+  Map<String, dynamic>? _planSel;
+  String _metodoPago = 'efectivo';
+  bool _saving       = false;
+  DateTime? _fechaInicioCustom;
+
+  static const _metodos = ['efectivo', 'transferencia', 'yape', 'plin', 'tarjeta', 'cortesia'];
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-seleccionar plan actual si hay suscripción activa
+    if (widget.planes.isNotEmpty) {
+      if (widget.suscActiva != null) {
+        _planSel = widget.planes.firstWhere(
+          (p) => p['id'] == widget.suscActiva!['plan_id'],
+          orElse: () => widget.planes.first);
+      } else {
+        _planSel = widget.planes.first;
+      }
+    }
+    _actualizarPrecio();
+  }
+
+  @override
+  void dispose() { _notasCtrl.dispose(); _precioCtrl.dispose(); super.dispose(); }
+
+  void _actualizarPrecio() {
+    if (_planSel == null) return;
+    final precio = (_planSel!['precio'] as num?)?.toDouble() ?? 0;
+    final desc   = (_planSel!['descuento_pct'] as int?) ?? 0;
+    final final_ = precio * (1 - desc / 100);
+    _precioCtrl.text = final_.toInt().toString();
+  }
+
+  Future<void> _asignar() async {
+    if (_planSel == null) { _snack(context, 'Selecciona un plan', err: true); return; }
+    if (!_fk.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      if (widget.esRenovacion && widget.suscActiva != null) {
+        await SB.renovarSuscripcion(
+          suscripcion : widget.suscActiva!,
+          plan        : _planSel!,
+          adminId     : Session.uid,
+          precioReal  : double.tryParse(_precioCtrl.text) ?? 0,
+          notas       : _notasCtrl.text,
+          metodoPago  : _metodoPago,
+        );
+      } else {
+        await SB.asignarMembresia(
+          clienteId        : widget.usuario['id'].toString(),
+          plan             : _planSel!,
+          adminId          : Session.uid,
+          precioReal       : double.tryParse(_precioCtrl.text) ?? 0,
+          notas            : _notasCtrl.text,
+          metodoPago       : _metodoPago,
+          fechaInicioCustom: _fechaInicioCustom,
+        );
+      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onOk();
+      _snack(context, widget.esRenovacion
+          ? 'Membresía renovada ✓' : 'Plan asignado: ${_planSel!['nombre']} ✓');
+    } catch (e) {
+      if (mounted) { setState(() => _saving = false); _snack(context, 'Error: $e', err: true); }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    initialChildSize: .88, maxChildSize: .96, minChildSize: .5, expand: false,
+    builder: (_, ctrl) => Form(key: _fk, child: ListView(
+      controller: ctrl,
+      padding: EdgeInsets.only(left: 20, right: 20, top: 12,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      children: [
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: C.dim, borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        Text(
+          widget.esRenovacion ? 'Renovar membresía' : 'Asignar membresía',
+          style: const TextStyle(color: C.rose, fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        // Info del cliente
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: C.brd)),
+          child: Row(children: [
+            const Icon(Icons.person_outline, color: C.gold, size: 18),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              '${widget.usuario['nombre']}  ·  ${widget.usuario['celular']}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+            _badge('⭐ ${widget.usuario['puntos'] ?? 0} pts', C.gold),
+          ])),
+        const SizedBox(height: 16),
+
+        // ── Selección de plan ──
+        const Text('PLAN', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 8),
+        ...widget.planes.map((p) {
+          final sel = _planSel?['id'] == p['id'];
+          final precio = (p['precio'] as num?)?.toDouble() ?? 0;
+          final desc   = (p['descuento_pct'] as int?) ?? 0;
+          final final_ = precio * (1 - desc / 100);
+          return GestureDetector(
+            onTap: () { setState(() => _planSel = p); _actualizarPrecio(); },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: sel ? C.roseDark.withOpacity(.15) : C.d3,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: sel ? C.rose : C.brd,
+                  width: sel ? 1.5 : 1)),
+              child: Row(children: [
+                Icon(sel ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: sel ? C.rose : C.muted, size: 18),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(p['nombre'].toString(),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14,
+                          color: sel ? C.rose : C.txt)),
+                  if ((p['descripcion'] ?? '').toString().isNotEmpty)
+                    Text(p['descripcion'].toString(),
+                        style: const TextStyle(color: C.muted, fontSize: 11)),
+                ])),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('S/${final_.toInt()}/${p['periodo'] ?? 'mes'}',
+                      style: TextStyle(color: sel ? C.rose : C.gold,
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                  if (desc > 0)
+                    Text('$desc% desc', style: const TextStyle(color: C.gold, fontSize: 10)),
+                ]),
+              ])));
+        }),
+        const SizedBox(height: 14),
+
+        // ── Precio cobrado ──
+        const Text('PRECIO COBRADO', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(child: _F(
+            c: _precioCtrl, label: 'Monto (S/)',
+            kb: TextInputType.number,
+            val: (v) => (v == null || double.tryParse(v) == null)
+                ? 'Ingresa monto' : null)),
+          const SizedBox(width: 10),
+          Expanded(child: _drop<String>(
+            val: _metodoPago, label: 'Método',
+            items: _metodos.map((m) => DropdownMenuItem(
+              value: m, child: Text(m[0].toUpperCase() + m.substring(1)))).toList(),
+            onChange: (v) => setState(() => _metodoPago = v ?? 'efectivo'))),
+        ]),
+        const SizedBox(height: 14),
+
+        // ── Fecha de inicio ──
+        const Text('INICIO', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(
+              context: context, initialDate: DateTime.now(),
+              firstDate: DateTime.now().subtract(const Duration(days: 30)),
+              lastDate: DateTime.now().add(const Duration(days: 30)),
+              builder: (_, ch) => Theme(data: ThemeData.dark().copyWith(
+                  colorScheme: const ColorScheme.dark(primary: C.rose)), child: ch!));
+            if (d != null) setState(() => _fechaInicioCustom = d);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            decoration: BoxDecoration(color: C.d3, borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: C.brd)),
+            child: Row(children: [
+              const Icon(Icons.calendar_today, size: 15, color: C.muted),
+              const SizedBox(width: 10),
+              Text(
+                _fechaInicioCustom != null
+                    ? DateFormat('dd/MM/yyyy').format(_fechaInicioCustom!)
+                    : 'Hoy — ${DateFormat('dd/MM/yyyy').format(DateTime.now())}',
+                style: const TextStyle(color: C.txt)),
+              const Spacer(),
+              const Text('Cambiar', style: TextStyle(color: C.muted, fontSize: 11)),
+            ])),
+        ),
+        const SizedBox(height: 14),
+
+        // ── Notas ──
+        const Text('NOTAS (opcional)', style: TextStyle(color: C.muted, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        _F(c: _notasCtrl, label: '', hint: 'Ej: Pagó en efectivo, Promoción especial…', lines: 2),
+        const SizedBox(height: 20),
+
+        // ── Botón confirmar ──
+        _saving
+            ? const Center(child: CircularProgressIndicator(color: C.rose))
+            : ElevatedButton.icon(
+                onPressed: _asignar,
+                icon: const Icon(Icons.workspace_premium),
+                label: Text(widget.esRenovacion ? 'Renovar membresía' : 'Asignar membresía'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: C.roseDark, foregroundColor: C.cream,
+                  minimumSize: const Size(double.infinity, 52))),
+      ],
+    )),
+  );
+}
+
+// ── Helper: diálogo de entrada de texto ──
+Future<String?> _inputDialog(
+    BuildContext context, String titulo, String subtitulo,
+    {String hint = '', bool numerico = false}) async {
+  final ctrl = TextEditingController();
+  final result = await showDialog<String>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text(titulo),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(subtitulo, style: const TextStyle(color: C.muted, fontSize: 13)),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: numerico ? TextInputType.number : TextInputType.text,
+          style: const TextStyle(color: C.txt),
+          decoration: InputDecoration(hintText: hint),
+        ),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(
+          onPressed: () => Navigator.pop(context, ctrl.text),
+          child: const Text('Confirmar', style: TextStyle(color: C.rose))),
+      ],
+    ),
+  );
+  ctrl.dispose();
+  return result;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -4236,6 +5202,8 @@ class _AdmLogoConfigPageState extends State<_AdmLogoConfigPage> {
       final ext   = xfile.name.split('.').last.toLowerCase();
       final url   = await SB.subirLogo(bytes, ext.isEmpty ? 'png' : ext);
       await SB.updateAppConfig({'logo_url': url, 'app_name': _appNameCtrl.text.trim()});
+      // Actualizar reactive → toda la app se refleja inmediatamente
+      await AppConfig.update(nombre: _appNameCtrl.text.trim(), logo: url);
       if (!mounted) return;
       setState(() => _uploading = false);
       await _load();
@@ -4248,6 +5216,8 @@ class _AdmLogoConfigPageState extends State<_AdmLogoConfigPage> {
   Future<void> _guardarNombre() async {
     try {
       await SB.updateAppConfig({'app_name': _appNameCtrl.text.trim()});
+      // Actualizar reactive en memoria → toda la app se actualiza
+      await AppConfig.update(nombre: _appNameCtrl.text.trim());
       if (!mounted) return;
       _snack(context, 'Nombre actualizado ✓');
     } catch (e) {
@@ -4911,6 +5881,79 @@ class _PlanDialogState extends State<PlanDialog> {
 // ────────────────────────────────────────────────────────────
 // ADMIN REPORTES
 // ────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
+// PANTALLA: Suscripciones por vencer pronto (alerta admin)
+// ────────────────────────────────────────────────────────────
+class _VencimientosScreen extends StatefulWidget {
+  const _VencimientosScreen();
+  @override
+  State<_VencimientosScreen> createState() => _VencimientosScreenState();
+}
+
+class _VencimientosScreenState extends State<_VencimientosScreen> {
+  List<Map<String, dynamic>> _porVencer = [];
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final r = await SB.getSuscripcionesPorVencer(dias: 14);
+    if (mounted) setState(() { _porVencer = r; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Vencimientos próximos')),
+    body: _loading
+        ? const Center(child: CircularProgressIndicator(color: C.rose))
+        : _porVencer.isEmpty
+            ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [
+                Text('✅', style: TextStyle(fontSize: 48)),
+                SizedBox(height: 12),
+                Text('Sin vencimientos en los próximos 14 días',
+                    style: TextStyle(color: C.muted)),
+              ]))
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _porVencer.length,
+                itemBuilder: (_, i) {
+                  final s  = _porVencer[i];
+                  final venc = DateTime.tryParse(s['fecha_vencimiento']?.toString() ?? '');
+                  final dias = venc != null ? venc.difference(DateTime.now()).inDays : 0;
+                  final col  = dias <= 2 ? C.err : dias <= 5 ? C.warn : C.info;
+                  final cliente = s['usuarios'] as Map?;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: C.d2,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: col.withOpacity(.4))),
+                    child: Row(children: [
+                      Container(
+                        width: 44, height: 44,
+                        decoration: BoxDecoration(
+                          color: col.withOpacity(.15), shape: BoxShape.circle),
+                        child: Center(child: Text('$dias',
+                            style: TextStyle(color: col, fontSize: 16,
+                                fontWeight: FontWeight.bold)))),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(cliente?['nombre']?.toString() ?? s['plan_nombre']?.toString() ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(cliente?['celular']?.toString() ?? '',
+                            style: const TextStyle(color: C.muted, fontSize: 12)),
+                        Text('Plan: ${s['plan_nombre']}  ·  Vence: ${_fmtFecha(s['fecha_vencimiento']?.toString() ?? '')}',
+                            style: TextStyle(color: col, fontSize: 11)),
+                      ])),
+                      _badge(dias <= 0 ? 'HOY' : 'En $dias días', col),
+                    ]));
+                }),
+  );
+}
+
 class ReportesScreen extends StatefulWidget {
   const ReportesScreen({super.key});
   @override

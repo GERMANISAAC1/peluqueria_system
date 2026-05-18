@@ -1,4 +1,4 @@
-package com.example.barberpro
+package com.example.gym
 
 import io.flutter.embedding.android.FlutterActivity
 

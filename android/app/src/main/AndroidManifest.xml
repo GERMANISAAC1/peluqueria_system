@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.barberpro">
 
+package="com.example.gym">
     <application
         android:label="barberpro"
         android:name="${applicationName}"

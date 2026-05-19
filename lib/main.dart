@@ -1,39 +1,3 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-
-  final prefs = await SharedPreferences.getInstance();
-  final inicial = _cargarDesdePrefs(prefs);
-  final notifier = DispositivosNotifier(inicial);
-
-  runApp(MyApp(notifier: notifier));
-}
-
-List<Dispositivo> _cargarDesdePrefs(SharedPreferences prefs) {
-  try {
-    final raw = prefs.getString('dispositivos');
-    if (raw == null) return [];
-    final list = jsonDecode(raw) as List<dynamic>;
-    return list.map((e) => Dispositivo.fromJson(e)).toList();
-  } catch (_) {
-    return [];
-  }
-}
-
-class Dispositivo {
-  final int id;
   final String nombre;
   final String tipo;
   final String ip;

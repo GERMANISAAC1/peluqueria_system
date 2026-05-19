@@ -135,35 +135,30 @@ class Dispositivo {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ESTADO GLOBAL — ChangeNotifier sin paquetes externos (CORREGIDO)
+// ESTADO GLOBAL — ChangeNotifier sin paquetes externos
 // ═══════════════════════════════════════════════════════════════
 
 class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> _items;
   int _nextId;
   SharedPreferences? _prefs;
-  final Completer<void> _prefsReady = Completer<void>();
-  List<String>? _cachedRooms;
 
   DispositivosNotifier(List<Dispositivo> initial)
       : _items = List.of(initial),
         _nextId = initial.isEmpty
             ? 1
             : initial.map((d) => d.id).reduce((a, b) => a > b ? a : b) + 1 {
-    _initPrefs().then((_) {
-      if (initial.isEmpty) _persistir();
-    });
+    _initPrefs();
   }
 
   Future<void> _initPrefs() async {
     _prefs = await SharedPreferences.getInstance();
-    _prefsReady.complete();
   }
 
   List<Dispositivo> get items => List.unmodifiable(_items);
 
   int get encendidos => _items.where((d) => d.encendido).length;
-  
+
   int get roomsCount => _items.map((d) => d.habitacion).toSet().length;
 
   int get consumoWatts {
@@ -175,19 +170,12 @@ class DispositivosNotifier extends ChangeNotifier {
   }
 
   List<String> get rooms {
-    if (_cachedRooms != null) return _cachedRooms!;
     final set = <String>{};
     for (final d in _items) set.add(d.habitacion);
-    _cachedRooms = ['all', ...set.toList()..sort()];
-    return _cachedRooms!;
-  }
-
-  void _invalidateRoomsCache() {
-    _cachedRooms = null;
+    return ['all', ...set.toList()..sort()];
   }
 
   void toggle(int id) {
-    HapticFeedback.lightImpact(); // Feedback háptico
     final idx = _items.indexWhere((d) => d.id == id);
     if (idx == -1) return;
     _items[idx] = _items[idx].copyWith(encendido: !_items[idx].encendido);
@@ -202,22 +190,19 @@ class DispositivosNotifier extends ChangeNotifier {
       tipo: tipo,
       habitacion: habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
     ));
-    _invalidateRoomsCache();
     notifyListeners();
     _persistir();
   }
 
   void eliminar(int id) {
     _items.removeWhere((d) => d.id == id);
-    _invalidateRoomsCache();
     notifyListeners();
     _persistir();
   }
 
-  Future<void> _persistir() async {
-    await _prefsReady.future;
+  void _persistir() {
     final json = jsonEncode(_items.map((d) => d.toJson()).toList());
-    await _prefs?.setString('dispositivos', json);
+    _prefs?.setString('dispositivos', json);
   }
 }
 
@@ -391,13 +376,9 @@ class _HomePageState extends State<HomePage> {
   int? _cHash;
 
   List<Dispositivo> _getFiltered(List<Dispositivo> items) {
-    // Hash mejorado para detectar cambios correctamente
-    final hash = Object.hash(
-      items.length,
-      Object.hashAll(items.map((d) => d.id)),
-      Object.hashAll(items.map((d) => d.encendido)),
+    final hash = Object.hashAll(
+      items.map((d) => Object.hash(d.id, d.encendido, d.nombre, d.habitacion)),
     );
-    
     if (_cachedFiltered != null &&
         _cFe == _filterEstado &&
         _cFr == _filterRoom &&
@@ -405,7 +386,6 @@ class _HomePageState extends State<HomePage> {
         _cHash == hash) {
       return _cachedFiltered!;
     }
-    
     final q = _searchQuery.toLowerCase();
     _cachedFiltered = items.where((d) {
       final matchRoom = _filterRoom == 'all' || d.habitacion == _filterRoom;
@@ -418,7 +398,6 @@ class _HomePageState extends State<HomePage> {
           d.tipo.toLowerCase().contains(q);
       return matchRoom && matchEstado && matchSearch;
     }).toList();
-    
     _cFe = _filterEstado;
     _cFr = _filterRoom;
     _cSq = _searchQuery;
@@ -461,27 +440,12 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
-    
     if (ok == true && mounted) {
-      final nombre = d.nombre;
       _DispositivosScope.of(context).eliminar(d.id);
-      
-      // Snackbar con opción de deshacer
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('"$nombre" eliminado'),
-          action: SnackBarAction(
-            label: 'DESHACER',
-            textColor: AppColors.cyan,
-            onPressed: () {
-              // Aquí se podría implementar undo
-              // Por ahora solo mostramos mensaje
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Función de deshacer próximamente')),
-              );
-            },
-          ),
-          duration: const Duration(seconds: 4),
+          content: Text('"${d.nombre}" eliminado'),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -551,17 +515,10 @@ class _HomePageState extends State<HomePage> {
                               onAgregar: _mostrarFormulario,
                             ),
                             Expanded(
-                              child: RefreshIndicator(
-                                onRefresh: () async {
-                                  // Aquí iría la recarga desde API
-                                  await Future.delayed(const Duration(milliseconds: 800));
-                                  setState(() {});
-                                },
-                                child: _DevicesGrid(
-                                  items: filtered,
-                                  onToggle: _toggleDispositivo,
-                                  onDelete: _confirmarEliminar,
-                                ),
+                              child: _DevicesGrid(
+                                items: filtered,
+                                onToggle: _toggleDispositivo,
+                                onDelete: _confirmarEliminar,
                               ),
                             ),
                           ],
@@ -1094,7 +1051,7 @@ class _FilterChip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GRID DE DISPOSITIVOS (CORREGIDO - async/await)
+// GRID DE DISPOSITIVOS
 // ═══════════════════════════════════════════════════════════════
 
 class _DevicesGrid extends StatelessWidget {
@@ -1144,7 +1101,7 @@ class _DevicesGrid extends StatelessWidget {
         key: ValueKey(items[i].id),
         d: items[i],
         onToggle: () => onToggle(items[i].id),
-        onDelete: () async => await onDelete(items[i]), // CORREGIDO: async/await
+        onDelete: () => onDelete(items[i]),
       ),
     );
   }
@@ -1383,7 +1340,7 @@ class _FormularioSheet extends StatefulWidget {
 
 class _FormularioSheetState extends State<_FormularioSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _nombreCtrl = TextEditingController(); // locales — sin fuga de estado
+  final _nombreCtrl = TextEditingController();
   final _habitCtrl = TextEditingController();
   String _tipo = 'Tasmota';
 

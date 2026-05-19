@@ -1,9 +1,13 @@
 // ignore_for_file: avoid_classes_with_only_static_members
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'package:network_info_plus/network_info_plus.dart';
+import 'package:ping_discover_network/ping_discover_network.dart';
 
 // ═══════════════════════════════════════════════════════════════
 // PUNTO DE ENTRADA
@@ -11,21 +15,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
+  
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  
   final prefs = await SharedPreferences.getInstance();
-  final inicial = _cargarDesdePrefs(prefs);
+  final inicial = await _cargarDesdePrefs(prefs);
   final notifier = DispositivosNotifier(inicial);
+  
+  // Iniciar escaneo de dispositivos en red
+  await notifier.escanearRed();
 
   runApp(_RealApp(notifier: notifier));
 }
 
-List<Dispositivo> _cargarDesdePrefs(SharedPreferences prefs) {
+Future<List<Dispositivo>> _cargarDesdePrefs(SharedPreferences prefs) async {
   try {
     final raw = prefs.getString('dispositivos');
     if (raw == null) return _dispositivosDemo();
@@ -40,45 +49,47 @@ List<Dispositivo> _cargarDesdePrefs(SharedPreferences prefs) {
 
 List<Dispositivo> _dispositivosDemo() => [
       Dispositivo(
-          id: 1,
-          nombre: 'Sala',
-          tipo: 'Tasmota',
-          habitacion: 'Sala',
-          encendido: true),
+        id: 1,
+        nombre: 'Philips Hue',
+        tipo: 'Hue',
+        habitacion: 'Sala',
+        encendido: false,
+        ip: '192.168.1.100',
+        protocolo: Protocolo.HTTP,
+      ),
       Dispositivo(
-          id: 2,
-          nombre: 'Cocina',
-          tipo: 'Celular',
-          habitacion: 'Cocina',
-          encendido: false),
+        id: 2,
+        nombre: 'Tasmota Plug',
+        tipo: 'Tasmota',
+        habitacion: 'Cocina',
+        encendido: false,
+        ip: '192.168.1.101',
+        protocolo: Protocolo.MQTT,
+      ),
       Dispositivo(
-          id: 3,
-          nombre: 'Dormitorio',
-          tipo: 'Cortina',
-          habitacion: 'Dormitorio',
-          encendido: false),
+        id: 3,
+        nombre: 'Sonoff Basic',
+        tipo: 'Sonoff',
+        habitacion: 'Dormitorio',
+        encendido: false,
+        ip: '192.168.1.102',
+        protocolo: Protocolo.HTTP,
+      ),
       Dispositivo(
-          id: 4,
-          nombre: 'Patio',
-          tipo: 'Escena',
-          habitacion: 'Exterior',
-          encendido: true),
-      Dispositivo(
-          id: 5,
-          nombre: 'Garaje',
-          tipo: 'Tasmota',
-          habitacion: 'Garaje',
-          encendido: false),
-      Dispositivo(
-          id: 6,
-          nombre: 'Oficina',
-          tipo: 'Celular',
-          habitacion: 'Oficina',
-          encendido: false),
+        id: 4,
+        nombre: 'Shelly 1PM',
+        tipo: 'Shelly',
+        habitacion: 'Garaje',
+        encendido: false,
+        ip: '192.168.1.103',
+        protocolo: Protocolo.HTTP,
+      ),
     ];
 
+enum Protocolo { HTTP, MQTT, WEBSOCKET, ZIGBEE }
+
 // ═══════════════════════════════════════════════════════════════
-// MODELO — inmutable, serializable, con copyWith
+// MODELO MEJORADO
 // ═══════════════════════════════════════════════════════════════
 
 class Dispositivo {
@@ -86,14 +97,24 @@ class Dispositivo {
   final String nombre;
   final String tipo;
   final String habitacion;
-  final bool encendido;
+  final String? ip;
+  final Protocolo protocolo;
+  bool encendido;
+  int potencia; // Watts actuales
+  int brightness; // Brillo 0-100
+  int temperature; // Temperatura en °C si aplica
 
-  const Dispositivo({
+  Dispositivo({
     required this.id,
     required this.nombre,
     required this.tipo,
     required this.habitacion,
+    this.ip,
+    this.protocolo = Protocolo.HTTP,
     this.encendido = false,
+    this.potencia = 0,
+    this.brightness = 100,
+    this.temperature = 0,
   });
 
   Dispositivo copyWith({
@@ -101,14 +122,24 @@ class Dispositivo {
     String? nombre,
     String? tipo,
     String? habitacion,
+    String? ip,
+    Protocolo? protocolo,
     bool? encendido,
+    int? potencia,
+    int? brightness,
+    int? temperature,
   }) =>
       Dispositivo(
         id: id ?? this.id,
         nombre: nombre ?? this.nombre,
         tipo: tipo ?? this.tipo,
         habitacion: habitacion ?? this.habitacion,
+        ip: ip ?? this.ip,
+        protocolo: protocolo ?? this.protocolo,
         encendido: encendido ?? this.encendido,
+        potencia: potencia ?? this.potencia,
+        brightness: brightness ?? this.brightness,
+        temperature: temperature ?? this.temperature,
       );
 
   Map<String, dynamic> toJson() => {
@@ -116,7 +147,12 @@ class Dispositivo {
         'nombre': nombre,
         'tipo': tipo,
         'habitacion': habitacion,
+        'ip': ip,
+        'protocolo': protocolo.index,
         'encendido': encendido,
+        'potencia': potencia,
+        'brightness': brightness,
+        'temperature': temperature,
       };
 
   factory Dispositivo.fromJson(Map<String, dynamic> j) => Dispositivo(
@@ -124,24 +160,104 @@ class Dispositivo {
         nombre: j['nombre'] as String,
         tipo: j['tipo'] as String,
         habitacion: j['habitacion'] as String,
+        ip: j['ip'] as String?,
+        protocolo: Protocolo.values[j['protocolo'] as int? ?? 0],
         encendido: j['encendido'] as bool? ?? false,
+        potencia: j['potencia'] as int? ?? 0,
+        brightness: j['brightness'] as int? ?? 100,
+        temperature: j['temperature'] as int? ?? 0,
       );
 
   @override
   bool operator ==(Object other) => other is Dispositivo && other.id == id;
-
   @override
   int get hashCode => id.hashCode;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ESTADO GLOBAL — ChangeNotifier sin paquetes externos
+// CONTROLADOR DE DISPOSITIVOS - COMUNICACIÓN REAL
+// ═══════════════════════════════════════════════════════════════
+
+class DeviceController {
+  static final DeviceController _instance = DeviceController._internal();
+  factory DeviceController() => _instance;
+  DeviceController._internal();
+
+  // Control por HTTP (Tasmota, Sonoff, Shelly)
+  Future<bool> controlHTTP(String ip, bool encender) async {
+    try {
+      final url = Uri.parse('http://$ip/cm?cmnd=Power%20${encender ? 'On' : 'Off'}');
+      final response = await http.get(url).timeout(const Duration(seconds: 2));
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error HTTP: $e');
+      return false;
+    }
+  }
+
+  // Control para Philips Hue
+  Future<bool> controlHue(String ip, bool encender, {int brightness = 100}) async {
+    try {
+      final url = Uri.parse('http://$ip/api/newdeveloper/lights/1/state');
+      final body = jsonEncode({
+        'on': encender,
+        'bri': (brightness * 2.54).round(),
+      });
+      final response = await http.put(url, body: body).timeout(const Duration(seconds: 2));
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error Hue: $e');
+      return false;
+    }
+  }
+
+  // Control para Shelly
+  Future<bool> controlShelly(String ip, bool encender) async {
+    try {
+      final url = Uri.parse('http://$ip/relay/0?turn=${encender ? 'on' : 'off'}');
+      final response = await http.get(url).timeout(const Duration(seconds: 2));
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error Shelly: $e');
+      return false;
+    }
+  }
+
+  // Obtener potencia actual
+  Future<int> getPotencia(String ip, String tipo) async {
+    try {
+      if (tipo == 'Shelly') {
+        final url = Uri.parse('http://$ip/status');
+        final response = await http.get(url).timeout(const Duration(seconds: 2));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return data['meters'][0]['power'] as int? ?? 0;
+        }
+      } else if (tipo == 'Tasmota') {
+        final url = Uri.parse('http://$ip/cm?cmnd=Status%208');
+        final response = await http.get(url).timeout(const Duration(seconds: 2));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return data['StatusSNS']['ENERGY']['Power'] as int? ?? 0;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getPotencia: $e');
+    }
+    return 0;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ESTADO GLOBAL MEJORADO
 // ═══════════════════════════════════════════════════════════════
 
 class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> _items;
   int _nextId;
   SharedPreferences? _prefs;
+  final DeviceController _controller = DeviceController();
+  Timer? _monitorTimer;
 
   DispositivosNotifier(List<Dispositivo> initial)
       : _items = List.of(initial),
@@ -149,6 +265,25 @@ class DispositivosNotifier extends ChangeNotifier {
             ? 1
             : initial.map((d) => d.id).reduce((a, b) => a > b ? a : b) + 1 {
     _initPrefs();
+    _iniciarMonitor();
+  }
+
+  void _iniciarMonitor() {
+    _monitorTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _actualizarPotencia();
+    });
+  }
+
+  Future<void> _actualizarPotencia() async {
+    for (var i = 0; i < _items.length; i++) {
+      if (_items[i].encendido && _items[i].ip != null) {
+        final potencia = await _controller.getPotencia(_items[i].ip!, _items[i].tipo);
+        if (potencia != _items[i].potencia) {
+          _items[i] = _items[i].copyWith(potencia: potencia);
+          notifyListeners();
+        }
+      }
+    }
   }
 
   Future<void> _initPrefs() async {
@@ -156,15 +291,13 @@ class DispositivosNotifier extends ChangeNotifier {
   }
 
   List<Dispositivo> get items => List.unmodifiable(_items);
-
   int get encendidos => _items.where((d) => d.encendido).length;
-
   int get roomsCount => _items.map((d) => d.habitacion).toSet().length;
-
-  int get consumoWatts {
+  
+  int get consumoTotal {
     var total = 0;
     for (final d in _items) {
-      if (d.encendido) total += kTipos[d.tipo]?.wattsPromedio ?? 40;
+      if (d.encendido) total += d.potencia;
     }
     return total;
   }
@@ -175,20 +308,104 @@ class DispositivosNotifier extends ChangeNotifier {
     return ['all', ...set.toList()..sort()];
   }
 
-  void toggle(int id) {
+  // Escanear red automáticamente
+  Future<void> escanearRed() async {
+    final info = NetworkInfo();
+    final wifiIP = await info.getWifiIP();
+    if (wifiIP != null) {
+      final subnet = wifiIP.substring(0, wifiIP.lastIndexOf('.'));
+      final stream = NetworkAnalyzer.discover(subnet, 80, timeout: 200);
+      
+      stream.listen((NetworkAddress addr) {
+        if (addr.exists) {
+          _detectarDispositivo(addr.ip);
+        }
+      });
+    }
+  }
+
+  Future<void> _detectarDispositivo(String ip) async {
+    // Detectar Tasmota
+    try {
+      final url = Uri.parse('http://$ip/cm?cmnd=Status%200');
+      final response = await http.get(url).timeout(const Duration(milliseconds: 500));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data.containsKey('Status')) {
+          final nombre = data['Status']['DeviceName'] ?? 'Tasmota';
+          if (!_items.any((d) => d.ip == ip)) {
+            _items.add(Dispositivo(
+              id: _nextId++,
+              nombre: nombre,
+              tipo: 'Tasmota',
+              habitacion: 'Descubierto',
+              ip: ip,
+              protocolo: Protocolo.HTTP,
+            ));
+            notifyListeners();
+            _persistir();
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> toggle(int id) async {
     final idx = _items.indexWhere((d) => d.id == id);
     if (idx == -1) return;
-    _items[idx] = _items[idx].copyWith(encendido: !_items[idx].encendido);
+    
+    final dispositivo = _items[idx];
+    bool exito = false;
+    
+    if (dispositivo.ip != null) {
+      switch (dispositivo.tipo) {
+        case 'Hue':
+          exito = await _controller.controlHue(dispositivo.ip!, !dispositivo.encendido);
+          break;
+        case 'Shelly':
+          exito = await _controller.controlShelly(dispositivo.ip!, !dispositivo.encendido);
+          break;
+        default:
+          exito = await _controller.controlHTTP(dispositivo.ip!, !dispositivo.encendido);
+      }
+    }
+    
+    if (exito || dispositivo.ip == null) {
+      _items[idx] = dispositivo.copyWith(encendido: !dispositivo.encendido);
+      notifyListeners();
+      _persistir();
+      
+      // Actualizar potencia después de encender
+      if (_items[idx].encendido && _items[idx].ip != null) {
+        final potencia = await _controller.getPotencia(_items[idx].ip!, _items[idx].tipo);
+        if (potencia > 0) {
+          _items[idx] = _items[idx].copyWith(potencia: potencia);
+          notifyListeners();
+        }
+      }
+    }
+  }
+
+  Future<void> setBrightness(int id, int brightness) async {
+    final idx = _items.indexWhere((d) => d.id == id);
+    if (idx == -1) return;
+    
+    if (_items[idx].ip != null && _items[idx].tipo == 'Hue') {
+      await _controller.controlHue(_items[idx].ip!, _items[idx].encendido, brightness: brightness);
+    }
+    
+    _items[idx] = _items[idx].copyWith(brightness: brightness);
     notifyListeners();
     _persistir();
   }
 
-  void agregar(String nombre, String tipo, String habitacion) {
+  void agregar(String nombre, String tipo, String habitacion, {String? ip}) {
     _items.add(Dispositivo(
       id: _nextId++,
       nombre: nombre.trim(),
       tipo: tipo,
       habitacion: habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
+      ip: ip,
     ));
     notifyListeners();
     _persistir();
@@ -204,110 +421,36 @@ class DispositivosNotifier extends ChangeNotifier {
     final json = jsonEncode(_items.map((d) => d.toJson()).toList());
     _prefs?.setString('dispositivos', json);
   }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INHERITED WIDGET — propaga el notifier sin paquetes externos
-// ═══════════════════════════════════════════════════════════════
-
-class _DispositivosScope extends InheritedNotifier<DispositivosNotifier> {
-  const _DispositivosScope({
-    required DispositivosNotifier notifier,
-    required super.child,
-  }) : super(notifier: notifier);
-
-  static DispositivosNotifier of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<_DispositivosScope>();
-    assert(scope != null, '_DispositivosScope no encontrado en el árbol');
-    return scope!.notifier!;
+  
+  @override
+  void dispose() {
+    _monitorTimer?.cancel();
+    super.dispose();
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TEMA / CONSTANTES
+// UI MEJORADA Y MÁS ATRACTIVA
 // ═══════════════════════════════════════════════════════════════
 
 class AppColors {
-  static const bg = Color(0xFF0A0C10);
-  static const bg2 = Color(0xFF111318);
-  static const bg3 = Color(0xFF181B22);
-  static const card = Color(0xFF13161D);
-  static const cyan = Color(0xFF00DBB4);
-  static const cyanDim = Color(0x1F00DBB4);
-  static const cyanBorder = Color(0x4D00DBB4);
-  static const textPri = Color(0xFFE8EAF0);
-  static const textSec = Color(0xFF8891A4);
-  static const textHint = Color(0xFF50586A);
-  static const green = Color(0xFF06D6A0);
-  static const yellow = Color(0xFFFFD166);
-  static const red = Color(0xFFFF4D6D);
-  static const redDim = Color(0x1FFF4D6D);
-  static const redBorder = Color(0x33FF4D6D);
-  static const orange = Color(0xFFFF9F1C);
-  static const blue = Color(0xFF4EA8DE);
-  static const purple = Color(0xFFC77DFF);
-  static const border = Color(0x12FFFFFF);
+  static const primary = Color(0xFF6C63FF);
+  static const primaryLight = Color(0xFF8B84FF);
+  static const primaryDark = Color(0xFF4A43CC);
+  static const secondary = Color(0xFFFF6584);
+  static const success = Color(0xFF00E5A0);
+  static const warning = Color(0xFFFFB347);
+  static const error = Color(0xFFFF4757);
+  static const background = Color(0xFF0A0E27);
+  static const surface = Color(0xFF141A33);
+  static const surfaceLight = Color(0xFF1E2546);
+  static const textPrimary = Color(0xFFFFFFFF);
+  static const textSecondary = Color(0xFF8A93B3);
+  static const textHint = Color(0xFF4A526B);
+  static const gradient1 = Color(0xFF6C63FF);
+  static const gradient2 = Color(0xFF4A43CC);
+  static const gradient3 = Color(0xFFFF6584);
 }
-
-class TipoInfo {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final Color bg;
-  final int wattsPromedio;
-
-  const TipoInfo({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.bg,
-    required this.wattsPromedio,
-  });
-}
-
-const Map<String, TipoInfo> kTipos = {
-  'Tasmota': TipoInfo(
-      label: 'Tasmota',
-      icon: Icons.wifi,
-      color: AppColors.blue,
-      bg: Color(0x1F4EA8DE),
-      wattsPromedio: 60),
-  'Celular': TipoInfo(
-      label: 'Celular',
-      icon: Icons.phone_android,
-      color: AppColors.purple,
-      bg: Color(0x1FC77DFF),
-      wattsPromedio: 15),
-  'Cortina': TipoInfo(
-      label: 'Cortina',
-      icon: Icons.curtains,
-      color: AppColors.yellow,
-      bg: Color(0x1FFFD166),
-      wattsPromedio: 30),
-  'Escena': TipoInfo(
-      label: 'Escena',
-      icon: Icons.auto_awesome,
-      color: AppColors.orange,
-      bg: Color(0x1FFF9F1C),
-      wattsPromedio: 5),
-  'Sensor': TipoInfo(
-      label: 'Sensor',
-      icon: Icons.sensors,
-      color: AppColors.green,
-      bg: Color(0x1F06D6A0),
-      wattsPromedio: 2),
-  'Cámara': TipoInfo(
-      label: 'Cámara',
-      icon: Icons.videocam_rounded,
-      color: AppColors.red,
-      bg: Color(0x1FFF4D6D),
-      wattsPromedio: 8),
-};
-
-// ═══════════════════════════════════════════════════════════════
-// APP ROOT - CORREGIDO
-// ═══════════════════════════════════════════════════════════════
 
 class _RealApp extends StatelessWidget {
   final DispositivosNotifier notifier;
@@ -319,34 +462,35 @@ class _RealApp extends StatelessWidget {
       notifier: notifier,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Domótica Pro',
-        theme: ThemeData.dark().copyWith(
-          scaffoldBackgroundColor: AppColors.bg,
-          colorScheme: const ColorScheme.dark(primary: AppColors.cyan),
-          snackBarTheme: SnackBarThemeData(
-            backgroundColor: AppColors.bg2,
-            contentTextStyle: const TextStyle(color: AppColors.textPri),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-            behavior: SnackBarBehavior.floating,
+        title: 'SmartHome Pro',
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          primaryColor: AppColors.primary,
+          scaffoldBackgroundColor: AppColors.background,
+          fontFamily: 'Poppins',
+          colorScheme: const ColorScheme.dark(
+            primary: AppColors.primary,
+            secondary: AppColors.secondary,
+            surface: AppColors.surface,
           ),
-          switchTheme: SwitchThemeData(
-            thumbColor: WidgetStateProperty.resolveWith(
-              (s) => s.contains(WidgetState.selected)
-                  ? Colors.black
-                  : AppColors.textHint,
-            ),
-            trackColor: WidgetStateProperty.resolveWith(
-              (s) => s.contains(WidgetState.selected)
-                  ? AppColors.cyan
-                  : AppColors.bg3,
+          appBarTheme: const AppBarTheme(
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            centerTitle: true,
+          ),
+          cardTheme: CardTheme(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
           ),
-          // CORREGIDO: Usar DialogThemeData
-          dialogTheme: const DialogThemeData(
-            backgroundColor: AppColors.bg2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.all(Radius.circular(16))),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: AppColors.surface,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(15),
+              borderSide: BorderSide.none,
+            ),
           ),
         ),
         home: const HomePage(),
@@ -355,8 +499,21 @@ class _RealApp extends StatelessWidget {
   }
 }
 
+class _DispositivosScope extends InheritedNotifier<DispositivosNotifier> {
+  const _DispositivosScope({
+    required DispositivosNotifier notifier,
+    required super.child,
+  }) : super(notifier: notifier);
+
+  static DispositivosNotifier of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<_DispositivosScope>();
+    assert(scope != null);
+    return scope!.notifier!;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
-// HOME PAGE — orquestación y estado local de UI
+// HOME PAGE MEJORADA
 // ═══════════════════════════════════════════════════════════════
 
 class HomePage extends StatefulWidget {
@@ -366,531 +523,253 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  String _filterEstado = 'all';
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   String _filterRoom = 'all';
   String _searchQuery = '';
 
-  // Caché de lista filtrada para evitar recalcular en cada build
-  List<Dispositivo>? _cachedFiltered;
-  String? _cFe, _cFr, _cSq;
-  int? _cHash;
-
-  List<Dispositivo> _getFiltered(List<Dispositivo> items) {
-    final hash = Object.hashAll(
-      items.map((d) => Object.hash(d.id, d.encendido, d.nombre, d.habitacion)),
-    );
-    if (_cachedFiltered != null &&
-        _cFe == _filterEstado &&
-        _cFr == _filterRoom &&
-        _cSq == _searchQuery &&
-        _cHash == hash) {
-      return _cachedFiltered!;
-    }
-    final q = _searchQuery.toLowerCase();
-    _cachedFiltered = items.where((d) {
-      final matchRoom = _filterRoom == 'all' || d.habitacion == _filterRoom;
-      final matchEstado = _filterEstado == 'all' ||
-          (_filterEstado == 'on' && d.encendido) ||
-          (_filterEstado == 'off' && !d.encendido);
-      final matchSearch = q.isEmpty ||
-          d.nombre.toLowerCase().contains(q) ||
-          d.habitacion.toLowerCase().contains(q) ||
-          d.tipo.toLowerCase().contains(q);
-      return matchRoom && matchEstado && matchSearch;
-    }).toList();
-    _cFe = _filterEstado;
-    _cFr = _filterRoom;
-    _cSq = _searchQuery;
-    _cHash = hash;
-    return _cachedFiltered!;
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
   }
 
-  void _invalidateCache() => _cachedFiltered = null;
-
-  // ── Acciones ──────────────────────────────────────────────────
-
-  void _toggleDispositivo(int id) =>
-      _DispositivosScope.of(context).toggle(id);
-
-  Future<void> _confirmarEliminar(Dispositivo d) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Eliminar dispositivo',
-            style: TextStyle(
-                color: AppColors.textPri,
-                fontSize: 17,
-                fontWeight: FontWeight.w700)),
-        content: Text(
-          '¿Eliminar "${d.nombre}"? No se puede deshacer.',
-          style: const TextStyle(color: AppColors.textSec, fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar',
-                style: TextStyle(color: AppColors.textSec)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar',
-                style: TextStyle(
-                    color: AppColors.red, fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      _DispositivosScope.of(context).eliminar(d.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('"${d.nombre}" eliminado'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
-
-  void _mostrarFormulario() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.bg2,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => _FormularioSheet(
-        onAgregar: (nombre, tipo, habitacion) =>
-            _DispositivosScope.of(context).agregar(nombre, tipo, habitacion),
-      ),
-    );
-  }
-
-  // ── Build ─────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final notifier = _DispositivosScope.of(context);
     final items = notifier.items;
-    final filtered = _getFiltered(items);
+    
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.background,
+              AppColors.surface,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _ModernHeader(),
+              _EnergyStats(notifier: notifier),
+              _SearchAndFilter(
+                searchQuery: _searchQuery,
+                onSearchChanged: (q) => setState(() => _searchQuery = q),
+                selectedRoom: _filterRoom,
+                onRoomChanged: (r) => setState(() => _filterRoom = r),
+                rooms: notifier.rooms,
+              ),
+              Expanded(
+                child: _DevicesGrid(
+                  items: _getFiltered(items, _filterRoom, _searchQuery),
+                  onToggle: notifier.toggle,
+                  onDelete: notifier.eliminar,
+                  onBrightnessChange: notifier.setBrightness,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: _FloatingActionButton(
+        onAgregar: (nombre, tipo, habitacion, ip) =>
+            notifier.agregar(nombre, tipo, habitacion, ip: ip),
+      ),
+    );
+  }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 600;
+  List<Dispositivo> _getFiltered(List<Dispositivo> items, String room, String query) {
+    return items.where((d) {
+      final matchRoom = room == 'all' || d.habitacion == room;
+      final matchSearch = query.isEmpty ||
+          d.nombre.toLowerCase().contains(query.toLowerCase());
+      return matchRoom && matchSearch;
+    }).toList();
+  }
+}
 
-        return Scaffold(
-          backgroundColor: AppColors.bg,
-          body: SafeArea(
+// ═══════════════════════════════════════════════════════════════
+// COMPONENTES MODERNOS
+// ═══════════════════════════════════════════════════════════════
+
+class _ModernHeader extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.primary, AppColors.secondary],
+              ),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: const Icon(Icons.smart_home, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 15),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Header(isWide: isWide),
-                _StatsBar(notifier: notifier),
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (isWide)
-                        _Sidebar(
-                          rooms: notifier.rooms,
-                          allItems: items,
-                          selectedRoom: _filterRoom,
-                          onRoomChanged: (r) => setState(() {
-                            _filterRoom = r;
-                            _invalidateCache();
-                          }),
-                        ),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            _Toolbar(
-                              filterEstado: _filterEstado,
-                              searchQuery: _searchQuery,
-                              showAddButton: isWide,
-                              onFilterChanged: (f) => setState(() {
-                                _filterEstado = f;
-                                _invalidateCache();
-                              }),
-                              onSearchChanged: (q) => setState(() {
-                                _searchQuery = q;
-                                _invalidateCache();
-                              }),
-                              onAgregar: _mostrarFormulario,
-                            ),
-                            Expanded(
-                              child: _DevicesGrid(
-                                items: filtered,
-                                onToggle: _toggleDispositivo,
-                                onDelete: _confirmarEliminar,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                const Text(
+                  'Bienvenido de vuelta',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                const Text(
+                  'Casa Inteligente',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
                   ),
                 ),
               ],
             ),
           ),
-          floatingActionButton: !isWide
-              ? FloatingActionButton.extended(
-                  onPressed: _mostrarFormulario,
-                  backgroundColor: AppColors.cyan,
-                  foregroundColor: Colors.black,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Agregar',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                )
-              : null,
-        );
-      },
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.notifications_none, color: AppColors.textPrimary),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// HEADER
-// ═══════════════════════════════════════════════════════════════
-
-class _Header extends StatelessWidget {
-  final bool isWide;
-  const _Header({required this.isWide});
+class _EnergyStats extends StatelessWidget {
+  final DispositivosNotifier notifier;
+  const _EnergyStats({required this.notifier});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 60,
-      color: AppColors.bg2,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.primary, AppColors.primaryDark],
+        ),
+        borderRadius: BorderRadius.circular(25),
+      ),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.cyanDim,
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: AppColors.cyanBorder),
-            ),
-            child:
-                const Icon(Icons.home_rounded, color: AppColors.cyan, size: 18),
-          ),
-          const SizedBox(width: 10),
-          const Text('DOMÓTICA PRO',
-              style: TextStyle(
-                color: AppColors.cyan,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.5,
-              )),
-          const Spacer(),
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: AppColors.green,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: AppColors.green.withValues(alpha: 0.5),
-                    blurRadius: 5)
+          Expanded(
+            child: Column(
+              children: [
+                const Icon(Icons.electrical_services, color: Colors.white, size: 24),
+                const SizedBox(height: 5),
+                Text(
+                  '${notifier.consumoTotal}W',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const Text('Consumo Actual', style: TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
-          if (isWide) ...[
-            const SizedBox(width: 7),
-            const Text('ONLINE',
-                style: TextStyle(
-                    color: AppColors.textSec,
-                    fontSize: 11,
-                    letterSpacing: 0.5)),
-          ],
-          const SizedBox(width: 14),
-          // Reloj aislado — no propaga rebuilds al árbol
-          const _ClockWidget(),
+          Container(width: 1, height: 40, color: Colors.white24),
+          Expanded(
+            child: Column(
+              children: [
+                const Icon(Icons.power_settings_new, color: Colors.white, size: 24),
+                const SizedBox(height: 5),
+                Text(
+                  '${notifier.encendidos}',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const Text('Dispositivos Activos', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-/// Widget de reloj con Timer propio. Rebuild aislado cada segundo.
-class _ClockWidget extends StatefulWidget {
-  const _ClockWidget();
-
-  @override
-  State<_ClockWidget> createState() => _ClockWidgetState();
-}
-
-class _ClockWidgetState extends State<_ClockWidget> {
-  late Timer _timer;
-  late String _time;
-
-  @override
-  void initState() {
-    super.initState();
-    _time = _fmt(DateTime.now());
-    _timer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => setState(() => _time = _fmt(DateTime.now())),
-    );
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
-  }
-
-  String _fmt(DateTime n) =>
-      '${n.hour.toString().padLeft(2, '0')}:'
-      '${n.minute.toString().padLeft(2, '0')}:'
-      '${n.second.toString().padLeft(2, '0')}';
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.cyanDim,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.cyanBorder),
-      ),
-      child: Text(_time,
-          style: const TextStyle(
-            color: AppColors.cyan,
-            fontSize: 13,
-            fontFamily: 'monospace',
-            letterSpacing: 1,
-          )),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// STATS BAR
-// ═══════════════════════════════════════════════════════════════
-
-class _StatsBar extends StatelessWidget {
-  final DispositivosNotifier notifier;
-  const _StatsBar({required this.notifier});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 64,
-      decoration: const BoxDecoration(
-        color: AppColors.bg2,
-        border: Border(
-          top: BorderSide(color: AppColors.border),
-          bottom: BorderSide(color: AppColors.border),
-        ),
-      ),
-      child: Row(
-        children: [
-          _StatCell(
-              icon: Icons.memory_rounded,
-              iconColor: AppColors.cyan,
-              label: 'Dispositivos',
-              value: '${notifier.items.length}'),
-          _vDiv(),
-          _StatCell(
-              icon: Icons.power_rounded,
-              iconColor: AppColors.green,
-              label: 'Encendidos',
-              value: '${notifier.encendidos}',
-              valueColor: AppColors.green),
-          _vDiv(),
-          _StatCell(
-              icon: Icons.house_rounded,
-              iconColor: AppColors.yellow,
-              label: 'Habitaciones',
-              value: '${notifier.roomsCount}'),
-          _vDiv(),
-          _StatCell(
-              icon: Icons.bolt_rounded,
-              iconColor: AppColors.yellow,
-              label: 'Consumo',
-              value: '${notifier.consumoWatts}W',
-              valueColor: AppColors.yellow),
-        ],
-      ),
-    );
-  }
-
-  Widget _vDiv() => Container(width: 1, color: AppColors.border);
-}
-
-class _StatCell extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  const _StatCell({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: iconColor, size: 16),
-            ),
-            const SizedBox(width: 9),
-            Flexible(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label.toUpperCase(),
-                      style: const TextStyle(
-                          color: AppColors.textHint,
-                          fontSize: 9,
-                          letterSpacing: 1)),
-                  Text(value,
-                      style: TextStyle(
-                        color: valueColor ?? AppColors.textPri,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                        height: 1.1,
-                      )),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SIDEBAR
-// ═══════════════════════════════════════════════════════════════
-
-class _Sidebar extends StatelessWidget {
-  final List<String> rooms;
-  final List<Dispositivo> allItems;
+class _SearchAndFilter extends StatelessWidget {
+  final String searchQuery;
+  final Function(String) onSearchChanged;
   final String selectedRoom;
-  final ValueChanged<String> onRoomChanged;
+  final Function(String) onRoomChanged;
+  final List<String> rooms;
 
-  const _Sidebar({
-    required this.rooms,
-    required this.allItems,
+  const _SearchAndFilter({
+    required this.searchQuery,
+    required this.onSearchChanged,
     required this.selectedRoom,
     required this.onRoomChanged,
+    required this.rooms,
   });
-
-  static const _iconMap = <String, IconData>{
-    'all': Icons.grid_view_rounded,
-    'Sala': Icons.weekend_rounded,
-    'Cocina': Icons.kitchen_rounded,
-    'Dormitorio': Icons.bed_rounded,
-    'Exterior': Icons.park_rounded,
-    'Garaje': Icons.garage_rounded,
-    'Oficina': Icons.desk_rounded,
-    'General': Icons.home_rounded,
-  };
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 185,
-      color: AppColors.bg2,
+    return Padding(
+      padding: const EdgeInsets.all(20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 13, 14, 5),
-            child: Text('HABITACIONES',
-                style: TextStyle(
-                    color: AppColors.textHint,
-                    fontSize: 9,
-                    letterSpacing: 1.5)),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: TextField(
+              onChanged: onSearchChanged,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Buscar dispositivo...',
+                hintStyle: TextStyle(color: AppColors.textHint),
+                prefixIcon: const Icon(Icons.search, color: AppColors.primary),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.all(15),
+              ),
+            ),
           ),
-          Expanded(
+          const SizedBox(height: 15),
+          SizedBox(
+            height: 40,
             child: ListView.builder(
-              padding: EdgeInsets.zero,
+              scrollDirection: Axis.horizontal,
               itemCount: rooms.length,
               itemBuilder: (_, i) {
-                final r = rooms[i];
-                final active = selectedRoom == r;
-                final count = r == 'all'
-                    ? allItems.length
-                    : allItems.where((d) => d.habitacion == r).length;
-                final label = r == 'all' ? 'Todos' : r;
-                final icon = _iconMap[r] ?? Icons.home_rounded;
-
-                return Semantics(
-                  label: 'Habitación $label, $count dispositivos',
-                  selected: active,
-                  button: true,
-                  child: GestureDetector(
-                    onTap: () => onRoomChanged(r),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 130),
-                      height: 38,
-                      margin:
-                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: active ? AppColors.cyanDim : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border(
-                          left: BorderSide(
-                            color: active ? AppColors.cyan : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Row(
-                        children: [
-                          Icon(icon, size: 14,
-                              color:
-                                  active ? AppColors.cyan : AppColors.textSec),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: Text(label,
-                                style: TextStyle(
-                                  color: active
-                                      ? AppColors.cyan
-                                      : AppColors.textSec,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                )),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: AppColors.bg3,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text('$count',
-                                style: const TextStyle(
-                                  color: AppColors.textSec,
-                                  fontSize: 10,
-                                  fontFamily: 'monospace',
-                                )),
-                          ),
-                        ],
-                      ),
+                final room = rooms[i];
+                final isSelected = selectedRoom == room;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: FilterChip(
+                    label: Text(room == 'all' ? 'Todos' : room),
+                    selected: isSelected,
+                    onSelected: (_) => onRoomChanged(room),
+                    backgroundColor: AppColors.surface,
+                    selectedColor: AppColors.primary,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : AppColors.textSecondary,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 );
@@ -903,167 +782,17 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TOOLBAR
-// ═══════════════════════════════════════════════════════════════
-
-class _Toolbar extends StatelessWidget {
-  final String filterEstado;
-  final String searchQuery;
-  final bool showAddButton;
-  final ValueChanged<String> onFilterChanged;
-  final ValueChanged<String> onSearchChanged;
-  final VoidCallback onAgregar;
-
-  const _Toolbar({
-    required this.filterEstado,
-    required this.searchQuery,
-    required this.showAddButton,
-    required this.onFilterChanged,
-    required this.onSearchChanged,
-    required this.onAgregar,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: SizedBox(
-              height: 36,
-              child: TextField(
-                onChanged: onSearchChanged,
-                style: const TextStyle(color: AppColors.textPri, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Buscar dispositivo...',
-                  hintStyle: const TextStyle(color: AppColors.textHint),
-                  prefixIcon:
-                      const Icon(Icons.search, color: AppColors.textHint, size: 16),
-                  filled: true,
-                  fillColor: AppColors.bg2,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: AppColors.cyanBorder, width: 1.5),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _FilterChip(
-              label: 'Todos',
-              value: 'all',
-              current: filterEstado,
-              onTap: onFilterChanged),
-          const SizedBox(width: 5),
-          _FilterChip(
-              label: 'Activos',
-              value: 'on',
-              current: filterEstado,
-              onTap: onFilterChanged),
-          const SizedBox(width: 5),
-          _FilterChip(
-              label: 'Inactivos',
-              value: 'off',
-              current: filterEstado,
-              onTap: onFilterChanged),
-          if (showAddButton) ...[
-            const SizedBox(width: 8),
-            SizedBox(
-              height: 36,
-              child: ElevatedButton.icon(
-                onPressed: onAgregar,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Agregar',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.cyan,
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final String current;
-  final ValueChanged<String> onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.value,
-    required this.current,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final active = current == value;
-    return Semantics(
-      button: true,
-      selected: active,
-      label: 'Filtrar $label',
-      child: GestureDetector(
-        onTap: () => onTap(value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 11),
-          decoration: BoxDecoration(
-            color: active ? AppColors.cyanDim : AppColors.bg2,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-                color: active ? AppColors.cyanBorder : AppColors.border),
-          ),
-          alignment: Alignment.center,
-          child: Text(label,
-              style: TextStyle(
-                color: active ? AppColors.cyan : AppColors.textSec,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              )),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// GRID DE DISPOSITIVOS
-// ═══════════════════════════════════════════════════════════════
-
 class _DevicesGrid extends StatelessWidget {
   final List<Dispositivo> items;
-  final ValueChanged<int> onToggle;
-  final Future<void> Function(Dispositivo) onDelete;
+  final Function(int) onToggle;
+  final Function(int) onDelete;
+  final Function(int, int) onBrightnessChange;
 
   const _DevicesGrid({
     required this.items,
     required this.onToggle,
     required this.onDelete,
+    required this.onBrightnessChange,
   });
 
   @override
@@ -1073,215 +802,232 @@ class _DevicesGrid extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.devices_other_rounded,
-                size: 48, color: AppColors.textHint.withValues(alpha: 0.4)),
-            const SizedBox(height: 12),
-            const Text('Sin dispositivos',
-                style: TextStyle(
-                    color: AppColors.textSec,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            const Text('Agrega uno con el botón +',
-                style: TextStyle(color: AppColors.textHint, fontSize: 13)),
+            Icon(Icons.devices_other, size: 80, color: AppColors.textHint),
+            const SizedBox(height: 20),
+            Text(
+              'No hay dispositivos',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 18),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Agrega tu primer dispositivo',
+              style: TextStyle(color: AppColors.textHint),
+            ),
           ],
         ),
       );
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 80),
+      padding: const EdgeInsets.all(20),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 205,
-        crossAxisSpacing: 11,
-        mainAxisSpacing: 11,
-        childAspectRatio: 0.78,
+        maxCrossAxisExtent: 350,
+        crossAxisSpacing: 15,
+        mainAxisSpacing: 15,
+        childAspectRatio: 1.1,
       ),
       itemCount: items.length,
       itemBuilder: (_, i) => _DeviceCard(
-        key: ValueKey(items[i].id),
-        d: items[i],
+        dispositivo: items[i],
         onToggle: () => onToggle(items[i].id),
-        onDelete: () => onDelete(items[i]),
+        onDelete: () => onDelete(items[i].id),
+        onBrightnessChange: (brightness) => onBrightnessChange(items[i].id, brightness),
       ),
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// DEVICE CARD
-// ═══════════════════════════════════════════════════════════════
-
-class _DeviceCard extends StatelessWidget {
-  final Dispositivo d;
+class _DeviceCard extends StatefulWidget {
+  final Dispositivo dispositivo;
   final VoidCallback onToggle;
-  final Future<void> Function() onDelete;
+  final VoidCallback onDelete;
+  final Function(int) onBrightnessChange;
 
   const _DeviceCard({
-    super.key,
-    required this.d,
+    required this.dispositivo,
     required this.onToggle,
     required this.onDelete,
+    required this.onBrightnessChange,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final info = kTipos[d.tipo] ?? kTipos['Tasmota']!;
-    final isOn = d.encendido;
-    final iconClr = isOn ? info.color : AppColors.textHint;
-    final iconBg = isOn ? info.bg : const Color(0x0FFFFFFF);
+  State<_DeviceCard> createState() => _DeviceCardState();
+}
 
-    return Semantics(
-      label:
-          '${d.nombre}, ${d.habitacion}, ${d.tipo}, ${isOn ? "encendido" : "apagado"}',
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isOn
-                ? AppColors.cyan.withValues(alpha: 0.25)
-                : AppColors.border,
-            width: isOn ? 1.2 : 1.0,
-          ),
-          boxShadow: isOn
-              ? [
-                  BoxShadow(
-                      color: AppColors.cyan.withValues(alpha: 0.07),
-                      blurRadius: 14,
-                      spreadRadius: 1)
-                ]
-              : const [],
-        ),
-        child: Column(
-          children: [
-            // Barra accent superior
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              height: 3,
-              decoration: BoxDecoration(
-                color: isOn ? info.color : Colors.transparent,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(14)),
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+class _DeviceCardState extends State<_DeviceCard> with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isOn = widget.dispositivo.encendido;
+    final tipoInfo = _getTipoInfo(widget.dispositivo.tipo);
+    
+    return AnimatedBuilder(
+      animation: _scaleAnimation,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _scaleAnimation.value,
+          child: GestureDetector(
+            onTapDown: (_) => _animationController.forward(),
+            onTapUp: (_) => _animationController.reverse(),
+            onTapCancel: () => _animationController.reverse(),
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isOn
+                        ? [AppColors.primary.withOpacity(0.2), AppColors.surface]
+                        : [AppColors.surface, AppColors.surface],
+                  ),
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(
+                    color: isOn ? AppColors.primary.withOpacity(0.5) : Colors.transparent,
+                    width: 1,
+                  ),
+                ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Icono + Switch
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: iconBg,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(info.icon, color: iconClr, size: 22),
-                        ),
-                        const Spacer(),
-                        Column(
-                          children: [
-                            Semantics(
-                              label: '${isOn ? "Apagar" : "Encender"} ${d.nombre}',
-                              toggled: isOn,
-                              child: Switch(
-                                value: isOn,
-                                onChanged: (_) => onToggle(),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
+                    // Header con icono
+                    Container(
+                      padding: const EdgeInsets.all(15),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: isOn ? AppColors.primary.withOpacity(0.2) : AppColors.surfaceLight,
+                              borderRadius: BorderRadius.circular(15),
                             ),
+                            child: Icon(
+                              tipoInfo.icon,
+                              color: isOn ? AppColors.primary : AppColors.textSecondary,
+                              size: 24,
+                            ),
+                          ),
+                          const Spacer(),
+                          Switch(
+                            value: isOn,
+                            onChanged: (_) => widget.onToggle(),
+                            activeColor: AppColors.primary,
+                            activeTrackColor: AppColors.primary.withOpacity(0.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Nombre del dispositivo
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 15),
+                      child: Text(
+                        widget.dispositivo.nombre,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    
+                    // Habitación
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 15),
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, size: 12, color: AppColors.textHint),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.dispositivo.habitacion,
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    const Spacer(),
+                    
+                    // Info de potencia
+                    if (widget.dispositivo.potencia > 0)
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 15),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.flash_on, size: 12, color: AppColors.warning),
+                            const SizedBox(width: 4),
                             Text(
-                              isOn ? 'ON' : 'OFF',
-                              style: TextStyle(
-                                color: isOn ? AppColors.cyan : AppColors.textHint,
-                                fontSize: 9,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                              ),
+                              '${widget.dispositivo.potencia}W',
+                              style: TextStyle(color: AppColors.warning, fontSize: 11),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Nombre
-                    Text(d.nombre,
-                        style: const TextStyle(
-                          color: AppColors.textPri,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 2),
-
-                    // Habitación
-                    Row(children: [
-                      const Icon(Icons.place_rounded,
-                          color: AppColors.textHint, size: 10),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text(d.habitacion,
-                            style: const TextStyle(
-                                color: AppColors.textHint, fontSize: 10),
-                            overflow: TextOverflow.ellipsis),
                       ),
-                    ]),
-
-                    const Spacer(),
-
-                    // Tags tipo + estado
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 3,
-                      children: [
-                        _Tag(label: d.tipo, color: info.color),
-                        _Tag(
-                          label: isOn ? '● Activo' : '○ Off',
-                          color: isOn ? AppColors.green : AppColors.textHint,
-                        ),
-                      ],
-                    ),
-
-                    // Consumo estimado (solo si encendido)
-                    if (isOn) ...[
-                      const SizedBox(height: 5),
-                      Text('~${info.wattsPromedio}W estimado',
-                          style: TextStyle(
-                            color: AppColors.yellow.withValues(alpha: 0.7),
-                            fontSize: 9,
-                          )),
-                    ],
-
+                    
                     const SizedBox(height: 8),
-
-                    // Eliminar con confirmación
-                    SizedBox(
-                      width: double.infinity,
-                      height: 28,
+                    
+                    // Slider de brillo para Hue
+                    if (widget.dispositivo.tipo == 'Hue' && isOn)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        child: Row(
+                          children: [
+                            Icon(Icons.brightness_low, size: 16, color: AppColors.textSecondary),
+                            Expanded(
+                              child: Slider(
+                                value: widget.dispositivo.brightness.toDouble(),
+                                min: 0,
+                                max: 100,
+                                activeColor: AppColors.primary,
+                                onChanged: (val) => widget.onBrightnessChange(val.toInt()),
+                              ),
+                            ),
+                            Icon(Icons.brightness_high, size: 16, color: AppColors.textSecondary),
+                          ],
+                        ),
+                      ),
+                    
+                    // Botón eliminar
+                    Container(
+                      margin: const EdgeInsets.all(10),
                       child: OutlinedButton.icon(
-                        onPressed: onDelete,
-                        icon: const Icon(Icons.delete_outline_rounded, size: 12),
-                        label: const Text('Eliminar',
-                            style:
-                                TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                        onPressed: widget.onDelete,
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        label: const Text('Eliminar', style: TextStyle(fontSize: 12)),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.red,
-                          side: const BorderSide(color: AppColors.redBorder),
-                          backgroundColor: AppColors.redDim,
+                          foregroundColor: AppColors.error,
+                          side: BorderSide(color: AppColors.error.withOpacity(0.5)),
+                          backgroundColor: AppColors.error.withOpacity(0.1),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(7)),
-                          padding: EdgeInsets.zero,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                     ),
@@ -1289,279 +1035,107 @@ class _DeviceCard extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  (IconData icon, Color color) _getTipoInfo(String tipo) {
+    switch (tipo) {
+      case 'Hue':
+        return (Icons.lightbulb, AppColors.warning);
+      case 'Tasmota':
+        return (Icons.wifi, AppColors.primary);
+      case 'Shelly':
+        return (Icons.electric_bolt, AppColors.success);
+      default:
+        return (Icons.device_unknown, AppColors.textSecondary);
+    }
+  }
+}
+
+class _FloatingActionButton extends StatelessWidget {
+  final Function(String, String, String, String?) onAgregar;
+  const _FloatingActionButton({required this.onAgregar});
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.extended(
+      onPressed: () => _showAddDialog(context),
+      icon: const Icon(Icons.add),
+      label: const Text('Agregar Dispositivo'),
+      backgroundColor: AppColors.primary,
+    );
+  }
+
+  void _showAddDialog(BuildContext context) {
+    final nombreCtrl = TextEditingController();
+    final tipoCtrl = TextEditingController();
+    final habitacionCtrl = TextEditingController();
+    final ipCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Nuevo Dispositivo'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nombreCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nombre',
+                hintText: 'Ej: Lámpara Sala',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: tipoCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Tipo',
+                hintText: 'Hue, Tasmota, Shelly...',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: habitacionCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Habitación',
+                hintText: 'Sala, Cocina...',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ipCtrl,
+              decoration: const InputDecoration(
+                labelText: 'IP (opcional)',
+                hintText: '192.168.1.100',
+              ),
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// WIDGETS ATÓMICOS
-// ═══════════════════════════════════════════════════════════════
-
-class _Tag extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _Tag({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.30)),
-      ),
-      child: Text(label,
-          style: TextStyle(
-            color: color,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
-          )),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// FORMULARIO — controllers locales, Form + validación real
-// ═══════════════════════════════════════════════════════════════
-
-class _FormularioSheet extends StatefulWidget {
-  final void Function(String nombre, String tipo, String habitacion) onAgregar;
-
-  const _FormularioSheet({required this.onAgregar});
-
-  @override
-  State<_FormularioSheet> createState() => _FormularioSheetState();
-}
-
-class _FormularioSheetState extends State<_FormularioSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _nombreCtrl = TextEditingController();
-  final _habitCtrl = TextEditingController();
-  String _tipo = 'Tasmota';
-
-  @override
-  void dispose() {
-    _nombreCtrl.dispose();
-    _habitCtrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (_formKey.currentState?.validate() != true) return;
-    widget.onAgregar(_nombreCtrl.text, _tipo, _habitCtrl.text);
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 18, 20, bottom + 20),
-      child: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle
-              Center(
-                child: Container(
-                  width: 38,
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // Título
-              const Row(children: [
-                Icon(Icons.device_hub_rounded, color: AppColors.cyan, size: 20),
-                SizedBox(width: 9),
-                Text('Nuevo dispositivo',
-                    style: TextStyle(
-                        color: AppColors.cyan,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700)),
-              ]),
-              const SizedBox(height: 20),
-
-              // Nombre — con validación real
-              const _FormLabel('Nombre del dispositivo'),
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _nombreCtrl,
-                textCapitalization: TextCapitalization.words,
-                style: const TextStyle(color: AppColors.textPri, fontSize: 14),
-                autofocus: true,
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty)
-                    return 'El nombre es requerido';
-                  if (v.trim().length < 2) return 'Mínimo 2 caracteres';
-                  if (v.trim().length > 40) return 'Máximo 40 caracteres';
-                  return null;
-                },
-                decoration: _inputDeco('Ej: Lámpara sala'),
-              ),
-              const SizedBox(height: 14),
-
-              // Habitación — opcional con validación de longitud
-              const _FormLabel('Habitación (opcional)'),
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _habitCtrl,
-                textCapitalization: TextCapitalization.words,
-                style: const TextStyle(color: AppColors.textPri, fontSize: 14),
-                validator: (v) {
-                  if (v != null && v.trim().length > 30)
-                    return 'Máximo 30 caracteres';
-                  return null;
-                },
-                decoration: _inputDeco('Ej: Sala, Cocina, Dormitorio...'),
-              ),
-              const SizedBox(height: 14),
-
-              // Tipo
-              const _FormLabel('Tipo de dispositivo'),
-              const SizedBox(height: 8),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 7,
-                mainAxisSpacing: 7,
-                childAspectRatio: 1.6,
-                children: kTipos.entries.map((e) {
-                  final sel = _tipo == e.key;
-                  return Semantics(
-                    label: 'Tipo ${e.key}',
-                    selected: sel,
-                    button: true,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _tipo = e.key),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 130),
-                        decoration: BoxDecoration(
-                          color: sel ? e.value.bg : AppColors.bg3,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: sel
-                                ? e.value.color.withValues(alpha: 0.5)
-                                : AppColors.border,
-                            width: sel ? 1.5 : 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(e.value.icon, size: 15,
-                                color: sel ? e.value.color : AppColors.textSec),
-                            const SizedBox(width: 5),
-                            Text(e.key,
-                                style: TextStyle(
-                                  color: sel ? e.value.color : AppColors.textSec,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                )),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 22),
-
-              // Botones
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textSec,
-                      side: const BorderSide(color: AppColors.border),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('Cancelar',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: _submit,
-                    icon: const Icon(Icons.check_rounded, size: 17),
-                    label: const Text('Agregar',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.cyan,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ]),
-            ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
           ),
-        ),
+          ElevatedButton(
+            onPressed: () {
+              if (nombreCtrl.text.isNotEmpty) {
+                onAgregar(
+                  nombreCtrl.text,
+                  tipoCtrl.text,
+                  habitacionCtrl.text,
+                  ipCtrl.text.isNotEmpty ? ipCtrl.text : null,
+                );
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Agregar'),
+          ),
+        ],
       ),
     );
-  }
-
-  InputDecoration _inputDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: AppColors.textHint),
-        filled: true,
-        fillColor: AppColors.bg3,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.cyanBorder, width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.red),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.red, width: 1.5),
-        ),
-        errorStyle: const TextStyle(color: AppColors.red, fontSize: 11),
-      );
-}
-
-class _FormLabel extends StatelessWidget {
-  final String text;
-  const _FormLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(text.toUpperCase(),
-        style: const TextStyle(
-            color: AppColors.textHint, fontSize: 9, letterSpacing: 1.5));
   }
 }

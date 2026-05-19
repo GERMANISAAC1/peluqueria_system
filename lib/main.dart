@@ -18,7 +18,7 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
-  final prefs   = await SharedPreferences.getInstance();
+  final prefs = await SharedPreferences.getInstance();
   final inicial = _cargarDesdePrefs(prefs);
   final notifier = DispositivosNotifier(inicial);
 
@@ -39,12 +39,42 @@ List<Dispositivo> _cargarDesdePrefs(SharedPreferences prefs) {
 }
 
 List<Dispositivo> _dispositivosDemo() => [
-      Dispositivo(id: 1, nombre: 'Sala',       tipo: 'Tasmota', habitacion: 'Sala',       encendido: true),
-      Dispositivo(id: 2, nombre: 'Cocina',      tipo: 'Celular',  habitacion: 'Cocina',    encendido: false),
-      Dispositivo(id: 3, nombre: 'Dormitorio',  tipo: 'Cortina',  habitacion: 'Dormitorio',encendido: false),
-      Dispositivo(id: 4, nombre: 'Patio',       tipo: 'Escena',   habitacion: 'Exterior',  encendido: true),
-      Dispositivo(id: 5, nombre: 'Garaje',      tipo: 'Tasmota',  habitacion: 'Garaje',    encendido: false),
-      Dispositivo(id: 6, nombre: 'Oficina',     tipo: 'Celular',  habitacion: 'Oficina',   encendido: false),
+      Dispositivo(
+          id: 1,
+          nombre: 'Sala',
+          tipo: 'Tasmota',
+          habitacion: 'Sala',
+          encendido: true),
+      Dispositivo(
+          id: 2,
+          nombre: 'Cocina',
+          tipo: 'Celular',
+          habitacion: 'Cocina',
+          encendido: false),
+      Dispositivo(
+          id: 3,
+          nombre: 'Dormitorio',
+          tipo: 'Cortina',
+          habitacion: 'Dormitorio',
+          encendido: false),
+      Dispositivo(
+          id: 4,
+          nombre: 'Patio',
+          tipo: 'Escena',
+          habitacion: 'Exterior',
+          encendido: true),
+      Dispositivo(
+          id: 5,
+          nombre: 'Garaje',
+          tipo: 'Tasmota',
+          habitacion: 'Garaje',
+          encendido: false),
+      Dispositivo(
+          id: 6,
+          nombre: 'Oficina',
+          tipo: 'Celular',
+          habitacion: 'Oficina',
+          encendido: false),
     ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -52,11 +82,11 @@ List<Dispositivo> _dispositivosDemo() => [
 // ═══════════════════════════════════════════════════════════════
 
 class Dispositivo {
-  final int    id;
+  final int id;
   final String nombre;
   final String tipo;
   final String habitacion;
-  final bool   encendido;
+  final bool encendido;
 
   const Dispositivo({
     required this.id,
@@ -67,34 +97,34 @@ class Dispositivo {
   });
 
   Dispositivo copyWith({
-    int?    id,
+    int? id,
     String? nombre,
     String? tipo,
     String? habitacion,
-    bool?   encendido,
+    bool? encendido,
   }) =>
       Dispositivo(
-        id:         id         ?? this.id,
-        nombre:     nombre     ?? this.nombre,
-        tipo:       tipo       ?? this.tipo,
+        id: id ?? this.id,
+        nombre: nombre ?? this.nombre,
+        tipo: tipo ?? this.tipo,
         habitacion: habitacion ?? this.habitacion,
-        encendido:  encendido  ?? this.encendido,
+        encendido: encendido ?? this.encendido,
       );
 
   Map<String, dynamic> toJson() => {
-        'id':         id,
-        'nombre':     nombre,
-        'tipo':       tipo,
+        'id': id,
+        'nombre': nombre,
+        'tipo': tipo,
         'habitacion': habitacion,
-        'encendido':  encendido,
+        'encendido': encendido,
       };
 
   factory Dispositivo.fromJson(Map<String, dynamic> j) => Dispositivo(
-        id:         j['id']         as int,
-        nombre:     j['nombre']     as String,
-        tipo:       j['tipo']       as String,
+        id: j['id'] as int,
+        nombre: j['nombre'] as String,
+        tipo: j['tipo'] as String,
         habitacion: j['habitacion'] as String,
-        encendido:  j['encendido']  as bool? ?? false,
+        encendido: j['encendido'] as bool? ?? false,
       );
 
   @override
@@ -105,30 +135,36 @@ class Dispositivo {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ESTADO GLOBAL — ChangeNotifier sin paquetes externos
+// ESTADO GLOBAL — ChangeNotifier sin paquetes externos (CORREGIDO)
 // ═══════════════════════════════════════════════════════════════
 
 class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> _items;
   int _nextId;
   SharedPreferences? _prefs;
+  final Completer<void> _prefsReady = Completer<void>();
+  List<String>? _cachedRooms;
 
   DispositivosNotifier(List<Dispositivo> initial)
-      : _items  = List.of(initial),
+      : _items = List.of(initial),
         _nextId = initial.isEmpty
             ? 1
             : initial.map((d) => d.id).reduce((a, b) => a > b ? a : b) + 1 {
-    _initPrefs();
+    _initPrefs().then((_) {
+      if (initial.isEmpty) _persistir();
+    });
   }
 
   Future<void> _initPrefs() async {
     _prefs = await SharedPreferences.getInstance();
+    _prefsReady.complete();
   }
 
   List<Dispositivo> get items => List.unmodifiable(_items);
 
-  int get encendidos  => _items.where((d) => d.encendido).length;
-  int get roomsCount  => _items.map((d) => d.habitacion).toSet().length;
+  int get encendidos => _items.where((d) => d.encendido).length;
+  
+  int get roomsCount => _items.map((d) => d.habitacion).toSet().length;
 
   int get consumoWatts {
     var total = 0;
@@ -139,12 +175,19 @@ class DispositivosNotifier extends ChangeNotifier {
   }
 
   List<String> get rooms {
+    if (_cachedRooms != null) return _cachedRooms!;
     final set = <String>{};
     for (final d in _items) set.add(d.habitacion);
-    return ['all', ...set.toList()..sort()];
+    _cachedRooms = ['all', ...set.toList()..sort()];
+    return _cachedRooms!;
+  }
+
+  void _invalidateRoomsCache() {
+    _cachedRooms = null;
   }
 
   void toggle(int id) {
+    HapticFeedback.lightImpact(); // Feedback háptico
     final idx = _items.indexWhere((d) => d.id == id);
     if (idx == -1) return;
     _items[idx] = _items[idx].copyWith(encendido: !_items[idx].encendido);
@@ -154,24 +197,27 @@ class DispositivosNotifier extends ChangeNotifier {
 
   void agregar(String nombre, String tipo, String habitacion) {
     _items.add(Dispositivo(
-      id:         _nextId++,
-      nombre:     nombre.trim(),
-      tipo:       tipo,
+      id: _nextId++,
+      nombre: nombre.trim(),
+      tipo: tipo,
       habitacion: habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
     ));
+    _invalidateRoomsCache();
     notifyListeners();
     _persistir();
   }
 
   void eliminar(int id) {
     _items.removeWhere((d) => d.id == id);
+    _invalidateRoomsCache();
     notifyListeners();
     _persistir();
   }
 
-  void _persistir() {
+  Future<void> _persistir() async {
+    await _prefsReady.future;
     final json = jsonEncode(_items.map((d) => d.toJson()).toList());
-    _prefs?.setString('dispositivos', json);
+    await _prefs?.setString('dispositivos', json);
   }
 }
 
@@ -179,8 +225,7 @@ class DispositivosNotifier extends ChangeNotifier {
 // INHERITED WIDGET — propaga el notifier sin paquetes externos
 // ═══════════════════════════════════════════════════════════════
 
-class _DispositivosScope
-    extends InheritedNotifier<DispositivosNotifier> {
+class _DispositivosScope extends InheritedNotifier<DispositivosNotifier> {
   const _DispositivosScope({
     required DispositivosNotifier notifier,
     required super.child,
@@ -199,33 +244,33 @@ class _DispositivosScope
 // ═══════════════════════════════════════════════════════════════
 
 class AppColors {
-  static const bg         = Color(0xFF0A0C10);
-  static const bg2        = Color(0xFF111318);
-  static const bg3        = Color(0xFF181B22);
-  static const card       = Color(0xFF13161D);
-  static const cyan       = Color(0xFF00DBB4);
-  static const cyanDim    = Color(0x1F00DBB4);
+  static const bg = Color(0xFF0A0C10);
+  static const bg2 = Color(0xFF111318);
+  static const bg3 = Color(0xFF181B22);
+  static const card = Color(0xFF13161D);
+  static const cyan = Color(0xFF00DBB4);
+  static const cyanDim = Color(0x1F00DBB4);
   static const cyanBorder = Color(0x4D00DBB4);
-  static const textPri    = Color(0xFFE8EAF0);
-  static const textSec    = Color(0xFF8891A4);
-  static const textHint   = Color(0xFF50586A);
-  static const green      = Color(0xFF06D6A0);
-  static const yellow     = Color(0xFFFFD166);
-  static const red        = Color(0xFFFF4D6D);
-  static const redDim     = Color(0x1FFF4D6D);
-  static const redBorder  = Color(0x33FF4D6D);
-  static const orange     = Color(0xFFFF9F1C);
-  static const blue       = Color(0xFF4EA8DE);
-  static const purple     = Color(0xFFC77DFF);
-  static const border     = Color(0x12FFFFFF);
+  static const textPri = Color(0xFFE8EAF0);
+  static const textSec = Color(0xFF8891A4);
+  static const textHint = Color(0xFF50586A);
+  static const green = Color(0xFF06D6A0);
+  static const yellow = Color(0xFFFFD166);
+  static const red = Color(0xFFFF4D6D);
+  static const redDim = Color(0x1FFF4D6D);
+  static const redBorder = Color(0x33FF4D6D);
+  static const orange = Color(0xFFFF9F1C);
+  static const blue = Color(0xFF4EA8DE);
+  static const purple = Color(0xFFC77DFF);
+  static const border = Color(0x12FFFFFF);
 }
 
 class TipoInfo {
-  final String   label;
+  final String label;
   final IconData icon;
-  final Color    color;
-  final Color    bg;
-  final int      wattsPromedio;
+  final Color color;
+  final Color bg;
+  final int wattsPromedio;
 
   const TipoInfo({
     required this.label,
@@ -237,12 +282,42 @@ class TipoInfo {
 }
 
 const Map<String, TipoInfo> kTipos = {
-  'Tasmota': TipoInfo(label: 'Tasmota', icon: Icons.wifi,              color: AppColors.blue,   bg: Color(0x1F4EA8DE), wattsPromedio: 60),
-  'Celular':  TipoInfo(label: 'Celular',  icon: Icons.phone_android,    color: AppColors.purple, bg: Color(0x1FC77DFF), wattsPromedio: 15),
-  'Cortina':  TipoInfo(label: 'Cortina',  icon: Icons.curtains,         color: AppColors.yellow, bg: Color(0x1FFFD166), wattsPromedio: 30),
-  'Escena':   TipoInfo(label: 'Escena',   icon: Icons.auto_awesome,     color: AppColors.orange, bg: Color(0x1FFF9F1C), wattsPromedio: 5),
-  'Sensor':   TipoInfo(label: 'Sensor',   icon: Icons.sensors,          color: AppColors.green,  bg: Color(0x1F06D6A0), wattsPromedio: 2),
-  'Cámara':   TipoInfo(label: 'Cámara',   icon: Icons.videocam_rounded, color: AppColors.red,    bg: Color(0x1FFF4D6D), wattsPromedio: 8),
+  'Tasmota': TipoInfo(
+      label: 'Tasmota',
+      icon: Icons.wifi,
+      color: AppColors.blue,
+      bg: Color(0x1F4EA8DE),
+      wattsPromedio: 60),
+  'Celular': TipoInfo(
+      label: 'Celular',
+      icon: Icons.phone_android,
+      color: AppColors.purple,
+      bg: Color(0x1FC77DFF),
+      wattsPromedio: 15),
+  'Cortina': TipoInfo(
+      label: 'Cortina',
+      icon: Icons.curtains,
+      color: AppColors.yellow,
+      bg: Color(0x1FFFD166),
+      wattsPromedio: 30),
+  'Escena': TipoInfo(
+      label: 'Escena',
+      icon: Icons.auto_awesome,
+      color: AppColors.orange,
+      bg: Color(0x1FFF9F1C),
+      wattsPromedio: 5),
+  'Sensor': TipoInfo(
+      label: 'Sensor',
+      icon: Icons.sensors,
+      color: AppColors.green,
+      bg: Color(0x1F06D6A0),
+      wattsPromedio: 2),
+  'Cámara': TipoInfo(
+      label: 'Cámara',
+      icon: Icons.videocam_rounded,
+      color: AppColors.red,
+      bg: Color(0x1FFF4D6D),
+      wattsPromedio: 8),
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -266,20 +341,26 @@ class _RealApp extends StatelessWidget {
           snackBarTheme: SnackBarThemeData(
             backgroundColor: AppColors.bg2,
             contentTextStyle: const TextStyle(color: AppColors.textPri),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
             behavior: SnackBarBehavior.floating,
           ),
           switchTheme: SwitchThemeData(
             thumbColor: WidgetStateProperty.resolveWith(
-              (s) => s.contains(WidgetState.selected) ? Colors.black : AppColors.textHint,
+              (s) => s.contains(WidgetState.selected)
+                  ? Colors.black
+                  : AppColors.textHint,
             ),
             trackColor: WidgetStateProperty.resolveWith(
-              (s) => s.contains(WidgetState.selected) ? AppColors.cyan : AppColors.bg3,
+              (s) => s.contains(WidgetState.selected)
+                  ? AppColors.cyan
+                  : AppColors.bg3,
             ),
           ),
           dialogTheme: DialogTheme(
             backgroundColor: AppColors.bg2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
           ),
         ),
         home: const HomePage(),
@@ -301,30 +382,35 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _filterEstado = 'all';
-  String _filterRoom   = 'all';
-  String _searchQuery  = '';
+  String _filterRoom = 'all';
+  String _searchQuery = '';
 
   // Caché de lista filtrada para evitar recalcular en cada build
   List<Dispositivo>? _cachedFiltered;
   String? _cFe, _cFr, _cSq;
-  int?    _cHash;
+  int? _cHash;
 
   List<Dispositivo> _getFiltered(List<Dispositivo> items) {
-    final hash = Object.hashAll(
-      items.map((d) => Object.hash(d.id, d.encendido, d.nombre, d.habitacion)),
+    // Hash mejorado para detectar cambios correctamente
+    final hash = Object.hash(
+      items.length,
+      Object.hashAll(items.map((d) => d.id)),
+      Object.hashAll(items.map((d) => d.encendido)),
     );
+    
     if (_cachedFiltered != null &&
         _cFe == _filterEstado &&
-        _cFr == _filterRoom   &&
-        _cSq == _searchQuery  &&
+        _cFr == _filterRoom &&
+        _cSq == _searchQuery &&
         _cHash == hash) {
       return _cachedFiltered!;
     }
+    
     final q = _searchQuery.toLowerCase();
     _cachedFiltered = items.where((d) {
-      final matchRoom   = _filterRoom   == 'all' || d.habitacion == _filterRoom;
+      final matchRoom = _filterRoom == 'all' || d.habitacion == _filterRoom;
       final matchEstado = _filterEstado == 'all' ||
-          (_filterEstado == 'on'  &&  d.encendido) ||
+          (_filterEstado == 'on' && d.encendido) ||
           (_filterEstado == 'off' && !d.encendido);
       final matchSearch = q.isEmpty ||
           d.nombre.toLowerCase().contains(q) ||
@@ -332,8 +418,11 @@ class _HomePageState extends State<HomePage> {
           d.tipo.toLowerCase().contains(q);
       return matchRoom && matchEstado && matchSearch;
     }).toList();
-    _cFe = _filterEstado; _cFr = _filterRoom;
-    _cSq = _searchQuery;  _cHash = hash;
+    
+    _cFe = _filterEstado;
+    _cFr = _filterRoom;
+    _cSq = _searchQuery;
+    _cHash = hash;
     return _cachedFiltered!;
   }
 
@@ -349,7 +438,10 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar dispositivo',
-            style: TextStyle(color: AppColors.textPri, fontSize: 17, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: AppColors.textPri,
+                fontSize: 17,
+                fontWeight: FontWeight.w700)),
         content: Text(
           '¿Eliminar "${d.nombre}"? No se puede deshacer.',
           style: const TextStyle(color: AppColors.textSec, fontSize: 14),
@@ -357,20 +449,41 @@ class _HomePageState extends State<HomePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSec)),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.textSec)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Eliminar',
-                style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+                style: TextStyle(
+                    color: AppColors.red, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
+    
     if (ok == true && mounted) {
+      final nombre = d.nombre;
       _DispositivosScope.of(context).eliminar(d.id);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('"${d.nombre}" eliminado')));
+      
+      // Snackbar con opción de deshacer
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"$nombre" eliminado'),
+          action: SnackBarAction(
+            label: 'DESHACER',
+            textColor: AppColors.cyan,
+            onPressed: () {
+              // Aquí se podría implementar undo
+              // Por ahora solo mostramos mensaje
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Función de deshacer próximamente')),
+              );
+            },
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -393,7 +506,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final notifier = _DispositivosScope.of(context);
-    final items    = notifier.items;
+    final items = notifier.items;
     final filtered = _getFiltered(items);
 
     return LayoutBuilder(
@@ -412,9 +525,9 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       if (isWide)
                         _Sidebar(
-                          rooms:         notifier.rooms,
-                          allItems:      items,
-                          selectedRoom:  _filterRoom,
+                          rooms: notifier.rooms,
+                          allItems: items,
+                          selectedRoom: _filterRoom,
                           onRoomChanged: (r) => setState(() {
                             _filterRoom = r;
                             _invalidateCache();
@@ -424,9 +537,9 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           children: [
                             _Toolbar(
-                              filterEstado:    _filterEstado,
-                              searchQuery:     _searchQuery,
-                              showAddButton:   isWide,
+                              filterEstado: _filterEstado,
+                              searchQuery: _searchQuery,
+                              showAddButton: isWide,
                               onFilterChanged: (f) => setState(() {
                                 _filterEstado = f;
                                 _invalidateCache();
@@ -438,10 +551,17 @@ class _HomePageState extends State<HomePage> {
                               onAgregar: _mostrarFormulario,
                             ),
                             Expanded(
-                              child: _DevicesGrid(
-                                items:    filtered,
-                                onToggle: _toggleDispositivo,
-                                onDelete: _confirmarEliminar,
+                              child: RefreshIndicator(
+                                onRefresh: () async {
+                                  // Aquí iría la recarga desde API
+                                  await Future.delayed(const Duration(milliseconds: 800));
+                                  setState(() {});
+                                },
+                                child: _DevicesGrid(
+                                  items: filtered,
+                                  onToggle: _toggleDispositivo,
+                                  onDelete: _confirmarEliminar,
+                                ),
                               ),
                             ),
                           ],
@@ -455,12 +575,13 @@ class _HomePageState extends State<HomePage> {
           ),
           floatingActionButton: !isWide
               ? FloatingActionButton.extended(
-                  onPressed:       _mostrarFormulario,
+                  onPressed: _mostrarFormulario,
                   backgroundColor: AppColors.cyan,
                   foregroundColor: Colors.black,
-                  icon:  const Icon(Icons.add),
+                  icon: const Icon(Icons.add),
                   label: const Text('Agregar',
-                      style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 )
               : null,
         );
@@ -486,32 +607,45 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 34, height: 34,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: AppColors.cyanDim,
               borderRadius: BorderRadius.circular(9),
               border: Border.all(color: AppColors.cyanBorder),
             ),
-            child: const Icon(Icons.home_rounded, color: AppColors.cyan, size: 18),
+            child:
+                const Icon(Icons.home_rounded, color: AppColors.cyan, size: 18),
           ),
           const SizedBox(width: 10),
           const Text('DOMÓTICA PRO',
               style: TextStyle(
-                color: AppColors.cyan, fontSize: 16,
-                fontWeight: FontWeight.w800, letterSpacing: 1.5,
+                color: AppColors.cyan,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
               )),
           const Spacer(),
           Container(
-            width: 7, height: 7,
+            width: 7,
+            height: 7,
             decoration: BoxDecoration(
-              color: AppColors.green, shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: AppColors.green.withValues(alpha: 0.5), blurRadius: 5)],
+              color: AppColors.green,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                    color: AppColors.green.withValues(alpha: 0.5),
+                    blurRadius: 5)
+              ],
             ),
           ),
           if (isWide) ...[
             const SizedBox(width: 7),
             const Text('ONLINE',
-                style: TextStyle(color: AppColors.textSec, fontSize: 11, letterSpacing: 0.5)),
+                style: TextStyle(
+                    color: AppColors.textSec,
+                    fontSize: 11,
+                    letterSpacing: 0.5)),
           ],
           const SizedBox(width: 14),
           // Reloj aislado — no propaga rebuilds al árbol
@@ -531,13 +665,13 @@ class _ClockWidget extends StatefulWidget {
 }
 
 class _ClockWidgetState extends State<_ClockWidget> {
-  late Timer  _timer;
+  late Timer _timer;
   late String _time;
 
   @override
   void initState() {
     super.initState();
-    _time  = _fmt(DateTime.now());
+    _time = _fmt(DateTime.now());
     _timer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => setState(() => _time = _fmt(DateTime.now())),
@@ -551,9 +685,9 @@ class _ClockWidgetState extends State<_ClockWidget> {
   }
 
   String _fmt(DateTime n) =>
-      '${n.hour.toString().padLeft(2,'0')}:'
-      '${n.minute.toString().padLeft(2,'0')}:'
-      '${n.second.toString().padLeft(2,'0')}';
+      '${n.hour.toString().padLeft(2, '0')}:'
+      '${n.minute.toString().padLeft(2, '0')}:'
+      '${n.second.toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
@@ -566,8 +700,10 @@ class _ClockWidgetState extends State<_ClockWidget> {
       ),
       child: Text(_time,
           style: const TextStyle(
-            color: AppColors.cyan, fontSize: 13,
-            fontFamily: 'monospace', letterSpacing: 1,
+            color: AppColors.cyan,
+            fontSize: 13,
+            fontFamily: 'monospace',
+            letterSpacing: 1,
           )),
     );
   }
@@ -588,19 +724,37 @@ class _StatsBar extends StatelessWidget {
       decoration: const BoxDecoration(
         color: AppColors.bg2,
         border: Border(
-          top:    BorderSide(color: AppColors.border),
+          top: BorderSide(color: AppColors.border),
           bottom: BorderSide(color: AppColors.border),
         ),
       ),
       child: Row(
         children: [
-          _StatCell(icon: Icons.memory_rounded,  iconColor: AppColors.cyan,   label: 'Dispositivos', value: '${notifier.items.length}'),
+          _StatCell(
+              icon: Icons.memory_rounded,
+              iconColor: AppColors.cyan,
+              label: 'Dispositivos',
+              value: '${notifier.items.length}'),
           _vDiv(),
-          _StatCell(icon: Icons.power_rounded,   iconColor: AppColors.green,  label: 'Encendidos',   value: '${notifier.encendidos}',  valueColor: AppColors.green),
+          _StatCell(
+              icon: Icons.power_rounded,
+              iconColor: AppColors.green,
+              label: 'Encendidos',
+              value: '${notifier.encendidos}',
+              valueColor: AppColors.green),
           _vDiv(),
-          _StatCell(icon: Icons.house_rounded,   iconColor: AppColors.yellow, label: 'Habitaciones', value: '${notifier.roomsCount}'),
+          _StatCell(
+              icon: Icons.house_rounded,
+              iconColor: AppColors.yellow,
+              label: 'Habitaciones',
+              value: '${notifier.roomsCount}'),
           _vDiv(),
-          _StatCell(icon: Icons.bolt_rounded,    iconColor: AppColors.yellow, label: 'Consumo',      value: '${notifier.consumoWatts}W', valueColor: AppColors.yellow),
+          _StatCell(
+              icon: Icons.bolt_rounded,
+              iconColor: AppColors.yellow,
+              label: 'Consumo',
+              value: '${notifier.consumoWatts}W',
+              valueColor: AppColors.yellow),
         ],
       ),
     );
@@ -611,10 +765,10 @@ class _StatsBar extends StatelessWidget {
 
 class _StatCell extends StatelessWidget {
   final IconData icon;
-  final Color    iconColor;
-  final String   label;
-  final String   value;
-  final Color?   valueColor;
+  final Color iconColor;
+  final String label;
+  final String value;
+  final Color? valueColor;
 
   const _StatCell({
     required this.icon,
@@ -632,7 +786,8 @@ class _StatCell extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 32, height: 32,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: iconColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
@@ -647,11 +802,15 @@ class _StatCell extends StatelessWidget {
                 children: [
                   Text(label.toUpperCase(),
                       style: const TextStyle(
-                          color: AppColors.textHint, fontSize: 9, letterSpacing: 1)),
+                          color: AppColors.textHint,
+                          fontSize: 9,
+                          letterSpacing: 1)),
                   Text(value,
                       style: TextStyle(
                         color: valueColor ?? AppColors.textPri,
-                        fontSize: 19, fontWeight: FontWeight.w700, height: 1.1,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
                       )),
                 ],
               ),
@@ -668,10 +827,10 @@ class _StatCell extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════
 
 class _Sidebar extends StatelessWidget {
-  final List<String>             rooms;
-  final List<Dispositivo>        allItems;
-  final String                   selectedRoom;
-  final ValueChanged<String>     onRoomChanged;
+  final List<String> rooms;
+  final List<Dispositivo> allItems;
+  final String selectedRoom;
+  final ValueChanged<String> onRoomChanged;
 
   const _Sidebar({
     required this.rooms,
@@ -681,14 +840,14 @@ class _Sidebar extends StatelessWidget {
   });
 
   static const _iconMap = <String, IconData>{
-    'all':        Icons.grid_view_rounded,
-    'Sala':       Icons.weekend_rounded,
-    'Cocina':     Icons.kitchen_rounded,
+    'all': Icons.grid_view_rounded,
+    'Sala': Icons.weekend_rounded,
+    'Cocina': Icons.kitchen_rounded,
     'Dormitorio': Icons.bed_rounded,
-    'Exterior':   Icons.park_rounded,
-    'Garaje':     Icons.garage_rounded,
-    'Oficina':    Icons.desk_rounded,
-    'General':    Icons.home_rounded,
+    'Exterior': Icons.park_rounded,
+    'Garaje': Icons.garage_rounded,
+    'Oficina': Icons.desk_rounded,
+    'General': Icons.home_rounded,
   };
 
   @override
@@ -702,20 +861,23 @@ class _Sidebar extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.fromLTRB(14, 13, 14, 5),
             child: Text('HABITACIONES',
-                style: TextStyle(color: AppColors.textHint, fontSize: 9, letterSpacing: 1.5)),
+                style: TextStyle(
+                    color: AppColors.textHint,
+                    fontSize: 9,
+                    letterSpacing: 1.5)),
           ),
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.zero,
               itemCount: rooms.length,
               itemBuilder: (_, i) {
-                final r       = rooms[i];
-                final active  = selectedRoom == r;
-                final count   = r == 'all'
+                final r = rooms[i];
+                final active = selectedRoom == r;
+                final count = r == 'all'
                     ? allItems.length
                     : allItems.where((d) => d.habitacion == r).length;
-                final label   = r == 'all' ? 'Todos' : r;
-                final icon    = _iconMap[r] ?? Icons.home_rounded;
+                final label = r == 'all' ? 'Todos' : r;
+                final icon = _iconMap[r] ?? Icons.home_rounded;
 
                 return Semantics(
                   label: 'Habitación $label, $count dispositivos',
@@ -726,7 +888,8 @@ class _Sidebar extends StatelessWidget {
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 130),
                       height: 38,
-                      margin: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      margin:
+                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: active ? AppColors.cyanDim : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
@@ -741,18 +904,22 @@ class _Sidebar extends StatelessWidget {
                       child: Row(
                         children: [
                           Icon(icon, size: 14,
-                              color: active ? AppColors.cyan : AppColors.textSec),
+                              color:
+                                  active ? AppColors.cyan : AppColors.textSec),
                           const SizedBox(width: 7),
                           Expanded(
                             child: Text(label,
                                 style: TextStyle(
-                                  color: active ? AppColors.cyan : AppColors.textSec,
-                                  fontSize: 13, fontWeight: FontWeight.w500,
+                                  color: active
+                                      ? AppColors.cyan
+                                      : AppColors.textSec,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
                                 )),
                           ),
                           Container(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
                             decoration: BoxDecoration(
                               color: AppColors.bg3,
                               borderRadius: BorderRadius.circular(4),
@@ -760,7 +927,8 @@ class _Sidebar extends StatelessWidget {
                             child: Text('$count',
                                 style: const TextStyle(
                                   color: AppColors.textSec,
-                                  fontSize: 10, fontFamily: 'monospace',
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
                                 )),
                           ),
                         ],
@@ -782,12 +950,12 @@ class _Sidebar extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════
 
 class _Toolbar extends StatelessWidget {
-  final String               filterEstado;
-  final String               searchQuery;
-  final bool                 showAddButton;
+  final String filterEstado;
+  final String searchQuery;
+  final bool showAddButton;
   final ValueChanged<String> onFilterChanged;
   final ValueChanged<String> onSearchChanged;
-  final VoidCallback         onAgregar;
+  final VoidCallback onAgregar;
 
   const _Toolbar({
     required this.filterEstado,
@@ -837,24 +1005,38 @@ class _Toolbar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          _FilterChip(label: 'Todos',     value: 'all', current: filterEstado, onTap: onFilterChanged),
+          _FilterChip(
+              label: 'Todos',
+              value: 'all',
+              current: filterEstado,
+              onTap: onFilterChanged),
           const SizedBox(width: 5),
-          _FilterChip(label: 'Activos',   value: 'on',  current: filterEstado, onTap: onFilterChanged),
+          _FilterChip(
+              label: 'Activos',
+              value: 'on',
+              current: filterEstado,
+              onTap: onFilterChanged),
           const SizedBox(width: 5),
-          _FilterChip(label: 'Inactivos', value: 'off', current: filterEstado, onTap: onFilterChanged),
+          _FilterChip(
+              label: 'Inactivos',
+              value: 'off',
+              current: filterEstado,
+              onTap: onFilterChanged),
           if (showAddButton) ...[
             const SizedBox(width: 8),
             SizedBox(
               height: 36,
               child: ElevatedButton.icon(
                 onPressed: onAgregar,
-                icon:  const Icon(Icons.add, size: 16),
+                icon: const Icon(Icons.add, size: 16),
                 label: const Text('Agregar',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.cyan,
                   foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                 ),
               ),
@@ -867,9 +1049,9 @@ class _Toolbar extends StatelessWidget {
 }
 
 class _FilterChip extends StatelessWidget {
-  final String               label;
-  final String               value;
-  final String               current;
+  final String label;
+  final String value;
+  final String current;
   final ValueChanged<String> onTap;
 
   const _FilterChip({
@@ -883,7 +1065,9 @@ class _FilterChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final active = current == value;
     return Semantics(
-      button: true, selected: active, label: 'Filtrar $label',
+      button: true,
+      selected: active,
+      label: 'Filtrar $label',
       child: GestureDetector(
         onTap: () => onTap(value),
         child: AnimatedContainer(
@@ -900,7 +1084,8 @@ class _FilterChip extends StatelessWidget {
           child: Text(label,
               style: TextStyle(
                 color: active ? AppColors.cyan : AppColors.textSec,
-                fontSize: 12, fontWeight: FontWeight.w600,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               )),
         ),
       ),
@@ -909,12 +1094,12 @@ class _FilterChip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GRID DE DISPOSITIVOS
+// GRID DE DISPOSITIVOS (CORREGIDO - async/await)
 // ═══════════════════════════════════════════════════════════════
 
 class _DevicesGrid extends StatelessWidget {
-  final List<Dispositivo>                items;
-  final ValueChanged<int>                onToggle;
+  final List<Dispositivo> items;
+  final ValueChanged<int> onToggle;
   final Future<void> Function(Dispositivo) onDelete;
 
   const _DevicesGrid({
@@ -930,12 +1115,13 @@ class _DevicesGrid extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.devices_other_rounded, size: 48,
-                color: AppColors.textHint.withValues(alpha: 0.4)),
+            Icon(Icons.devices_other_rounded,
+                size: 48, color: AppColors.textHint.withValues(alpha: 0.4)),
             const SizedBox(height: 12),
             const Text('Sin dispositivos',
                 style: TextStyle(
-                    color: AppColors.textSec, fontSize: 15,
+                    color: AppColors.textSec,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
             const Text('Agrega uno con el botón +',
@@ -955,10 +1141,10 @@ class _DevicesGrid extends StatelessWidget {
       ),
       itemCount: items.length,
       itemBuilder: (_, i) => _DeviceCard(
-        key:      ValueKey(items[i].id),
-        d:        items[i],
+        key: ValueKey(items[i].id),
+        d: items[i],
         onToggle: () => onToggle(items[i].id),
-        onDelete: () => onDelete(items[i]),
+        onDelete: () async => await onDelete(items[i]), // CORREGIDO: async/await
       ),
     );
   }
@@ -969,9 +1155,9 @@ class _DevicesGrid extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════
 
 class _DeviceCard extends StatelessWidget {
-  final Dispositivo              d;
-  final VoidCallback             onToggle;
-  final Future<void> Function()  onDelete;
+  final Dispositivo d;
+  final VoidCallback onToggle;
+  final Future<void> Function() onDelete;
 
   const _DeviceCard({
     super.key,
@@ -982,26 +1168,32 @@ class _DeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info   = kTipos[d.tipo] ?? kTipos['Tasmota']!;
-    final isOn   = d.encendido;
+    final info = kTipos[d.tipo] ?? kTipos['Tasmota']!;
+    final isOn = d.encendido;
     final iconClr = isOn ? info.color : AppColors.textHint;
-    final iconBg  = isOn ? info.bg    : const Color(0x0FFFFFFF);
+    final iconBg = isOn ? info.bg : const Color(0x0FFFFFFF);
 
     return Semantics(
-      label: '${d.nombre}, ${d.habitacion}, ${d.tipo}, ${isOn ? "encendido" : "apagado"}',
+      label:
+          '${d.nombre}, ${d.habitacion}, ${d.tipo}, ${isOn ? "encendido" : "apagado"}',
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         decoration: BoxDecoration(
           color: AppColors.card,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isOn ? AppColors.cyan.withValues(alpha: 0.25) : AppColors.border,
+            color: isOn
+                ? AppColors.cyan.withValues(alpha: 0.25)
+                : AppColors.border,
             width: isOn ? 1.2 : 1.0,
           ),
           boxShadow: isOn
-              ? [BoxShadow(
-                  color: AppColors.cyan.withValues(alpha: 0.07),
-                  blurRadius: 14, spreadRadius: 1)]
+              ? [
+                  BoxShadow(
+                      color: AppColors.cyan.withValues(alpha: 0.07),
+                      blurRadius: 14,
+                      spreadRadius: 1)
+                ]
               : const [],
         ),
         child: Column(
@@ -1028,7 +1220,8 @@ class _DeviceCard extends StatelessWidget {
                       children: [
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 220),
-                          width: 44, height: 44,
+                          width: 44,
+                          height: 44,
                           decoration: BoxDecoration(
                             color: iconBg,
                             borderRadius: BorderRadius.circular(12),
@@ -1052,7 +1245,8 @@ class _DeviceCard extends StatelessWidget {
                               isOn ? 'ON' : 'OFF',
                               style: TextStyle(
                                 color: isOn ? AppColors.cyan : AppColors.textHint,
-                                fontSize: 9, fontFamily: 'monospace',
+                                fontSize: 9,
+                                fontFamily: 'monospace',
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1066,18 +1260,22 @@ class _DeviceCard extends StatelessWidget {
                     Text(d.nombre,
                         style: const TextStyle(
                           color: AppColors.textPri,
-                          fontSize: 15, fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
                         ),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 2),
 
                     // Habitación
                     Row(children: [
-                      const Icon(Icons.place_rounded, color: AppColors.textHint, size: 10),
+                      const Icon(Icons.place_rounded,
+                          color: AppColors.textHint, size: 10),
                       const SizedBox(width: 3),
                       Expanded(
                         child: Text(d.habitacion,
-                            style: const TextStyle(color: AppColors.textHint, fontSize: 10),
+                            style: const TextStyle(
+                                color: AppColors.textHint, fontSize: 10),
                             overflow: TextOverflow.ellipsis),
                       ),
                     ]),
@@ -1115,9 +1313,10 @@ class _DeviceCard extends StatelessWidget {
                       height: 28,
                       child: OutlinedButton.icon(
                         onPressed: onDelete,
-                        icon:  const Icon(Icons.delete_outline_rounded, size: 12),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 12),
                         label: const Text('Eliminar',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                            style:
+                                TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.red,
                           side: const BorderSide(color: AppColors.redBorder),
@@ -1145,7 +1344,7 @@ class _DeviceCard extends StatelessWidget {
 
 class _Tag extends StatelessWidget {
   final String label;
-  final Color  color;
+  final Color color;
 
   const _Tag({required this.label, required this.color});
 
@@ -1154,14 +1353,16 @@ class _Tag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color:  color.withValues(alpha: 0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(5),
         border: Border.all(color: color.withValues(alpha: 0.30)),
       ),
       child: Text(label,
           style: TextStyle(
-            color: color, fontSize: 10,
-            fontWeight: FontWeight.w600, letterSpacing: 0.3,
+            color: color,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
           )),
     );
   }
@@ -1181,9 +1382,9 @@ class _FormularioSheet extends StatefulWidget {
 }
 
 class _FormularioSheetState extends State<_FormularioSheet> {
-  final _formKey    = GlobalKey<FormState>();
-  final _nombreCtrl = TextEditingController();  // locales — sin fuga de estado
-  final _habitCtrl  = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _nombreCtrl = TextEditingController(); // locales — sin fuga de estado
+  final _habitCtrl = TextEditingController();
   String _tipo = 'Tasmota';
 
   @override
@@ -1215,7 +1416,8 @@ class _FormularioSheetState extends State<_FormularioSheet> {
               // Handle
               Center(
                 child: Container(
-                  width: 38, height: 4,
+                  width: 38,
+                  height: 4,
                   decoration: BoxDecoration(
                       color: AppColors.border,
                       borderRadius: BorderRadius.circular(2)),
@@ -1230,7 +1432,8 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                 Text('Nuevo dispositivo',
                     style: TextStyle(
                         color: AppColors.cyan,
-                        fontSize: 19, fontWeight: FontWeight.w700)),
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700)),
               ]),
               const SizedBox(height: 20),
 
@@ -1243,9 +1446,10 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                 style: const TextStyle(color: AppColors.textPri, fontSize: 14),
                 autofocus: true,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'El nombre es requerido';
-                  if (v.trim().length < 2)           return 'Mínimo 2 caracteres';
-                  if (v.trim().length > 40)          return 'Máximo 40 caracteres';
+                  if (v == null || v.trim().isEmpty)
+                    return 'El nombre es requerido';
+                  if (v.trim().length < 2) return 'Mínimo 2 caracteres';
+                  if (v.trim().length > 40) return 'Máximo 40 caracteres';
                   return null;
                 },
                 decoration: _inputDeco('Ej: Lámpara sala'),
@@ -1260,7 +1464,8 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                 textCapitalization: TextCapitalization.words,
                 style: const TextStyle(color: AppColors.textPri, fontSize: 14),
                 validator: (v) {
-                  if (v != null && v.trim().length > 30) return 'Máximo 30 caracteres';
+                  if (v != null && v.trim().length > 30)
+                    return 'Máximo 30 caracteres';
                   return null;
                 },
                 decoration: _inputDeco('Ej: Sala, Cocina, Dormitorio...'),
@@ -1280,7 +1485,9 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                 children: kTipos.entries.map((e) {
                   final sel = _tipo == e.key;
                   return Semantics(
-                    label: 'Tipo ${e.key}', selected: sel, button: true,
+                    label: 'Tipo ${e.key}',
+                    selected: sel,
+                    button: true,
                     child: GestureDetector(
                       onTap: () => setState(() => _tipo = e.key),
                       child: AnimatedContainer(
@@ -1304,7 +1511,8 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                             Text(e.key,
                                 style: TextStyle(
                                   color: sel ? e.value.color : AppColors.textSec,
-                                  fontSize: 12, fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 )),
                           ],
                         ),
@@ -1336,7 +1544,7 @@ class _FormularioSheetState extends State<_FormularioSheet> {
                   flex: 2,
                   child: ElevatedButton.icon(
                     onPressed: _submit,
-                    icon:  const Icon(Icons.check_rounded, size: 17),
+                    icon: const Icon(Icons.check_rounded, size: 17),
                     label: const Text('Agregar',
                         style: TextStyle(
                             fontWeight: FontWeight.w700, letterSpacing: 0.5)),

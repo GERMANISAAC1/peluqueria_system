@@ -32,3 +32,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+
+  dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.2.2
+  http: ^1.1.0
+  network_info_plus: ^4.1.0
+  ping_discover_network: ^0.4.0

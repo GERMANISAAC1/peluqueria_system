@@ -306,7 +306,7 @@ const Map<String, TipoInfo> kTipos = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// APP ROOT
+// APP ROOT - CORREGIDO
 // ═══════════════════════════════════════════════════════════════
 
 class _RealApp extends StatelessWidget {
@@ -342,10 +342,11 @@ class _RealApp extends StatelessWidget {
                   : AppColors.bg3,
             ),
           ),
-          dialogTheme: DialogTheme(
+          // CORREGIDO: Usar DialogThemeData
+          dialogTheme: const DialogThemeData(
             backgroundColor: AppColors.bg2,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+                borderRadius: BorderRadius.all(Radius.circular(16))),
           ),
         ),
         home: const HomePage(),

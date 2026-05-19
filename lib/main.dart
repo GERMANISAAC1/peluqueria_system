@@ -14,30 +14,30 @@ void main() async {
   ]);
 
   final prefs = await SharedPreferences.getInstance();
-  final inicial = await _cargarDesdePrefs(prefs);
-  final notifier = DispositivosNotifier(inicial);
+  final dispositivosGuardados = _cargarDesdePrefs(prefs);
+  final notifier = DispositivosNotifier(dispositivosGuardados);
 
   runApp(MyApp(notifier: notifier));
 }
 
-Future<List<Dispositivo>> _cargarDesdePrefs(SharedPreferences prefs) async {
+List<Dispositivo> _cargarDesdePrefs(SharedPreferences prefs) {
   try {
     final raw = prefs.getString('dispositivos');
     if (raw == null) return [];
-    final list = jsonDecode(raw) as List<dynamic>;
+    final List list = jsonDecode(raw);
     return list.map((e) => Dispositivo.fromJson(e)).toList();
-  } catch (_) {
+  } catch (e) {
     return [];
   }
 }
 
+// Modelo de dispositivo
 class Dispositivo {
   final int id;
   final String nombre;
-  final String tipo;
+  final String tipo;    // tasmota, sonoff, shelly
   final String ip;
   bool encendido;
-  bool esSimulado; // para modo demostración
 
   Dispositivo({
     required this.id,
@@ -45,79 +45,79 @@ class Dispositivo {
     required this.tipo,
     required this.ip,
     this.encendido = false,
-    this.esSimulado = false,
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'nombre': nombre,
-        'tipo': tipo,
-        'ip': ip,
-        'encendido': encendido,
-        'esSimulado': esSimulado,
-      };
+    'id': id,
+    'nombre': nombre,
+    'tipo': tipo,
+    'ip': ip,
+    'encendido': encendido,
+  };
 
-  factory Dispositivo.fromJson(Map<String, dynamic> j) => Dispositivo(
-        id: j['id'],
-        nombre: j['nombre'],
-        tipo: j['tipo'],
-        ip: j['ip'],
-        encendido: j['encendido'] ?? false,
-        esSimulado: j['esSimulado'] ?? false,
-      );
+  factory Dispositivo.fromJson(Map<String, dynamic> json) => Dispositivo(
+    id: json['id'],
+    nombre: json['nombre'],
+    tipo: json['tipo'],
+    ip: json['ip'],
+    encendido: json['encendido'] ?? false,
+  );
 }
 
-class DeviceController {
-  static Future<bool> enviarComandoReal(String ip, String comando) async {
+// Controlador de dispositivos reales (sin paquete http)
+class ControladorReal {
+  static Future<bool> enviarComando(String ip, String path) async {
     try {
       final socket = await Socket.connect(ip, 80, timeout: const Duration(seconds: 2));
-      final request = 'GET $comando HTTP/1.1\r\nHost: $ip\r\nConnection: close\r\n\r\n';
+      final request = 'GET $path HTTP/1.1\r\nHost: $ip\r\nConnection: close\r\n\r\n';
       socket.add(utf8.encode(request));
       await socket.flush();
       await socket.close();
       return true;
     } catch (e) {
+      debugPrint('Error enviando comando a $ip: $e');
       return false;
     }
   }
 
-  static Future<bool> encenderReal(String ip, String tipo) async {
-    String comando;
+  static Future<bool> encender(String tipo, String ip) async {
+    String path;
     switch (tipo.toLowerCase()) {
       case 'tasmota':
-        comando = '/cm?cmnd=Power%20On';
+        path = '/cm?cmnd=Power%20On';
         break;
       case 'sonoff':
-        comando = '/control?cmd=on';
+        path = '/control?cmd=on';
         break;
       case 'shelly':
-        comando = '/relay/0?turn=on';
+        path = '/relay/0?turn=on';
         break;
       default:
-        comando = '/on';
+        path = '/on';
     }
-    return enviarComandoReal(ip, comando);
+    return enviarComando(ip, path);
   }
 
-  static Future<bool> apagarReal(String ip, String tipo) async {
-    String comando;
+  static Future<bool> apagar(String tipo, String ip) async {
+    String path;
     switch (tipo.toLowerCase()) {
       case 'tasmota':
-        comando = '/cm?cmnd=Power%20Off';
+        path = '/cm?cmnd=Power%20Off';
         break;
       case 'sonoff':
-        comando = '/control?cmd=off';
+        path = '/control?cmd=off';
         break;
       case 'shelly':
-        comando = '/relay/0?turn=off';
+        path = '/relay/0?turn=off';
         break;
       default:
-        comando = '/off';
+        path = '/off';
     }
-    return enviarComandoReal(ip, comando);
+    return enviarComando(ip, path);
   }
 
-  static Future<bool> probarConexionReal(String ip) async {
+  // Probar si el dispositivo responde en el puerto 80
+  static Future<bool> probarConexion(String ip) async {
     try {
       final socket = await Socket.connect(ip, 80, timeout: const Duration(seconds: 1));
       await socket.close();
@@ -126,38 +126,17 @@ class DeviceController {
       return false;
     }
   }
-
-  // Escaneo de red básico (puerto 80 abierto)
-  static Future<List<String>> escanearRed(String subnet) async {
-    List<String> encontrados = [];
-    for (int i = 1; i <= 254; i++) {
-      final ip = '$subnet.$i';
-      try {
-        final socket = await Socket.connect(ip, 80, timeout: const Duration(milliseconds: 300));
-        await socket.close();
-        encontrados.add(ip);
-      } catch (_) {}
-    }
-    return encontrados;
-  }
 }
 
+// Estado global (ChangeNotifier)
 class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> _items = [];
   SharedPreferences? _prefs;
   int _nextId = 1;
-  bool _modoSimulacion = true; // Por defecto simulación
 
-  DispositivosNotifier(List<Dispositivo> initial) {
-    _items = List.of(initial);
-    if (_items.isEmpty) {
-      // Agregar dispositivos de demostración
-      _items.addAll([
-        Dispositivo(id: _nextId++, nombre: 'Demo Luz Sala', tipo: 'demo', ip: 'simulado', encendido: false, esSimulado: true),
-        Dispositivo(id: _nextId++, nombre: 'Demo TV', tipo: 'demo', ip: 'simulado', encendido: false, esSimulado: true),
-        Dispositivo(id: _nextId++, nombre: 'Demo Aire', tipo: 'demo', ip: 'simulado', encendido: false, esSimulado: true),
-      ]);
-    } else {
+  DispositivosNotifier(List<Dispositivo> inicial) {
+    _items = List.of(inicial);
+    if (_items.isNotEmpty) {
       _nextId = _items.map((d) => d.id).reduce((a, b) => a > b ? a : b) + 1;
     }
     _initPrefs();
@@ -168,73 +147,43 @@ class DispositivosNotifier extends ChangeNotifier {
   }
 
   List<Dispositivo> get items => List.unmodifiable(_items);
-  bool get modoSimulacion => _modoSimulacion;
-
-  void toggleModoSimulacion() {
-    _modoSimulacion = !_modoSimulacion;
-    notifyListeners();
-  }
 
   Future<bool> toggle(int id) async {
     final index = _items.indexWhere((d) => d.id == id);
     if (index == -1) return false;
 
     final d = _items[index];
-    bool success;
+    bool exito;
 
-    if (_modoSimulacion || d.esSimulado) {
-      // Modo demostración: simular siempre éxito
-      success = true;
-      await Future.delayed(const Duration(milliseconds: 300)); // simular latencia
+    if (!d.encendido) {
+      exito = await ControladorReal.encender(d.tipo, d.ip);
+      if (exito) _items[index] = Dispositivo(id: d.id, nombre: d.nombre, tipo: d.tipo, ip: d.ip, encendido: true);
     } else {
-      // Modo real
-      if (!d.encendido) {
-        success = await DeviceController.encenderReal(d.ip, d.tipo);
-      } else {
-        success = await DeviceController.apagarReal(d.ip, d.tipo);
-      }
+      exito = await ControladorReal.apagar(d.tipo, d.ip);
+      if (exito) _items[index] = Dispositivo(id: d.id, nombre: d.nombre, tipo: d.tipo, ip: d.ip, encendido: false);
     }
 
-    if (success) {
-      _items[index] = Dispositivo(
-        id: d.id,
-        nombre: d.nombre,
-        tipo: d.tipo,
-        ip: d.ip,
-        encendido: !d.encendido,
-        esSimulado: d.esSimulado,
-      );
+    if (exito) {
       notifyListeners();
       _guardar();
     }
-    return success;
+    return exito;
   }
 
-  Future<void> agregarDispositivoReal(String nombre, String tipo, String ip) async {
-    // Verificar si realmente responde antes de agregar
-    final ok = await DeviceController.probarConexionReal(ip);
-    if (!ok) throw Exception('No se pudo conectar a $ip');
+  Future<bool> agregar(String nombre, String tipo, String ip) async {
+    // Verificar que el dispositivo responde antes de agregar
+    final ok = await ControladorReal.probarConexion(ip);
+    if (!ok) return false;
+
     _items.add(Dispositivo(
       id: _nextId++,
-      nombre: nombre,
+      nombre: nombre.trim(),
       tipo: tipo.toLowerCase(),
-      ip: ip,
-      esSimulado: false,
+      ip: ip.trim(),
     ));
     notifyListeners();
     _guardar();
-  }
-
-  void agregarDispositivoDemo(String nombre, String tipo) {
-    _items.add(Dispositivo(
-      id: _nextId++,
-      nombre: nombre,
-      tipo: tipo,
-      ip: 'simulado',
-      esSimulado: true,
-    ));
-    notifyListeners();
-    _guardar();
+    return true;
   }
 
   void eliminar(int id) {
@@ -249,6 +198,7 @@ class DispositivosNotifier extends ChangeNotifier {
   }
 }
 
+// Aplicación principal
 class MyApp extends StatelessWidget {
   final DispositivosNotifier notifier;
   const MyApp({required this.notifier});
@@ -257,15 +207,14 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Domótica Pro',
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark),
-      ),
+      title: 'Domótica Real',
+      theme: ThemeData.dark(useMaterial3: true),
       home: HomePage(notifier: notifier),
     );
   }
 }
 
+// Pantalla principal
 class HomePage extends StatefulWidget {
   final DispositivosNotifier notifier;
   const HomePage({required this.notifier});
@@ -275,11 +224,13 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  final _formKey = GlobalKey<FormState>();
   final _nombreCtrl = TextEditingController();
   final _tipoCtrl = TextEditingController();
   final _ipCtrl = TextEditingController();
+  bool _probando = false;
 
-  void _mostrarSnackBar(String msg, {bool error = false}) {
+  void _mostrarSnack(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: error ? Colors.red : Colors.green),
     );
@@ -289,119 +240,61 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Domótica Pro'),
+        title: const Text('Control Domótico Real'),
         centerTitle: true,
-        actions: [
-          Switch(
-            value: widget.notifier.modoSimulacion,
-            onChanged: (_) => widget.notifier.toggleModoSimulacion(),
-            activeColor: Colors.blue,
-          ),
-          const SizedBox(width: 8),
-          Text(widget.notifier.modoSimulacion ? 'DEMO' : 'REAL', style: const TextStyle(fontSize: 12)),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => _mostrarAyuda(),
-          ),
-        ],
+        backgroundColor: Colors.blue,
       ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            color: widget.notifier.modoSimulacion ? Colors.orange.shade900 : Colors.green.shade900,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(widget.notifier.modoSimulacion ? Icons.smart_toy : Icons.wifi, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  widget.notifier.modoSimulacion
-                      ? 'MODO DEMOSTRACIÓN - Los toggles son simulados'
-                      : 'MODO REAL - Controla dispositivos físicos',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: widget.notifier.items.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.devices_other, size: 64, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        const Text('No hay dispositivos'),
-                        const SizedBox(height: 8),
-                        ElevatedButton.icon(
-                          onPressed: () => _mostrarDialogAgregar(),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Agregar dispositivo'),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: widget.notifier.items.length,
-                    itemBuilder: (context, index) {
-                      final d = widget.notifier.items[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          leading: Icon(
-                            d.encendido ? Icons.power : Icons.power_off,
-                            color: d.encendido ? Colors.green : Colors.red,
-                          ),
-                          title: Text(d.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(d.esSimulado ? '${d.tipo} | Simulado' : '${d.tipo} | ${d.ip}'),
-                          trailing: Switch(
-                            value: d.encendido,
-                            onChanged: (_) async {
-                              final ok = await widget.notifier.toggle(d.id);
-                              if (!ok && mounted) {
-                                _mostrarSnackBar('Error al controlar ${d.nombre}', error: true);
-                              } else if (ok && mounted && !widget.notifier.modoSimulacion && !d.esSimulado) {
-                                _mostrarSnackBar('${d.nombre} ${d.encendido ? "apagado" : "encendido"} correctamente');
-                              }
-                            },
-                          ),
-                          onLongPress: () => _confirmarEliminar(d.id, d.nombre),
-                        ),
-                      );
-                    },
+      body: widget.notifier.items.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.devices_other, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  const Text('No hay dispositivos', style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: _mostrarDialogAgregar,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Agregar dispositivo real'),
                   ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _mostrarDialogAgregar,
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  void _mostrarAyuda() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Modos de uso'),
-        content: const Text(
-          '🔵 MODO DEMO (switch azul):\n'
-          '• Simula encendido/apagado sin red\n'
-          '• Ideal para probar la app\n\n'
-          '🟢 MODO REAL (switch verde):\n'
-          '• Controla dispositivos reales\n'
-          '• Deben estar en la misma WiFi\n'
-          '• Soporta Tasmota, Sonoff, Shelly\n\n'
-          '➕ Agregar dispositivo:\n'
-          '• Demo: solo nombre y tipo\n'
-          '• Real: IP válida y tipo correcto',
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
-      ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: widget.notifier.items.length,
+              itemBuilder: (context, index) {
+                final d = widget.notifier.items[index];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: Icon(
+                      d.encendido ? Icons.power : Icons.power_off,
+                      color: d.encendido ? Colors.green : Colors.red,
+                    ),
+                    title: Text(d.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('${d.tipo.toUpperCase()} | ${d.ip}'),
+                    trailing: Switch(
+                      value: d.encendido,
+                      onChanged: (_) async {
+                        final ok = await widget.notifier.toggle(d.id);
+                        if (!ok && mounted) {
+                          _mostrarSnack('Error al controlar ${d.nombre}', error: true);
+                        }
+                      },
+                    ),
+                    onLongPress: () => _confirmarEliminar(d.id, d.nombre),
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: widget.notifier.items.isNotEmpty
+          ? FloatingActionButton(
+              onPressed: _mostrarDialogAgregar,
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 
@@ -409,7 +302,7 @@ class _HomePageState extends State<HomePage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Eliminar'),
+        title: const Text('Eliminar dispositivo'),
         content: Text('¿Eliminar "$nombre"?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
@@ -417,7 +310,7 @@ class _HomePageState extends State<HomePage> {
             onPressed: () {
               widget.notifier.eliminar(id);
               Navigator.pop(context);
-              _mostrarSnackBar('Dispositivo eliminado');
+              _mostrarSnack('Dispositivo eliminado');
             },
             child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
           ),
@@ -427,80 +320,95 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _mostrarDialogAgregar() {
-    final isDemo = widget.notifier.modoSimulacion;
     _nombreCtrl.clear();
     _tipoCtrl.clear();
     _ipCtrl.clear();
+    _probando = false;
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(isDemo ? 'Agregar dispositivo DEMO' : 'Agregar dispositivo REAL'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nombreCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre', hintText: 'Ej: Lampara Sala'),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Agregar dispositivo REAL'),
+            content: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: _nombreCtrl,
+                    decoration: const InputDecoration(labelText: 'Nombre', hintText: 'Ej: Lámpara Sala'),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null,
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _tipoCtrl,
+                    decoration: const InputDecoration(labelText: 'Tipo', hintText: 'tasmota, sonoff, shelly'),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null,
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _ipCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'IP',
+                      hintText: '192.168.1.100',
+                      suffixIcon: _probando
+                          ? const SizedBox(width: 20, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+                          : null,
+                    ),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'IP requerida';
+                      final pattern = r'^(\d{1,3}\.){3}\d{1,3}$';
+                      if (!RegExp(pattern).hasMatch(v.trim())) return 'IP inválida';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: _probando ? null : () async {
+                      final ip = _ipCtrl.text.trim();
+                      if (ip.isEmpty) {
+                        _mostrarSnack('Ingresa una IP primero', error: true);
+                        return;
+                      }
+                      setState(() => _probando = true);
+                      final ok = await ControladorReal.probarConexion(ip);
+                      setState(() => _probando = false);
+                      if (ok) {
+                        _mostrarSnack('✓ Dispositivo responde en $ip');
+                      } else {
+                        _mostrarSnack('✗ No se pudo conectar a $ip', error: true);
+                      }
+                    },
+                    icon: const Icon(Icons.network_check),
+                    label: const Text('Probar conexión'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _tipoCtrl,
-                decoration: const InputDecoration(labelText: 'Tipo', hintText: 'tasmota, sonoff, shelly, demo'),
-              ),
-              if (!isDemo) ...[
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _ipCtrl,
-                  decoration: const InputDecoration(labelText: 'IP', hintText: '192.168.1.100'),
-                ),
-                const SizedBox(height: 10),
-                ElevatedButton.icon(
-                  onPressed: () async {
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+              ElevatedButton(
+                onPressed: () async {
+                  if (_formKey.currentState!.validate()) {
+                    final nombre = _nombreCtrl.text.trim();
+                    final tipo = _tipoCtrl.text.trim();
                     final ip = _ipCtrl.text.trim();
-                    if (ip.isEmpty) return;
-                    final ok = await DeviceController.probarConexionReal(ip);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(ok ? '✓ Dispositivo responde' : '✗ No responde'), backgroundColor: ok ? Colors.green : Colors.red),
-                    );
-                  },
-                  icon: const Icon(Icons.network_check),
-                  label: const Text('Probar conexión'),
-                ),
-              ],
+                    final success = await widget.notifier.agregar(nombre, tipo, ip);
+                    if (success) {
+                      Navigator.pop(context);
+                      _mostrarSnack('Dispositivo agregado');
+                    } else {
+                      _mostrarSnack('No se pudo conectar al dispositivo', error: true);
+                    }
+                  }
+                },
+                child: const Text('Agregar'),
+              ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () async {
-              final nombre = _nombreCtrl.text.trim();
-              if (nombre.isEmpty) return;
-              final tipo = _tipoCtrl.text.trim();
-              if (isDemo) {
-                widget.notifier.agregarDispositivoDemo(nombre, tipo.isEmpty ? 'demo' : tipo);
-                Navigator.pop(context);
-                _mostrarSnackBar('Dispositivo demo agregado');
-              } else {
-                final ip = _ipCtrl.text.trim();
-                if (ip.isEmpty) {
-                  _mostrarSnackBar('Ingresa una IP', error: true);
-                  return;
-                }
-                try {
-                  await widget.notifier.agregarDispositivoReal(nombre, tipo, ip);
-                  Navigator.pop(context);
-                  _mostrarSnackBar('Dispositivo real agregado');
-                } catch (e) {
-                  _mostrarSnackBar(e.toString(), error: true);
-                }
-              }
-            },
-            child: const Text('Agregar'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

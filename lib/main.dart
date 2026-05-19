@@ -402,7 +402,7 @@ class DomoticaApp extends StatelessWidget {
       onSurface: AppColors.textPrimary,
     ),
     fontFamily: 'SF Pro Display',
-    cardTheme: const CardTheme(
+    cardTheme: const CardThemeData(
       color: AppColors.card,
       elevation: 0,
       margin: EdgeInsets.zero,

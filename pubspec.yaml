@@ -1,20 +1,33 @@
-name: domotica_pro          # nivel 0
-description: ...            # nivel 0
-publish_to: 'none'         # nivel 0
-version: 1.0.0+1          # nivel 0
+name: domotica_pro
+description: Aplicación de domótica profesional - Versión 2.0
+publish_to: 'none'
+version: 2.0.0+1
 
-environment:               # nivel 0
-  sdk: '>=3.0.0 <4.0.0'   # nivel 2 espacios
+environment:
+  sdk: '>=3.0.0 <4.0.0'
 
-dependencies:              # nivel 0 (IMPORTANTE: mismo nivel que flutter)
-  flutter:                 # nivel 2 espacios
-    sdk: flutter          # nivel 4 espacios
-  shared_preferences: ^2.2.2  # nivel 2 espacios
-  http: ^1.1.0            # nivel 2 espacios
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  
+  # Persistencia
+  shared_preferences: ^2.2.2
+  
+  # Networking
+  http: ^1.1.0
+  
+  # Utilidades
+  flutter_local_notifications: ^16.3.0
+  intl: ^0.18.1
 
-dev_dependencies:          # nivel 0
-  flutter_test:           # nivel 2 espacios
-    sdk: flutter          # nivel 4 espacios
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
 
-flutter:                   # nivel 0 (mismo nivel que dependencies)
-  uses-material-design: true  # nivel 2 espacios
+flutter:
+  uses-material-design: true

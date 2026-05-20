@@ -1,33 +1,44 @@
+<!-- ╔════════════════════════════════════════════════════════════╗
+     ║  PARCHE OBLIGATORIO — Android bloquea HTTP en LAN        ║
+     ║  Sin esto, los comandos al dispositivo son ignorados     ║
+     ║  silenciosamente desde Android 9 (API 28+).              ║
+     ╚════════════════════════════════════════════════════════════╝
+
+     ARCHIVO:  android/app/src/main/AndroidManifest.xml
+
+     Agrega  android:usesCleartextTraffic="true"  al tag <application>
+     tal como se muestra abajo.  Es la única línea que debes añadir.
+-->
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- ✅ Agrega estos permisos -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Permiso de internet (ya debe estar) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
-        android:label="gym"
+        android:label="Domótica Pro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">   <!-- ✅ Agrega esta línea -->
+        android:usesCleartextTraffic="true">   <!-- ← LÍNEA CRÍTICA -->
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
 
             <meta-data
-                android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme" />
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme" />
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-
         </activity>
 
         <meta-data
@@ -35,4 +46,84 @@
             android:value="2" />
 
     </application>
+
+    <queries>
+        <!-- Permite detectar dispositivos en la red local -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+    </queries>
+
 </manifest>
+
+<!-- ═══════════════════════════════════════════════════════════
+     RESUMEN DE TODOS LOS FIXES v3.0
+     ═══════════════════════════════════════════════════════════
+
+  PROBLEMA 1 — Comandos no llegan al dispositivo (el más crítico)
+  ──────────────────────────────────────────────────────────────
+  CAUSA: El código anterior hacía socket.close() ANTES de leer la
+  respuesta HTTP del dispositivo. Muchos firmwares (Tasmota, Shelly)
+  implementan HTTP/1.1 y mantienen la conexión abierta esperando más
+  peticiones. Al cerrar el socket prematuramente, el firmware interpreta
+  que el cliente abortó y no ejecuta el comando.
+
+  FIX: Se cambió a HTTP/1.0 + Connection: close y se lee TODA la
+  respuesta antes de cerrar. El dispositivo procesa la request,
+  envía la respuesta, y cierra él mismo. El cliente solo cierra
+  después de recibir EOF.
+
+  Código clave en NetCtrl._get():
+    final req = 'GET $path HTTP/1.0\r\n'
+                'Host: $ip\r\n'
+                'Connection: close\r\n\r\n';
+    socket.write(req);
+    await socket.flush();
+    // LEE hasta EOF antes de cerrar:
+    await socket.cast<List<int>>().transform(utf8.decoder)
+        .timeout(timeout).forEach((chunk) => buf.write(chunk));
+
+  PROBLEMA 2 — Android bloquea HTTP plano (cleartext)
+  ──────────────────────────────────────────────────────────────
+  CAUSA: Android 9+ (API 28+) bloquea conexiones HTTP sin TLS por
+  defecto. Los dispositivos IoT en LAN usan HTTP, no HTTPS.
+  La app lanzaba una excepción silenciosa de red.
+
+  FIX: Agregar android:usesCleartextTraffic="true" en AndroidManifest.
+
+  PROBLEMA 3 — Rutas incorrectas en Tasmota
+  ──────────────────────────────────────────────────────────────
+  CAUSA: El código anterior usaba Power%20On (URL encoding con %20).
+  Tasmota espera application/x-www-form-urlencoded: Power+On (con +).
+
+  FIX: Rutas actualizadas:
+    Tasmota:  /cm?cmnd=Power+On   /cm?cmnd=Power+Off
+    Sonoff:   /control?cmd=on     /control?cmd=off
+    Shelly:   /relay/0?turn=on    /relay/0?turn=off
+    Celular:  /on                 /off
+    Genérico: /on                 /off
+
+  PROBLEMA 4 — Timeout muy corto
+  ──────────────────────────────────────────────────────────────
+  CAUSA: Timeout de 2s es insuficiente en redes WiFi congestionadas
+  o cuando el dispositivo IoT está en modo ahorro.
+
+  FIX: Timeout aumentado a 5s para comandos y 4s para ping.
+
+  MEJORAS UI v3.0:
+  ──────────────────────────────────────────────────────────────
+  ✓ 4 páginas: Panel, Habitaciones, Dispositivos, Historial
+  ✓ Panel con estadísticas, barra de actividad, acceso rápido por
+    categoría de artefacto (luz, ventilador, TV, AC, enchufe, etc.)
+  ✓ Página Habitaciones: grid 2 columnas, tarjetas grandes interactivas,
+    tabs de filtro por habitación, animación glow en encendido
+  ✓ Categoría de artefacto: icono visual correcto por tipo de artefacto
+  ✓ Tarjetas de dispositivo con borde pulsante animado cuando ON
+  ✓ Sincronización de estado real para Tasmota (/cm?cmnd=Power)
+  ✓ Nota informativa en el formulario con las rutas exactas de cada firmware
+  ✓ Botón eliminar directo en la tarjeta (sin long press obligatorio)
+  ✓ Snackbars con icono de estado
+  ✓ Historial con timestamps relativos
+
+-->

@@ -1,7 +1,8 @@
 // ============================================================
-//  DOMÓTICA PRO — Producción v2.0
+//  DOMÓTICA PRO — Producción v2.1
 //  Arquitectura: ChangeNotifier + SharedPreferences
 //  Diseño: Glassmorphism Dark Premium
+//  Correcciones: control de red con HttpClient, panel por habitaciones, edición
 // ============================================================
 
 import 'dart:async';
@@ -78,13 +79,6 @@ extension TipoDispositivoExt on TipoDispositivo {
     TipoDispositivo.celular => 'Celular',
     TipoDispositivo.otro    => 'Otro',
   };
-  String get iconAsset => switch (this) {
-    TipoDispositivo.tasmota => '🔌',
-    TipoDispositivo.sonoff  => '⚡',
-    TipoDispositivo.shelly  => '🌐',
-    TipoDispositivo.celular => '📱',
-    TipoDispositivo.otro    => '🔧',
-  };
   IconData get icon => switch (this) {
     TipoDispositivo.tasmota => Icons.electrical_services_rounded,
     TipoDispositivo.sonoff  => Icons.bolt_rounded,
@@ -116,11 +110,11 @@ class LogEntry {
 
 class Dispositivo {
   final int id;
-  final String nombre;
+  String nombre;
   final TipoDispositivo tipo;
-  final String ip;
-  final int puerto;
-  final String habitacion;
+  String ip;
+  int puerto;
+  String habitacion;
   bool encendido;
   DateTime? ultimaAccion;
   int toggleCount;
@@ -164,12 +158,20 @@ class Dispositivo {
   );
 
   Dispositivo copyWith({
+    String? nombre,
+    String? ip,
+    int? puerto,
+    String? habitacion,
     bool? encendido,
     DateTime? ultimaAccion,
     int? toggleCount,
   }) => Dispositivo(
-    id: id, nombre: nombre, tipo: tipo, ip: ip, puerto: puerto,
-    habitacion: habitacion,
+    id: id,
+    nombre: nombre ?? this.nombre,
+    tipo: tipo,
+    ip: ip ?? this.ip,
+    puerto: puerto ?? this.puerto,
+    habitacion: habitacion ?? this.habitacion,
     encendido: encendido ?? this.encendido,
     ultimaAccion: ultimaAccion ?? this.ultimaAccion,
     toggleCount: toggleCount ?? this.toggleCount,
@@ -197,19 +199,21 @@ class DispositivoRepo {
 }
 
 // ─────────────────────────────────────────────────────────
-// CONTROLADOR DE RED (raw sockets, sin http)
+// CONTROLADOR DE RED (HttpClient, más fiable)
 // ─────────────────────────────────────────────────────────
 class ControladorRed {
-  static Future<bool> _get(String ip, int puerto, String path) async {
+  // Envía un comando GET y verifica código HTTP 2xx
+  static Future<bool> _sendCommand(String ip, int puerto, String path) async {
     try {
-      final s = await Socket.connect(ip, puerto,
-          timeout: const Duration(seconds: 3));
-      s.add(utf8.encode(
-          'GET $path HTTP/1.1\r\nHost: $ip\r\nConnection: close\r\n\r\n'));
-      await s.flush();
-      await s.close();
-      return true;
-    } catch (_) {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 3);
+      final request = await client.get(ip, puerto, path);
+      request.headers.add('Connection', 'close');
+      final response = await request.close();
+      await response.drain(); // Leer toda la respuesta para asegurar que el servidor procesa
+      client.close();
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
       return false;
     }
   }
@@ -228,19 +232,18 @@ class ControladorRed {
     _                       => '/off',
   };
 
-  static Future<bool> encender(Dispositivo d) => _get(
+  static Future<bool> encender(Dispositivo d) => _sendCommand(
       d.ip, d.puerto,
       d.tipo == TipoDispositivo.celular ? '/on' : _pathEncender(d.tipo));
 
-  static Future<bool> apagar(Dispositivo d) => _get(
+  static Future<bool> apagar(Dispositivo d) => _sendCommand(
       d.ip, d.puerto,
       d.tipo == TipoDispositivo.celular ? '/off' : _pathApagar(d.tipo));
 
   static Future<bool> probar(String ip, int puerto) async {
     try {
-      final s = await Socket.connect(ip, puerto,
-          timeout: const Duration(seconds: 2));
-      await s.close();
+      final socket = await Socket.connect(ip, puerto, timeout: const Duration(seconds: 2));
+      await socket.close();
       return true;
     } catch (_) {
       return false;
@@ -354,12 +357,33 @@ class DispositivosNotifier extends ChangeNotifier {
     return true;
   }
 
+  Future<bool> actualizar(Dispositivo dispositivoActualizado) async {
+    final idx = _items.indexWhere((d) => d.id == dispositivoActualizado.id);
+    if (idx == -1) return false;
+    // Mantener el estado encendido y contador original (solo se actualizan datos fijos)
+    final original = _items[idx];
+    _items[idx] = dispositivoActualizado.copyWith(
+      encendido: original.encendido,
+      ultimaAccion: original.ultimaAccion,
+      toggleCount: original.toggleCount,
+    );
+    _agregarLog('Dispositivo "${dispositivoActualizado.nombre}" actualizado', exito: true);
+    notifyListeners();
+    _guardar();
+    return true;
+  }
+
   void eliminar(int id) {
     final d = _items.firstWhere((x) => x.id == id, orElse: () => _items.first);
     _items.removeWhere((x) => x.id == id);
     _agregarLog('Dispositivo "${d.nombre}" eliminado', exito: true);
     notifyListeners();
     _guardar();
+  }
+
+  void limpiarLog() {
+    _log.clear();
+    notifyListeners();
   }
 
   void _agregarLog(String msg, {required bool exito}) {
@@ -435,9 +459,6 @@ class DomoticaApp extends StatelessWidget {
         textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
       ),
     ),
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
-    ),
     snackBarTheme: const SnackBarThemeData(
       backgroundColor: AppColors.card,
       contentTextStyle: TextStyle(color: AppColors.textPrimary),
@@ -447,7 +468,7 @@ class DomoticaApp extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────
-// SHELL PRINCIPAL (navegación inferior)
+// SHELL PRINCIPAL (navegación inferior con 4 pestañas)
 // ─────────────────────────────────────────────────────────
 class MainShell extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -464,6 +485,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final pages = [
       DashboardPage(notifier: widget.notifier),
+      RoomsPage(notifier: widget.notifier),
       DispositivosPage(notifier: widget.notifier),
       HistorialPage(notifier: widget.notifier),
     ];
@@ -499,9 +521,10 @@ class _NavBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _NavItem(icon: Icons.dashboard_rounded,   label: 'Panel',       index: 0, current: current, onTap: onTap),
-              _NavItem(icon: Icons.devices_rounded,     label: 'Dispositivos', index: 1, current: current, onTap: onTap),
-              _NavItem(icon: Icons.history_rounded,     label: 'Historial',   index: 2, current: current, onTap: onTap),
+              _NavItem(icon: Icons.dashboard_rounded,   label: 'Panel',      index: 0, current: current, onTap: onTap),
+              _NavItem(icon: Icons.meeting_room_rounded, label: 'Habitaciones', index: 1, current: current, onTap: onTap),
+              _NavItem(icon: Icons.devices_rounded,     label: 'Dispositivos', index: 2, current: current, onTap: onTap),
+              _NavItem(icon: Icons.history_rounded,     label: 'Historial',   index: 3, current: current, onTap: onTap),
             ],
           ),
         ),
@@ -554,7 +577,7 @@ class _NavItem extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────
-// PÁGINA: DASHBOARD
+// PÁGINA: DASHBOARD (resumen)
 // ─────────────────────────────────────────────────────────
 class DashboardPage extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -595,7 +618,6 @@ class _DashboardPageState extends State<DashboardPage>
 
         return CustomScrollView(
           slivers: [
-            // ── AppBar
             SliverAppBar(
               expandedHeight: 180,
               pinned: true,
@@ -610,10 +632,7 @@ class _DashboardPageState extends State<DashboardPage>
                 ),
               ),
               title: const Text('Domótica Pro',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               actions: [
                 _AccionRapidaBtn(
                   icon: Icons.power_settings_new_rounded,
@@ -624,71 +643,36 @@ class _DashboardPageState extends State<DashboardPage>
                 const SizedBox(width: 8),
               ],
             ),
-
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 16),
-                    // ── Stats row
                     Row(children: [
-                      _StatCard(
-                        label: 'Encendidos',
-                        value: enc.toString(),
-                        icon: Icons.power_rounded,
-                        color: AppColors.green,
-                        glow: AppColors.greenGlow,
-                        flex: 1,
-                      ),
+                      _StatCard(label: 'Encendidos', value: enc.toString(),
+                          icon: Icons.power_rounded, color: AppColors.green,
+                          glow: AppColors.greenGlow, flex: 1),
                       const SizedBox(width: 12),
-                      _StatCard(
-                        label: 'Apagados',
-                        value: (total - enc).toString(),
-                        icon: Icons.power_off_rounded,
-                        color: AppColors.red,
-                        glow: AppColors.redGlow,
-                        flex: 1,
-                      ),
+                      _StatCard(label: 'Apagados', value: (total - enc).toString(),
+                          icon: Icons.power_off_rounded, color: AppColors.red,
+                          glow: AppColors.redGlow, flex: 1),
                       const SizedBox(width: 12),
-                      _StatCard(
-                        label: 'Total',
-                        value: total.toString(),
-                        icon: Icons.devices_rounded,
-                        color: AppColors.accent,
-                        glow: AppColors.accentGlow,
-                        flex: 1,
-                      ),
+                      _StatCard(label: 'Total', value: total.toString(),
+                          icon: Icons.devices_rounded, color: AppColors.accent,
+                          glow: AppColors.accentGlow, flex: 1),
                     ]),
-
                     const SizedBox(height: 20),
-                    // ── Barra de actividad
                     _ActivityBar(porcentaje: porcentaje, encendidos: enc, total: total),
-
                     const SizedBox(height: 24),
-                    // ── Por habitación
                     if (items.isNotEmpty) ...[
-                      _SectionTitle('Por habitación'),
+                      _SectionTitle('Últimos dispositivos'),
                       const SizedBox(height: 12),
-                      ..._habitaciones(items).map((entry) =>
-                          _HabitacionCard(
-                            nombre: entry.key,
-                            dispositivos: entry.value,
-                            notifier: n,
-                          )),
+                      ...items.reversed.take(3).map((d) => _RecentDeviceTile(
+                          dispositivo: d, notifier: n)),
                     ] else
                       _EmptyDashboard(),
-
-                    const SizedBox(height: 24),
-                    // ── Últimas acciones (preview)
-                    if (n.log.isNotEmpty) ...[
-                      _SectionTitle('Última actividad'),
-                      const SizedBox(height: 12),
-                      ...n.log.take(3).map((e) => _LogTile(entry: e)),
-                    ],
-
-                    const SizedBox(height: 100),
                   ],
                 ),
               ),
@@ -698,171 +682,80 @@ class _DashboardPageState extends State<DashboardPage>
       },
     );
   }
-
-  List<MapEntry<String, List<Dispositivo>>> _habitaciones(
-      List<Dispositivo> items) {
-    final Map<String, List<Dispositivo>> map = {};
-    for (final d in items) {
-      map.putIfAbsent(d.habitacion, () => []).add(d);
-    }
-    return map.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-  }
 }
 
 // ─────────────────────────────────────────────────────────
-// WIDGETS DEL DASHBOARD
+// PÁGINA: HABITACIONES (control principal)
 // ─────────────────────────────────────────────────────────
-class _DashHeader extends StatelessWidget {
-  final Animation<double> pulse;
-  final int  encendidos, total;
-  final bool modoDemo;
-  final VoidCallback onToggleDemo;
-
-  const _DashHeader({
-    required this.pulse, required this.encendidos, required this.total,
-    required this.modoDemo, required this.onToggleDemo,
-  });
+class RoomsPage extends StatelessWidget {
+  final DispositivosNotifier notifier;
+  const RoomsPage({super.key, required this.notifier});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0D1528), Color(0xFF070B14)],
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 56, 16, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text(
-                    _saludo(),
-                    style: const TextStyle(
-                        fontSize: 13, color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$encendidos de $total activos',
-                    style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary),
-                  ),
-                ],
+    return AnimatedBuilder(
+      animation: notifier,
+      builder: (_, __) {
+        final roomsMap = <String, List<Dispositivo>>{};
+        for (final d in notifier.items) {
+          roomsMap.putIfAbsent(d.habitacion, () => []).add(d);
+        }
+        final rooms = roomsMap.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+        return Scaffold(
+          backgroundColor: AppColors.bg,
+          body: CustomScrollView(
+            slivers: [
+              const SliverAppBar(
+                pinned: true,
+                backgroundColor: AppColors.surface,
+                title: Text('Habitaciones',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
               ),
-            ),
-            // Demo toggle
-            AnimatedBuilder(
-              animation: pulse,
-              builder: (_, __) => GestureDetector(
-                onTap: onToggleDemo,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: modoDemo
-                        ? Color.lerp(AppColors.orangeGlow,
-                            AppColors.orange.withOpacity(0.15), pulse.value)!
-                        : AppColors.surfaceAlt,
-                    borderRadius: AppRadius.sm,
-                    border: Border.all(
-                        color: modoDemo
-                            ? AppColors.orange.withOpacity(0.5)
-                            : AppColors.border),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.science_rounded,
-                          size: 14,
-                          color: modoDemo ? AppColors.orange : AppColors.textMuted),
-                      const SizedBox(width: 6),
-                      Text('DEMO',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: modoDemo
-                                  ? AppColors.orange
-                                  : AppColors.textMuted)),
-                    ],
+              if (rooms.isEmpty)
+                const SliverFillRemaining(
+                  child: Center(child: Text('No hay dispositivos',
+                      style: TextStyle(color: AppColors.textSecondary))),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) {
+                        final room = rooms[i];
+                        return _RoomCard(
+                          nombre: room.key,
+                          dispositivos: room.value,
+                          notifier: notifier,
+                        );
+                      },
+                      childCount: rooms.length,
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
-  }
-
-  String _saludo() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Buenos días ☀️';
-    if (h < 18) return 'Buenas tardes 🌤️';
-    return 'Buenas noches 🌙';
   }
 }
 
-class _StatCard extends StatelessWidget {
-  final String label, value;
-  final IconData icon;
-  final Color color, glow;
-  final int flex;
-  const _StatCard({
-    required this.label, required this.value, required this.icon,
-    required this.color, required this.glow, required this.flex,
+class _RoomCard extends StatelessWidget {
+  final String nombre;
+  final List<Dispositivo> dispositivos;
+  final DispositivosNotifier notifier;
+  const _RoomCard({
+    required this.nombre, required this.dispositivos, required this.notifier,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      flex: flex,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: AppRadius.md,
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                  color: glow, borderRadius: AppRadius.sm),
-              child: Icon(icon, color: color, size: 16),
-            ),
-            const SizedBox(height: 10),
-            Text(value,
-                style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: color)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: AppColors.textSecondary)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActivityBar extends StatelessWidget {
-  final double porcentaje;
-  final int encendidos, total;
-  const _ActivityBar({required this.porcentaje, required this.encendidos, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
+    final encendidos = dispositivos.where((d) => d.encendido).length;
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: AppRadius.md,
@@ -871,107 +764,33 @@ class _ActivityBar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Actividad global',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-              Text('${(porcentaje * 100).round()}%',
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.accent)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: AppRadius.xl,
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: porcentaje),
-              duration: const Duration(milliseconds: 600),
-              curve: Curves.easeInOut,
-              builder: (_, val, __) => LinearProgressIndicator(
-                value: val,
-                minHeight: 8,
-                backgroundColor: AppColors.border,
-                valueColor: const AlwaysStoppedAnimation(AppColors.accent),
-              ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(_habitacionIcon(nombre), color: AppColors.accent, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(nombre,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ),
+                _ChipStatus(enc: encendidos, total: dispositivos.length),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text('$encendidos de $total dispositivos activos',
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _HabitacionCard extends StatefulWidget {
-  final String nombre;
-  final List<Dispositivo> dispositivos;
-  final DispositivosNotifier notifier;
-  const _HabitacionCard({
-    required this.nombre, required this.dispositivos, required this.notifier,
-  });
-
-  @override
-  State<_HabitacionCard> createState() => _HabitacionCardState();
-}
-
-class _HabitacionCardState extends State<_HabitacionCard> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final enc = widget.dispositivos.where((d) => d.encendido).length;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: AppRadius.md,
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: AppRadius.md,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                children: [
-                  Icon(_habitacionIcon(widget.nombre),
-                      color: AppColors.accent, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(widget.nombre,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                            color: AppColors.textPrimary)),
-                  ),
-                  _ChipStatus(enc: enc, total: widget.dispositivos.length),
-                  const SizedBox(width: 8),
-                  Icon(
-                    _expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    color: AppColors.textSecondary,
-                  ),
-                ],
-              ),
+          const Divider(height: 1, color: AppColors.border),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: dispositivos.map((d) => _RoomDeviceTile(
+                  dispositivo: d, notifier: notifier)).toList(),
             ),
           ),
-          if (_expanded) ...[
-            const Divider(height: 1, color: AppColors.border),
-            ...widget.dispositivos.map((d) => _MiniDeviceTile(
-                  d: d, notifier: widget.notifier)),
-          ],
         ],
       ),
     );
@@ -992,127 +811,62 @@ class _HabitacionCardState extends State<_HabitacionCard> {
   }
 }
 
-class _ChipStatus extends StatelessWidget {
-  final int enc, total;
-  const _ChipStatus({required this.enc, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = enc == 0
-        ? AppColors.textMuted
-        : enc == total
-            ? AppColors.green
-            : AppColors.orange;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: AppRadius.xl,
-      ),
-      child: Text('$enc/$total',
-          style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w700, color: color)),
-    );
-  }
-}
-
-class _MiniDeviceTile extends StatefulWidget {
-  final Dispositivo d;
+class _RoomDeviceTile extends StatefulWidget {
+  final Dispositivo dispositivo;
   final DispositivosNotifier notifier;
-  const _MiniDeviceTile({required this.d, required this.notifier});
+  const _RoomDeviceTile({required this.dispositivo, required this.notifier});
 
   @override
-  State<_MiniDeviceTile> createState() => _MiniDeviceTileState();
+  State<_RoomDeviceTile> createState() => _RoomDeviceTileState();
 }
 
-class _MiniDeviceTileState extends State<_MiniDeviceTile> {
+class _RoomDeviceTileState extends State<_RoomDeviceTile> {
   bool _toggling = false;
 
   @override
   Widget build(BuildContext context) {
-    final d = widget.d;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: d.encendido
-                  ? d.tipo.color.withOpacity(0.18)
-                  : AppColors.surfaceAlt,
-              borderRadius: AppRadius.sm,
-            ),
-            child: Icon(d.tipo.icon,
-                size: 18,
-                color: d.encendido ? d.tipo.color : AppColors.textMuted),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
+    final d = widget.dispositivo;
+    final color = d.tipo.color;
+    return SizedBox(
+      width: 140,
+      child: Card(
+        color: AppColors.surfaceAlt,
+        shape: RoundedRectangleBorder(
+            borderRadius: AppRadius.sm,
+            side: BorderSide(color: d.encendido ? color : AppColors.border, width: 0.5)),
+        child: InkWell(
+          borderRadius: AppRadius.sm,
+          onTap: _toggling ? null : () async {
+            setState(() => _toggling = true);
+            await widget.notifier.toggle(d.id);
+            if (mounted) setState(() => _toggling = false);
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Icon(d.tipo.icon, size: 32, color: d.encendido ? color : AppColors.textMuted),
+                const SizedBox(height: 8),
                 Text(d.nombre,
-                    style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textPrimary)),
-                Text(d.ip,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.textMuted)),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                if (_toggling)
+                  const SizedBox(width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  Switch(
+                    value: d.encendido,
+                    onChanged: (_) {},
+                    activeColor: Colors.white,
+                    activeTrackColor: color,
+                    inactiveTrackColor: AppColors.border,
+                  ),
               ],
             ),
           ),
-          if (_toggling)
-            const SizedBox(
-              width: 24, height: 24,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: AppColors.accent),
-            )
-          else
-            _PulseSwitch(
-              value: d.encendido,
-              color: d.tipo.color,
-              onChanged: (_) async {
-                setState(() => _toggling = true);
-                await widget.notifier.toggle(d.id);
-                if (mounted) setState(() => _toggling = false);
-              },
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyDashboard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 32),
-      child: Center(
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppColors.accentGlow,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.devices_other_rounded,
-                  size: 52, color: AppColors.accent),
-            ),
-            const SizedBox(height: 16),
-            const Text('Sin dispositivos',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            const Text('Agrega tu primer dispositivo\ndesde la pestaña Dispositivos',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-          ],
         ),
       ),
     );
@@ -1120,7 +874,7 @@ class _EmptyDashboard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────
-// PÁGINA: DISPOSITIVOS
+// PÁGINA: DISPOSITIVOS (gestión + edición)
 // ─────────────────────────────────────────────────────────
 class DispositivosPage extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -1170,21 +924,17 @@ class _DispositivosPageState extends State<DispositivosPage> {
           backgroundColor: AppColors.bg,
           body: CustomScrollView(
             slivers: [
-              // AppBar
               SliverAppBar(
                 pinned: true,
                 backgroundColor: AppColors.surface,
                 title: const Text('Dispositivos',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
+                    style: TextStyle(fontWeight: FontWeight.w700)),
                 bottom: PreferredSize(
                   preferredSize: const Size.fromHeight(110),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: Column(
                       children: [
-                        // Búsqueda
                         TextField(
                           onChanged: (v) => setState(() => _busqueda = v),
                           style: const TextStyle(color: AppColors.textPrimary),
@@ -1192,46 +942,34 @@ class _DispositivosPageState extends State<DispositivosPage> {
                             hintText: 'Buscar dispositivo o IP...',
                             prefixIcon: const Icon(Icons.search_rounded,
                                 color: AppColors.textMuted, size: 20),
-                            contentPadding:
-                                const EdgeInsets.symmetric(vertical: 10),
+                            contentPadding: const EdgeInsets.symmetric(vertical: 10),
                           ),
                         ),
                         const SizedBox(height: 10),
-                        // Chips de habitación
                         SizedBox(
                           height: 34,
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: habs.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(width: 8),
+                            separatorBuilder: (_, __) => const SizedBox(width: 8),
                             itemBuilder: (_, i) {
                               final h = habs[i];
                               final sel = h == _habitacionFiltro;
                               return GestureDetector(
-                                onTap: () =>
-                                    setState(() => _habitacionFiltro = h),
+                                onTap: () => setState(() => _habitacionFiltro = h),
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: sel
-                                        ? AppColors.accent
-                                        : AppColors.surfaceAlt,
+                                    color: sel ? AppColors.accent : AppColors.surfaceAlt,
                                     borderRadius: AppRadius.xl,
-                                    border: Border.all(
-                                        color: sel
-                                            ? AppColors.accent
-                                            : AppColors.border),
+                                    border: Border.all(color: sel ? AppColors.accent : AppColors.border),
                                   ),
                                   child: Text(h,
                                       style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
-                                          color: sel
-                                              ? Colors.white
-                                              : AppColors.textSecondary)),
+                                          color: sel ? Colors.white : AppColors.textSecondary)),
                                 ),
                               );
                             },
@@ -1242,22 +980,10 @@ class _DispositivosPageState extends State<DispositivosPage> {
                   ),
                 ),
               ),
-
-              // Lista
               if (items.isEmpty)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.search_off_rounded,
-                            size: 48, color: AppColors.textMuted),
-                        const SizedBox(height: 12),
-                        const Text('Sin resultados',
-                            style: TextStyle(color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
+                const SliverFillRemaining(
+                  child: Center(child: Text('Sin resultados',
+                      style: TextStyle(color: AppColors.textSecondary))),
                 )
               else
                 SliverPadding(
@@ -1279,8 +1005,7 @@ class _DispositivosPageState extends State<DispositivosPage> {
             onPressed: () => _mostrarOpciones(context),
             backgroundColor: AppColors.accent,
             icon: const Icon(Icons.add_rounded),
-            label: const Text('Agregar',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            label: const Text('Agregar'),
           ),
         );
       },
@@ -1300,10 +1025,7 @@ class _DispositivosPageState extends State<DispositivosPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('¿Qué tipo de dispositivo?',
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             const SizedBox(height: 20),
             _TipoBtn(
               icon: Icons.electrical_services_rounded,
@@ -1319,21 +1041,20 @@ class _DispositivosPageState extends State<DispositivosPage> {
             _TipoBtn(
               icon: Icons.smartphone_rounded,
               label: 'Celular con linterna',
-              sub: 'Puerto personalizable, ruta /on y /off',
+              sub: 'Puerto personalizable, rutas /on y /off',
               color: AppColors.purple,
               onTap: () {
                 Navigator.pop(ctx);
                 _abrirForm(ctx, esCelular: true);
               },
             ),
-            const SizedBox(height: 16),
           ],
         ),
       ),
     );
   }
 
-  void _abrirForm(BuildContext ctx, {required bool esCelular}) {
+  void _abrirForm(BuildContext ctx, {required bool esCelular, Dispositivo? editar}) {
     showModalBottomSheet(
       context: ctx,
       backgroundColor: AppColors.surface,
@@ -1344,13 +1065,14 @@ class _DispositivosPageState extends State<DispositivosPage> {
         esCelular: esCelular,
         notifier: widget.notifier,
         onSnack: _snack,
+        editar: editar,
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────
-// TARJETA DE DISPOSITIVO
+// TARJETA DE DISPOSITIVO (con edición y eliminación)
 // ─────────────────────────────────────────────────────────
 class _DeviceCard extends StatefulWidget {
   final Dispositivo dispositivo;
@@ -1372,8 +1094,7 @@ class _DeviceCardState extends State<_DeviceCard>
   @override
   void initState() {
     super.initState();
-    _glow = AnimationController(
-        vsync: this, duration: const Duration(seconds: 2))
+    _glow = AnimationController(vsync: this, duration: const Duration(seconds: 2))
       ..repeat(reverse: true);
   }
 
@@ -1389,7 +1110,7 @@ class _DeviceCardState extends State<_DeviceCard>
     final color = d.encendido ? d.tipo.color : AppColors.textMuted;
 
     return GestureDetector(
-      onLongPress: () => _confirmarEliminar(context, d),
+      onLongPress: () => _mostrarMenu(context, d),
       child: AnimatedBuilder(
         animation: _glow,
         builder: (_, __) => Container(
@@ -1399,19 +1120,13 @@ class _DeviceCardState extends State<_DeviceCard>
             borderRadius: AppRadius.md,
             border: Border.all(
               color: d.encendido
-                  ? d.tipo.color
-                      .withOpacity(0.3 + _glow.value * 0.15)
+                  ? d.tipo.color.withOpacity(0.3 + _glow.value * 0.15)
                   : AppColors.border,
               width: d.encendido ? 1.5 : 0.5,
             ),
             boxShadow: d.encendido
-                ? [
-                    BoxShadow(
-                      color: d.tipo.color.withOpacity(0.08 + _glow.value * 0.06),
-                      blurRadius: 12,
-                      spreadRadius: 1,
-                    )
-                  ]
+                ? [BoxShadow(color: d.tipo.color.withOpacity(0.08 + _glow.value * 0.06),
+                            blurRadius: 12, spreadRadius: 1)]
                 : [],
           ),
           child: Padding(
@@ -1420,49 +1135,33 @@ class _DeviceCardState extends State<_DeviceCard>
               children: [
                 Row(
                   children: [
-                    // Ícono
-                    Container(
-                      width: 48, height: 48,
+                    Container(width: 48, height: 48,
                       decoration: BoxDecoration(
-                        color: d.encendido
-                            ? d.tipo.color.withOpacity(0.18)
-                            : AppColors.surfaceAlt,
+                        color: d.encendido ? d.tipo.color.withOpacity(0.18) : AppColors.surfaceAlt,
                         borderRadius: AppRadius.sm,
                       ),
-                      child: Icon(d.tipo.icon,
-                          size: 24,
-                          color: d.encendido
-                              ? d.tipo.color
-                              : AppColors.textMuted),
+                      child: Icon(d.tipo.icon, size: 24,
+                          color: d.encendido ? d.tipo.color : AppColors.textMuted),
                     ),
                     const SizedBox(width: 14),
-                    // Info
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(d.nombre,
-                              style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary)),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 3),
                           Row(children: [
                             _Badge(d.tipo.nombre, color: d.tipo.color),
                             const SizedBox(width: 8),
-                            _Badge(d.habitacion,
-                                color: AppColors.textSecondary),
+                            _Badge(d.habitacion, color: AppColors.textSecondary),
                           ]),
                         ],
                       ),
                     ),
-                    // Switch
                     if (_toggling)
-                      const SizedBox(
-                        width: 28, height: 28,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.accent),
-                      )
+                      const SizedBox(width: 28, height: 28,
+                          child: CircularProgressIndicator(strokeWidth: 2))
                     else
                       _PulseSwitch(
                         value: d.encendido,
@@ -1472,34 +1171,24 @@ class _DeviceCardState extends State<_DeviceCard>
                           final ok = await widget.notifier.toggle(d.id);
                           if (mounted) {
                             setState(() => _toggling = false);
-                            if (!ok) {
-                              widget.onSnack('Error al controlar ${d.nombre}',
-                                  error: true);
-                            }
+                            if (!ok) widget.onSnack('Error al controlar ${d.nombre}', error: true);
                           }
                         },
                       ),
                   ],
                 ),
-                // Detalles expandidos
                 const SizedBox(height: 12),
                 const Divider(height: 1, color: AppColors.border),
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    _InfoChip(
-                        icon: Icons.wifi_rounded,
-                        label: d.tipo == TipoDispositivo.celular
-                            ? '${d.ip}:${d.puerto}'
-                            : d.ip),
+                    _InfoChip(icon: Icons.wifi_rounded,
+                        label: d.tipo == TipoDispositivo.celular ? '${d.ip}:${d.puerto}' : d.ip),
                     const SizedBox(width: 8),
-                    _InfoChip(
-                        icon: Icons.toggle_on_rounded,
-                        label: '${d.toggleCount} cambios'),
+                    _InfoChip(icon: Icons.toggle_on_rounded, label: '${d.toggleCount} cambios'),
                     const Spacer(),
                     if (d.ultimaAccion != null)
-                      _InfoChip(
-                          icon: Icons.access_time_rounded,
+                      _InfoChip(icon: Icons.access_time_rounded,
                           label: _tiempoRelativo(d.ultimaAccion!)),
                   ],
                 ),
@@ -1511,20 +1200,62 @@ class _DeviceCardState extends State<_DeviceCard>
     );
   }
 
+  void _mostrarMenu(BuildContext ctx, Dispositivo d) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_rounded, color: AppColors.accent),
+              title: const Text('Editar dispositivo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _abrirFormEditar(ctx, d);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_rounded, color: AppColors.red),
+              title: const Text('Eliminar dispositivo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _confirmarEliminar(ctx, d);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _abrirFormEditar(BuildContext ctx, Dispositivo d) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => _FormAgregarDispositivo(
+        esCelular: d.tipo == TipoDispositivo.celular,
+        notifier: widget.notifier,
+        onSnack: widget.onSnack,
+        editar: d,
+      ),
+    );
+  }
+
   void _confirmarEliminar(BuildContext ctx, Dispositivo d) {
     showDialog(
       context: ctx,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.card,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
-        title: const Text('Eliminar dispositivo',
-            style: TextStyle(color: AppColors.textPrimary)),
-        content: Text('¿Eliminar "${d.nombre}"?\nEsta acción no se puede deshacer.',
-            style: const TextStyle(color: AppColors.textSecondary)),
+        title: const Text('Eliminar dispositivo'),
+        content: Text('¿Eliminar "${d.nombre}"?\nEsta acción no se puede deshacer.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
           TextButton(
             onPressed: () {
               widget.notifier.eliminar(d.id);
@@ -1549,27 +1280,28 @@ class _DeviceCardState extends State<_DeviceCard>
 }
 
 // ─────────────────────────────────────────────────────────
-// FORMULARIO AGREGAR DISPOSITIVO
+// FORMULARIO AGREGAR / EDITAR DISPOSITIVO
 // ─────────────────────────────────────────────────────────
 class _FormAgregarDispositivo extends StatefulWidget {
   final bool esCelular;
   final DispositivosNotifier notifier;
   final void Function(String, {bool error}) onSnack;
+  final Dispositivo? editar;
   const _FormAgregarDispositivo({
     required this.esCelular, required this.notifier, required this.onSnack,
+    this.editar,
   });
 
   @override
-  State<_FormAgregarDispositivo> createState() =>
-      _FormAgregarDispositivoState();
+  State<_FormAgregarDispositivo> createState() => _FormAgregarDispositivoState();
 }
 
 class _FormAgregarDispositivoState extends State<_FormAgregarDispositivo> {
   final _formKey    = GlobalKey<FormState>();
   final _nombreCtrl = TextEditingController();
   final _ipCtrl     = TextEditingController();
-  final _puertoCtrl = TextEditingController(text: '80');
-  final _habCtrl    = TextEditingController(text: 'General');
+  final _puertoCtrl = TextEditingController();
+  final _habCtrl    = TextEditingController();
   TipoDispositivo _tipo = TipoDispositivo.tasmota;
   bool _guardando   = false;
   bool _probando    = false;
@@ -1585,9 +1317,21 @@ class _FormAgregarDispositivoState extends State<_FormAgregarDispositivo> {
   @override
   void initState() {
     super.initState();
-    if (widget.esCelular) {
-      _tipo = TipoDispositivo.celular;
-      _puertoCtrl.text = '8080';
+    if (widget.editar != null) {
+      final d = widget.editar!;
+      _nombreCtrl.text = d.nombre;
+      _ipCtrl.text = d.ip;
+      _puertoCtrl.text = d.puerto.toString();
+      _habCtrl.text = d.habitacion;
+      _tipo = d.tipo;
+    } else {
+      if (widget.esCelular) {
+        _tipo = TipoDispositivo.celular;
+        _puertoCtrl.text = '8080';
+      } else {
+        _puertoCtrl.text = '80';
+        _habCtrl.text = 'General';
+      }
     }
   }
 
@@ -1612,187 +1356,78 @@ class _FormAgregarDispositivoState extends State<_FormAgregarDispositivo> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Título
-              Row(
-                children: [
-                  Icon(
-                    widget.esCelular
-                        ? Icons.smartphone_rounded
-                        : Icons.electrical_services_rounded,
-                    color: widget.esCelular ? AppColors.purple : AppColors.accent,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    widget.esCelular
-                        ? 'Agregar celular (linterna)'
-                        : 'Agregar dispositivo IoT',
-                    style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary),
-                  ),
-                ],
-              ),
+              Row(children: [
+                Icon(widget.esCelular ? Icons.smartphone_rounded : Icons.electrical_services_rounded,
+                    color: widget.esCelular ? AppColors.purple : AppColors.accent, size: 22),
+                const SizedBox(width: 10),
+                Text(widget.editar != null
+                    ? 'Editar dispositivo'
+                    : (widget.esCelular ? 'Agregar celular' : 'Agregar dispositivo IoT'),
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              ]),
               const SizedBox(height: 20),
-
-              // Nombre
-              _Label('Nombre del dispositivo'),
-              TextFormField(
-                controller: _nombreCtrl,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(hintText: 'Ej: Lámpara sala'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Nombre requerido' : null,
-              ),
+              _Label('Nombre'), TextFormField(controller: _nombreCtrl,
+                  validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null),
               const SizedBox(height: 14),
-
-              // Tipo (solo IoT)
-              if (!widget.esCelular) ...[
-                _Label('Tipo de dispositivo'),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: tiposIot.map((t) {
-                    final sel = t == _tipo;
-                    return GestureDetector(
-                      onTap: () => setState(() => _tipo = t),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: sel ? t.color.withOpacity(0.2) : AppColors.surfaceAlt,
-                          borderRadius: AppRadius.sm,
-                          border: Border.all(
-                              color: sel ? t.color : AppColors.border),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(t.icon, size: 14, color: sel ? t.color : AppColors.textMuted),
-                          const SizedBox(width: 6),
-                          Text(t.nombre,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: sel ? t.color : AppColors.textSecondary)),
-                        ]),
+              if (!widget.esCelular && widget.editar == null) ...[
+                _Label('Tipo'), Wrap(spacing: 8, runSpacing: 8,
+                  children: tiposIot.map((t) => GestureDetector(
+                    onTap: () => setState(() => _tipo = t),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _tipo == t ? t.color.withOpacity(0.2) : AppColors.surfaceAlt,
+                        borderRadius: AppRadius.sm,
+                        border: Border.all(color: _tipo == t ? t.color : AppColors.border),
                       ),
-                    );
-                  }).toList(),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(t.icon, size: 14, color: _tipo == t ? t.color : AppColors.textMuted),
+                        const SizedBox(width: 6),
+                        Text(t.nombre, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                            color: _tipo == t ? t.color : AppColors.textSecondary)),
+                      ]),
+                    ),
+                  )).toList(),
                 ),
                 const SizedBox(height: 14),
               ],
-
-              // IP
-              _Label('Dirección IP'),
-              TextFormField(
-                controller: _ipCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(hintText: '192.168.1.100'),
-                onChanged: (_) => setState(() => _pingOk = null),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'IP requerida';
-                  if (!RegExp(r'^(\d{1,3}\.){3}\d{1,3}$').hasMatch(v.trim()))
-                    return 'IP inválida';
-                  return null;
-                },
-              ),
+              _Label('IP'), TextFormField(controller: _ipCtrl,
+                  onChanged: (_) => setState(() => _pingOk = null),
+                  validator: (v) => v == null || v.trim().isEmpty ? 'IP requerida' : null),
               const SizedBox(height: 14),
-
-              // Puerto
-              _Label('Puerto'),
-              TextFormField(
-                controller: _puertoCtrl,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: widget.esCelular ? '8080' : '80',
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Puerto requerido';
-                  if (int.tryParse(v.trim()) == null) return 'Número válido';
-                  return null;
-                },
-              ),
+              _Label('Puerto'), TextFormField(controller: _puertoCtrl, keyboardType: TextInputType.number,
+                  validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null),
               const SizedBox(height: 14),
-
-              // Habitación
-              _Label('Habitación / Zona'),
-              TextFormField(
-                controller: _habCtrl,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(
-                    hintText: 'Sala, Cocina, Dormitorio...'),
-              ),
+              _Label('Habitación'), TextFormField(controller: _habCtrl),
               const SizedBox(height: 20),
-
-              // Botón probar conexión
               OutlinedButton.icon(
                 onPressed: _probando ? null : _probarConexion,
-                icon: _probando
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.accent),
-                      )
-                    : Icon(
-                        _pingOk == null
-                            ? Icons.network_check_rounded
-                            : _pingOk!
-                                ? Icons.check_circle_rounded
-                                : Icons.error_rounded,
-                        size: 18,
-                        color: _pingOk == null
-                            ? AppColors.textSecondary
-                            : _pingOk!
-                                ? AppColors.green
-                                : AppColors.red,
-                      ),
-                label: Text(
-                  _probando
-                      ? 'Probando...'
-                      : _pingOk == null
-                          ? 'Probar conexión'
-                          : _pingOk!
-                              ? 'Conexión exitosa'
-                              : 'Sin respuesta',
-                  style: TextStyle(
-                      color: _pingOk == null
-                          ? AppColors.textSecondary
-                          : _pingOk!
-                              ? AppColors.green
-                              : AppColors.red),
-                ),
+                icon: _probando ? const SizedBox(width: 14, height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(_pingOk == null ? Icons.network_check_rounded
+                        : (_pingOk! ? Icons.check_circle_rounded : Icons.error_rounded),
+                        size: 18, color: _pingOk == null ? AppColors.textSecondary
+                        : (_pingOk! ? AppColors.green : AppColors.red)),
+                label: Text(_probando ? 'Probando...'
+                    : (_pingOk == null ? 'Probar conexión'
+                        : (_pingOk! ? 'Conexión exitosa' : 'Sin respuesta')),
+                    style: TextStyle(color: _pingOk == null ? AppColors.textSecondary
+                        : (_pingOk! ? AppColors.green : AppColors.red))),
                 style: OutlinedButton.styleFrom(
-                  side: BorderSide(
-                      color: _pingOk == null
-                          ? AppColors.border
-                          : _pingOk!
-                              ? AppColors.green
-                              : AppColors.red),
+                  side: BorderSide(color: _pingOk == null ? AppColors.border
+                      : (_pingOk! ? AppColors.green : AppColors.red)),
                   shape: const RoundedRectangleBorder(borderRadius: AppRadius.sm),
                   minimumSize: const Size.fromHeight(44),
                 ),
               ),
               const SizedBox(height: 12),
-
-              // Botón agregar
-              SizedBox(
-                width: double.infinity,
+              SizedBox(width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _guardando ? null : _guardar,
-                  child: _guardando
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white),
-                        )
-                      : const Text('Agregar dispositivo'),
+                  child: _guardando ? const SizedBox(height: 20, width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Guardar'),
                 ),
               ),
               const SizedBox(height: 24),
@@ -1806,14 +1441,8 @@ class _FormAgregarDispositivoState extends State<_FormAgregarDispositivo> {
   Future<void> _probarConexion() async {
     final ip = _ipCtrl.text.trim();
     final puerto = int.tryParse(_puertoCtrl.text.trim()) ?? 80;
-    if (ip.isEmpty) {
-      widget.onSnack('Ingresa una IP primero', error: true);
-      return;
-    }
-    setState(() {
-      _probando = true;
-      _pingOk = null;
-    });
+    if (ip.isEmpty) { widget.onSnack('Ingresa una IP', error: true); return; }
+    setState(() { _probando = true; _pingOk = null; });
     final ok = await ControladorRed.probar(ip, puerto);
     if (mounted) setState(() { _probando = false; _pingOk = ok; });
   }
@@ -1821,19 +1450,30 @@ class _FormAgregarDispositivoState extends State<_FormAgregarDispositivo> {
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _guardando = true);
-    final ok = await widget.notifier.agregar(
-      nombre: _nombreCtrl.text,
-      tipo: _tipo,
-      ip: _ipCtrl.text,
-      puerto: int.parse(_puertoCtrl.text.trim()),
-      habitacion: _habCtrl.text,
-      skipPing: widget.notifier.modoDemo,
-    );
+    bool ok;
+    if (widget.editar != null) {
+      final editado = widget.editar!.copyWith(
+        nombre: _nombreCtrl.text.trim(),
+        ip: _ipCtrl.text.trim(),
+        puerto: int.parse(_puertoCtrl.text.trim()),
+        habitacion: _habCtrl.text.trim().isEmpty ? 'General' : _habCtrl.text.trim(),
+      );
+      ok = await widget.notifier.actualizar(editado);
+    } else {
+      ok = await widget.notifier.agregar(
+        nombre: _nombreCtrl.text,
+        tipo: _tipo,
+        ip: _ipCtrl.text,
+        puerto: int.parse(_puertoCtrl.text.trim()),
+        habitacion: _habCtrl.text,
+        skipPing: widget.notifier.modoDemo,
+      );
+    }
     if (mounted) {
       setState(() => _guardando = false);
       if (ok) {
         Navigator.pop(context);
-        widget.onSnack('Dispositivo agregado correctamente');
+        widget.onSnack(widget.editar != null ? 'Dispositivo actualizado' : 'Dispositivo agregado');
       } else {
         widget.onSnack('No se pudo conectar al dispositivo', error: true);
       }
@@ -1858,38 +1498,15 @@ class HistorialPage extends StatelessWidget {
           backgroundColor: AppColors.bg,
           appBar: AppBar(
             backgroundColor: AppColors.surface,
-            title: const Text('Historial',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+            title: const Text('Historial', style: TextStyle(fontWeight: FontWeight.w700)),
             actions: [
               if (log.isNotEmpty)
-                TextButton(
-                  onPressed: () {},
-                  child: const Text('Limpiar',
-                      style: TextStyle(color: AppColors.textSecondary)),
-                ),
+                TextButton(onPressed: notifier.limpiarLog, child: const Text('Limpiar')),
             ],
           ),
           body: log.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: const BoxDecoration(
-                            color: AppColors.surfaceAlt,
-                            shape: BoxShape.circle),
-                        child: const Icon(Icons.history_rounded,
-                            size: 40, color: AppColors.textMuted),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text('Sin actividad registrada',
-                          style: TextStyle(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                )
+              ? const Center(child: Text('Sin actividad registrada',
+                    style: TextStyle(color: AppColors.textSecondary)))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: log.length,
@@ -1917,34 +1534,22 @@ class _LogTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 32, height: 32,
+          Container(width: 32, height: 32,
             decoration: BoxDecoration(
-              color: (entry.exito ? AppColors.green : AppColors.red)
-                  .withOpacity(0.15),
+              color: (entry.exito ? AppColors.green : AppColors.red).withOpacity(0.15),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              entry.exito
-                  ? Icons.check_rounded
-                  : Icons.close_rounded,
-              size: 16,
-              color: entry.exito ? AppColors.green : AppColors.red,
-            ),
+            child: Icon(entry.exito ? Icons.check_rounded : Icons.close_rounded,
+                size: 16, color: entry.exito ? AppColors.green : AppColors.red),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(entry.mensaje,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textPrimary)),
+                Text(entry.mensaje, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
                 const SizedBox(height: 3),
-                Text(_fmt(entry.tiempo),
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.textMuted)),
+                Text(_fmt(entry.tiempo), style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
               ],
             ),
           ),
@@ -1993,10 +1598,8 @@ class _AccionRapidaBtn extends StatelessWidget {
   final Color color;
   final String tooltip;
   final VoidCallback onPressed;
-  const _AccionRapidaBtn({
-    required this.icon, required this.color,
-    required this.tooltip, required this.onPressed,
-  });
+  const _AccionRapidaBtn({required this.icon, required this.color,
+    required this.tooltip, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -2004,8 +1607,7 @@ class _AccionRapidaBtn extends StatelessWidget {
       message: tooltip,
       child: GestureDetector(
         onTap: onPressed,
-        child: Container(
-          width: 36, height: 36,
+        child: Container(width: 36, height: 36,
           decoration: BoxDecoration(
               color: color.withOpacity(0.15),
               borderRadius: AppRadius.sm,
@@ -2026,13 +1628,8 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: color.withOpacity(0.12), borderRadius: AppRadius.xl),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: color)),
+      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: AppRadius.xl),
+      child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
     );
   }
 }
@@ -2044,16 +1641,11 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: AppColors.textMuted),
-        const SizedBox(width: 4),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 11, color: AppColors.textMuted)),
-      ],
-    );
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: AppColors.textMuted),
+      const SizedBox(width: 4),
+      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+    ]);
   }
 }
 
@@ -2063,12 +1655,8 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textSecondary,
-            letterSpacing: 0.5));
+    return Text(text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700,
+        color: AppColors.textSecondary, letterSpacing: 0.5));
   }
 }
 
@@ -2078,14 +1666,9 @@ class _Label extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary)),
-    );
+    return Padding(padding: const EdgeInsets.only(bottom: 6),
+        child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary)));
   }
 }
 
@@ -2094,10 +1677,8 @@ class _TipoBtn extends StatelessWidget {
   final String label, sub;
   final Color color;
   final VoidCallback onTap;
-  const _TipoBtn({
-    required this.icon, required this.label,
-    required this.sub, required this.color, required this.onTap,
-  });
+  const _TipoBtn({required this.icon, required this.label,
+    required this.sub, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2110,37 +1691,179 @@ class _TipoBtn extends StatelessWidget {
           borderRadius: AppRadius.sm,
           border: Border.all(color: AppColors.border),
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
-                  borderRadius: AppRadius.sm),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          color: AppColors.textPrimary)),
-                  const SizedBox(height: 3),
-                  Text(sub,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios_rounded,
-                size: 14, color: AppColors.textMuted),
-          ],
-        ),
+        child: Row(children: [
+          Container(padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: AppRadius.sm),
+              child: Icon(icon, color: color, size: 22)),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+            const SizedBox(height: 3),
+            Text(sub, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          ])),
+          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textMuted),
+        ]),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// WIDGETS FALTANTES PARA DASHBOARD
+// ─────────────────────────────────────────────────────────
+class _DashHeader extends StatelessWidget {
+  final Animation<double> pulse;
+  final int encendidos, total;
+  final bool modoDemo;
+  final VoidCallback onToggleDemo;
+  const _DashHeader({required this.pulse, required this.encendidos,
+    required this.total, required this.modoDemo, required this.onToggleDemo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(gradient: LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [Color(0xFF0D1528), Color(0xFF070B14)])),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 56, 16, 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_saludo(), style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                const SizedBox(height: 4),
+                Text('$encendidos de $total activos',
+                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
+              ])),
+          AnimatedBuilder(animation: pulse, builder: (_, __) => GestureDetector(
+            onTap: onToggleDemo,
+            child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: modoDemo ? Color.lerp(AppColors.orangeGlow,
+                    AppColors.orange.withOpacity(0.15), pulse.value)! : AppColors.surfaceAlt,
+                borderRadius: AppRadius.sm,
+                border: Border.all(color: modoDemo ? AppColors.orange.withOpacity(0.5) : AppColors.border),
+              ),
+              child: Row(children: [
+                Icon(Icons.science_rounded, size: 14,
+                    color: modoDemo ? AppColors.orange : AppColors.textMuted),
+                const SizedBox(width: 6),
+                Text('DEMO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                    color: modoDemo ? AppColors.orange : AppColors.textMuted)),
+              ]),
+            ),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  String _saludo() { final h = DateTime.now().hour;
+    if (h < 12) return 'Buenos días ☀️';
+    if (h < 18) return 'Buenas tardes 🌤️';
+    return 'Buenas noches 🌙';
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label, value;
+  final IconData icon;
+  final Color color, glow;
+  final int flex;
+  const _StatCard({required this.label, required this.value, required this.icon,
+    required this.color, required this.glow, required this.flex});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(flex: flex,
+      child: Container(padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: AppColors.card, borderRadius: AppRadius.md,
+            border: Border.all(color: AppColors.border)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(color: glow, borderRadius: AppRadius.sm),
+              child: Icon(icon, color: color, size: 16)),
+          const SizedBox(height: 10),
+          Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ActivityBar extends StatelessWidget {
+  final double porcentaje;
+  final int encendidos, total;
+  const _ActivityBar({required this.porcentaje, required this.encendidos, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.card, borderRadius: AppRadius.md,
+          border: Border.all(color: AppColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          const Text('Actividad global', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('${(porcentaje * 100).round()}%', style: const TextStyle(fontSize: 13,
+              fontWeight: FontWeight.w700, color: AppColors.accent)),
+        ]),
+        const SizedBox(height: 12),
+        ClipRRect(borderRadius: AppRadius.xl,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: porcentaje),
+            duration: const Duration(milliseconds: 600),
+            builder: (_, val, __) => LinearProgressIndicator(value: val, minHeight: 8,
+                backgroundColor: AppColors.border,
+                valueColor: const AlwaysStoppedAnimation(AppColors.accent)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('$encendidos de $total dispositivos activos',
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+      ]),
+    );
+  }
+}
+
+class _RecentDeviceTile extends StatelessWidget {
+  final Dispositivo dispositivo;
+  final DispositivosNotifier notifier;
+  const _RecentDeviceTile({required this.dispositivo, required this.notifier});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: AppColors.card, borderRadius: AppRadius.sm,
+          border: Border.all(color: AppColors.border)),
+      child: Row(children: [
+        Icon(dispositivo.tipo.icon, color: dispositivo.tipo.color, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(dispositivo.nombre,
+            style: const TextStyle(fontWeight: FontWeight.w500))),
+        _PulseSwitch(value: dispositivo.encendido, color: dispositivo.tipo.color,
+            onChanged: (_) => notifier.toggle(dispositivo.id)),
+      ]),
+    );
+  }
+}
+
+class _EmptyDashboard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(margin: const EdgeInsets.symmetric(vertical: 32),
+      child: Center(child: Column(children: [
+        Container(padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(color: AppColors.accentGlow, shape: BoxShape.circle),
+            child: const Icon(Icons.devices_other_rounded, size: 52, color: AppColors.accent)),
+        const SizedBox(height: 16),
+        const Text('Sin dispositivos',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        const Text('Agrega tu primer dispositivo\ndesde la pestaña Dispositivos',
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+      ])),
     );
   }
 }

@@ -1867,3 +1867,27 @@ class _EmptyDashboard extends StatelessWidget {
     );
   }
 }
+
+class _ChipStatus extends StatelessWidget {
+  final int enc, total;
+  const _ChipStatus({required this.enc, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = enc == 0
+        ? AppColors.textMuted
+        : enc == total
+            ? AppColors.green
+            : AppColors.orange;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: AppRadius.xl,
+      ),
+      child: Text('$enc/$total',
+          style: TextStyle(
+              fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+    );
+  }
+}

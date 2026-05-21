@@ -142,42 +142,72 @@ class LinternaPropia {
 // ═══════════════════════════════════════════════════════════════
 // ENUMS
 // ═══════════════════════════════════════════════════════════════
-enum TipoD { tasmota, sonoff, shelly, celular, linternaProp, otro }
+// ─── TipoD ──────────────────────────────────────────────────────
+// linternaRemota = servidor HTTP remoto con rutas /flash/on y /flash/off
+//   Ejemplo probado: http://10.44.38.3:8888/flash/on
+//   Funciona desde cualquier red (datos Claro, WiFi distinta, etc.)
+//   siempre que la IP sea alcanzable (IP pública / datos móviles).
+enum TipoD { tasmota, sonoff, shelly, celular, linternaRemota, linternaProp, otro }
 
 extension TipoDX on TipoD {
   String get label => switch (this) {
-        TipoD.tasmota      => 'Tasmota',
-        TipoD.sonoff       => 'Sonoff',
-        TipoD.shelly       => 'Shelly',
-        TipoD.celular      => 'Celular LAN',
-        TipoD.linternaProp => 'Mi Linterna',
-        TipoD.otro         => 'Genérico',
+        TipoD.tasmota        => 'Tasmota',
+        TipoD.sonoff         => 'Sonoff',
+        TipoD.shelly         => 'Shelly',
+        TipoD.celular        => 'Celular HTTP',
+        TipoD.linternaRemota => 'Linterna Remota',
+        TipoD.linternaProp   => 'Mi Linterna',
+        TipoD.otro           => 'Genérico',
       };
   IconData get icon => switch (this) {
-        TipoD.tasmota      => Icons.electrical_services_rounded,
-        TipoD.sonoff       => Icons.bolt_rounded,
-        TipoD.shelly       => Icons.router_rounded,
-        TipoD.celular      => Icons.smartphone_rounded,
-        TipoD.linternaProp => Icons.flashlight_on_rounded,
-        TipoD.otro         => Icons.settings_input_hdmi_rounded,
+        TipoD.tasmota        => Icons.electrical_services_rounded,
+        TipoD.sonoff         => Icons.bolt_rounded,
+        TipoD.shelly         => Icons.router_rounded,
+        TipoD.celular        => Icons.smartphone_rounded,
+        TipoD.linternaRemota => Icons.flashlight_on_rounded,
+        TipoD.linternaProp   => Icons.highlight_rounded,
+        TipoD.otro           => Icons.settings_input_hdmi_rounded,
       };
   Color get color => switch (this) {
-        TipoD.tasmota      => C.blue,
-        TipoD.sonoff       => C.orange,
-        TipoD.shelly       => C.green,
-        TipoD.celular      => C.purple,
-        TipoD.linternaProp => C.yellow,
-        TipoD.otro         => C.t2,
+        TipoD.tasmota        => C.blue,
+        TipoD.sonoff         => C.orange,
+        TipoD.shelly         => C.green,
+        TipoD.celular        => C.purple,
+        TipoD.linternaRemota => C.yellow,
+        TipoD.linternaProp   => C.yellow,
+        TipoD.otro           => C.t2,
       };
   Color get glow => switch (this) {
-        TipoD.tasmota      => C.blueG,
-        TipoD.sonoff       => C.orangeG,
-        TipoD.shelly       => C.greenG,
-        TipoD.celular      => C.purpleG,
-        TipoD.linternaProp => C.yellowG,
-        TipoD.otro         => const Color(0x227B8DB8),
+        TipoD.tasmota        => C.blueG,
+        TipoD.sonoff         => C.orangeG,
+        TipoD.shelly         => C.greenG,
+        TipoD.celular        => C.purpleG,
+        TipoD.linternaRemota => C.yellowG,
+        TipoD.linternaProp   => C.yellowG,
+        TipoD.otro           => const Color(0x227B8DB8),
+      };
+  // Ruta GET para encender (usada en modos LAN/Internet/Webhook-path)
+  String get pathOn => switch (this) {
+        TipoD.tasmota        => '/cm?cmnd=Power+On',
+        TipoD.sonoff         => '/control?cmd=on',
+        TipoD.shelly         => '/relay/0?turn=on',
+        TipoD.celular        => '/on',
+        TipoD.linternaRemota => '/flash/on',
+        TipoD.linternaProp   => '',
+        TipoD.otro           => '/on',
+      };
+  // Ruta GET para apagar
+  String get pathOff => switch (this) {
+        TipoD.tasmota        => '/cm?cmnd=Power+Off',
+        TipoD.sonoff         => '/control?cmd=off',
+        TipoD.shelly         => '/relay/0?turn=off',
+        TipoD.celular        => '/off',
+        TipoD.linternaRemota => '/flash/off',
+        TipoD.linternaProp   => '',
+        TipoD.otro           => '/off',
       };
   bool get necesitaRed => this != TipoD.linternaProp;
+  bool get esLinterna   => this == TipoD.linternaProp || this == TipoD.linternaRemota;
   static TipoD fromStr(String s) =>
       TipoD.values.firstWhere((e) => e.name == s, orElse: () => TipoD.otro);
 }
@@ -402,25 +432,13 @@ class NetCtrl {
     }
   }
 
-  // ── Rutas por firmware ────────────────────────────────────────
-  static String _pathOn(TipoD t) => switch (t) {
-        TipoD.tasmota      => '/cm?cmnd=Power+On',
-        TipoD.sonoff       => '/control?cmd=on',
-        TipoD.shelly       => '/relay/0?turn=on',
-        TipoD.celular      => '/on',
-        TipoD.linternaProp => '',
-        TipoD.otro         => '/on',
-      };
-  static String _pathOff(TipoD t) => switch (t) {
-        TipoD.tasmota      => '/cm?cmnd=Power+Off',
-        TipoD.sonoff       => '/control?cmd=off',
-        TipoD.shelly       => '/relay/0?turn=off',
-        TipoD.celular      => '/off',
-        TipoD.linternaProp => '',
-        TipoD.otro         => '/off',
-      };
+  // Rutas delegadas al enum (incluye linternaRemota /flash/on - /flash/off)
+  static String _pathOn(TipoD t)  => t.pathOn;
+  static String _pathOff(TipoD t) => t.pathOff;
 
   // ── Encender ──────────────────────────────────────────────────
+  // linternaRemota usa http.get() directo (ej: http://10.44.38.3:8888/flash/on)
+  // compatible con cualquier red (Claro, Movistar, WiFi distinta)
   static Future<bool> encender(Dispositivo d) async {
     if (d.tipo == TipoD.linternaProp) return LinternaPropia.toggle();
     try {
@@ -431,6 +449,12 @@ class NetCtrl {
           return _getHttp(url);
         case ModoConexion.lan:
         case ModoConexion.internet:
+          if (d.tipo == TipoD.linternaRemota) {
+            // Usa http.get() en lugar de TCP raw — más compatible con
+            // servidores HTTP de apps Android (Web Remote, HTTP Shortcuts, etc.)
+            final url = 'http://${d.ip.trim()}:${d.puerto}${_pathOn(d.tipo)}';
+            return _getHttp(url);
+          }
           await _getTcp(d.ip.trim(), d.puerto, _pathOn(d.tipo));
           return true;
       }
@@ -451,6 +475,10 @@ class NetCtrl {
           return _getHttp(url);
         case ModoConexion.lan:
         case ModoConexion.internet:
+          if (d.tipo == TipoD.linternaRemota) {
+            final url = 'http://${d.ip.trim()}:${d.puerto}${_pathOff(d.tipo)}';
+            return _getHttp(url);
+          }
           await _getTcp(d.ip.trim(), d.puerto, _pathOff(d.tipo));
           return true;
       }
@@ -1178,7 +1206,7 @@ class _MiniTileState extends State<_MiniTile> {
   @override
   Widget build(BuildContext ctx) {
     final d = widget.d;
-    final esL = d.tipo == TipoD.linternaProp;
+    final esL = d.tipo.esLinterna;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       child: Row(children: [
@@ -1327,7 +1355,7 @@ class _DevTileState extends State<_DevTile> with SingleTickerProviderStateMixin 
   Widget build(BuildContext ctx) {
     final d = widget.d;
     final col = d.tipo.color;
-    final esL = d.tipo == TipoD.linternaProp;
+    final esL = d.tipo.esLinterna;
     return AnimatedBuilder(
       animation: _glow,
       builder: (_, __) => GestureDetector(
@@ -1489,7 +1517,7 @@ class _DispCardState extends State<_DispCard> with SingleTickerProviderStateMixi
   @override
   Widget build(BuildContext ctx) {
     final d = widget.d; final col = d.tipo.color;
-    final esL = d.tipo == TipoD.linternaProp;
+    final esL = d.tipo.esLinterna;
     return AnimatedBuilder(
       animation: _glow,
       builder: (_, __) => Container(
@@ -1594,14 +1622,28 @@ class _AddFormState extends State<_AddForm> {
     super.dispose();
   }
 
-  String _infoFirmware() => switch (_tipo) {
-    TipoD.tasmota      => 'GET /cm?cmnd=Power+On\nActiva el Webserver en Tasmota.',
-    TipoD.sonoff       => 'GET /control?cmd=on\nRequiere firmware DIY o Tasmota.',
-    TipoD.shelly       => 'GET /relay/0?turn=on\nGen1. Para Gen2 usa webhook.',
-    TipoD.celular      => 'Servidor HTTP en el otro celular.\nRutas: /on  /off',
-    TipoD.linternaProp => 'Linterna de ESTE celular.\nNo necesita red.',
-    TipoD.otro         => 'Genérico: GET /on  /off',
-  };
+  String _infoFirmware() {
+    switch (_tipo) {
+      case TipoD.tasmota:
+        return 'GET /cm?cmnd=Power+On\nActiva el Webserver en Tasmota.';
+      case TipoD.sonoff:
+        return 'GET /control?cmd=on\nRequiere firmware DIY o Tasmota.';
+      case TipoD.shelly:
+        return 'GET /relay/0?turn=on\nGen1. Para Gen2 usa webhook.';
+      case TipoD.celular:
+        return 'Servidor HTTP en el otro celular.\nRutas: /on  /off';
+      case TipoD.linternaRemota:
+        return 'Linterna remota vía HTTP.\n'
+            'Encender → /flash/on\n'
+            'Apagar   → /flash/off\n'
+            'Ej probado: http://10.44.38.3:8888/flash/on\n'
+            'Funciona desde cualquier red (Claro, WiFi ajena, etc.)';
+      case TipoD.linternaProp:
+        return 'Linterna de ESTE celular.\nNo necesita red — usa la cámara trasera.';
+      case TipoD.otro:
+        return 'Genérico: GET /on  /off en el puerto indicado.';
+    }
+  }
 
   @override
   Widget build(BuildContext ctx) => Padding(

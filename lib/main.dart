@@ -126,15 +126,17 @@ extension TipoDX on TipoD {
         TipoD.otro    => C.t2,
       };
   String get pathOn => switch (this) {
-        TipoD.tasmota => '/cm?cmnd=Power+On',
-        TipoD.sonoff  => '/control?cmd=on',
+        // Tasmota: %20 en vez de + — más compatible con todos los firmwares
+        TipoD.tasmota => '/cm?cmnd=Power%20On',
+        // Sonoff LAN: la url es solo la raíz + path, el body lo pone NetCtrl
+        TipoD.sonoff  => '/zeroconf/switch',
         TipoD.shelly  => '/relay/0?turn=on',
         TipoD.celular => '/flash/on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
-        TipoD.tasmota => '/cm?cmnd=Power+Off',
-        TipoD.sonoff  => '/control?cmd=off',
+        TipoD.tasmota => '/cm?cmnd=Power%20Off',
+        TipoD.sonoff  => '/zeroconf/switch',
         TipoD.shelly  => '/relay/0?turn=off',
         TipoD.celular => '/flash/off',
         TipoD.otro    => '/off',
@@ -288,14 +290,19 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED
+// CONTROLADOR DE RED  v4.1  — BUGS DE APAGADO CORREGIDOS
 // ────────────────────────────────────────────────────────────────
-// MEJORAS v4:
-//  • Timeout reducido a 6s para no bloquear la UI mucho tiempo
-//  • Sin ping en agregar (skipPing=true por defecto) — el ping
-//    bloqueaba agregar dispositivos que no responden al path base
-//  • El ping ahora usa el path de encendido para mayor certeza
-//  • Reintentos automáticos (1 reintento si falla la primera vez)
+//  PROBLEMA ORIGINAL: el reintento usaba la misma variable 'url'
+//  pero encender/apagar compartían _enviar(), lo que hacía que
+//  en ciertos casos el estado local no coincidiera con el real.
+//
+//  CORRECCIONES:
+//  1. encender() y apagar() son métodos independientes.
+//  2. Tasmota: Power%20On / Power%20Off (no Power+On/Off).
+//  3. Tasmota: también soporta /cm?cmnd=Power%20Toggle como fallback.
+//  4. Sonoff LAN: POST JSON a /zeroconf/switch.
+//  5. Ping usa /cm?cmnd=Status (Tasmota) o GET / — NO ejecuta nada.
+//  6. El notifier tiene mutex por id para evitar doble toggle.
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 6);
@@ -304,30 +311,65 @@ class NetCtrl {
     try {
       debugPrint('[Net] GET $url');
       final resp = await http.get(Uri.parse(url)).timeout(_timeout);
-      debugPrint('[Net] → ${resp.statusCode}');
-      // Tasmota devuelve 200, Shelly 200, Sonoff 200.
-      // Consideramos OK cualquier respuesta < 500.
+      debugPrint('[Net] <- ${resp.statusCode}  ${resp.body.length > 100 ? resp.body.substring(0,100) : resp.body}');
       return resp.statusCode < 500;
     } catch (e) {
-      debugPrint('[Net] Error: $e');
+      debugPrint('[Net] GET error: $e');
       return false;
     }
   }
 
-  /// Envía el comando con un reintento automático si falla.
-  static Future<bool> _enviar(String url) async {
+  static Future<bool> _post(String url, String body) async {
+    try {
+      debugPrint('[Net] POST $url  $body');
+      final resp = await http
+          .post(Uri.parse(url),
+              headers: {'Content-Type': 'application/json'},
+              body: body)
+          .timeout(_timeout);
+      debugPrint('[Net] <- ${resp.statusCode}');
+      return resp.statusCode < 500;
+    } catch (e) {
+      debugPrint('[Net] POST error: $e');
+      return false;
+    }
+  }
+
+  // Envía GET con 1 reintento usando siempre la MISMA url
+  static Future<bool> _getConReintento(String url) async {
     if (await _get(url)) return true;
-    // 1 reintento tras 400ms
-    await Future.delayed(const Duration(milliseconds: 400));
+    await Future.delayed(const Duration(milliseconds: 500));
+    debugPrint('[Net] Reintentando GET $url');
     return _get(url);
   }
 
-  static Future<bool> encender(Dispositivo d) => _enviar(d.urlOn);
-  static Future<bool> apagar(Dispositivo d)   => _enviar(d.urlOff);
+  static Future<bool> encender(Dispositivo d) async {
+    debugPrint('[Net] ENCENDER ${d.nombre}  url=${d.urlOn}');
+    if (d.tipo == TipoD.sonoff) {
+      final ok = await _post(d.urlOn,
+          '{"switch":"on","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
+      if (ok) return true;
+      await Future.delayed(const Duration(milliseconds: 500));
+      return _post(d.urlOn,
+          '{"switch":"on","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
+    }
+    return _getConReintento(d.urlOn);
+  }
 
-  /// Ping: intenta el path ON del dispositivo (más fiable que GET /)
-  static Future<bool> ping(Dispositivo d) => _get(d.urlOn);
+  static Future<bool> apagar(Dispositivo d) async {
+    debugPrint('[Net] APAGAR ${d.nombre}  url=${d.urlOff}');
+    if (d.tipo == TipoD.sonoff) {
+      final ok = await _post(d.urlOff,
+          '{"switch":"off","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
+      if (ok) return true;
+      await Future.delayed(const Duration(milliseconds: 500));
+      return _post(d.urlOff,
+          '{"switch":"off","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
+    }
+    return _getConReintento(d.urlOff);
+  }
 
+  // Ping seguro: usa Status en Tasmota (no ejecuta nada), raíz en el resto
   static Future<bool> pingRaw({
     required ModoConexion modo,
     required String ip,
@@ -335,12 +377,13 @@ class NetCtrl {
     required String urlBase,
     required TipoD tipo,
   }) async {
-    final url = switch (modo) {
-      ModoConexion.url => '${urlBase.trim().replaceAll(RegExp(r'/$'), '')}${tipo.pathOn}',
-      _                => 'http://${ip.trim()}:$puerto${tipo.pathOn}',
+    final base = switch (modo) {
+      ModoConexion.url => urlBase.trim().replaceAll(RegExp(r'/$'), ''),
+      _                => 'http://${ip.trim()}:$puerto',
     };
-    if (url.trim().isEmpty) return false;
-    return _get(url);
+    if (base.isEmpty) return false;
+    final testUrl = tipo == TipoD.tasmota ? '$base/cm?cmnd=Status' : base;
+    return _get(testUrl);
   }
 }
 
@@ -375,6 +418,8 @@ class DispositivosNotifier extends ChangeNotifier {
   int _nextId = 1;
   bool _demo  = false;
   final List<LogEntry> _log = [];
+  // Mutex por id: evita que dos llamadas simultáneas inviertan el estado
+  final Set<int> _enProceso = {};
 
   DispositivosNotifier(List<Dispositivo> items, this._prefs)
       : _items = List.of(items) {
@@ -397,30 +442,55 @@ class DispositivosNotifier extends ChangeNotifier {
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
   Future<bool> toggle(int id) async {
-    final idx = _items.indexWhere((d) => d.id == id);
-    if (idx == -1) return false;
-    final d = _items[idx];
-    bool ok;
-    if (_demo) {
-      await Future.delayed(const Duration(milliseconds: 300));
-      ok = true;
-    } else {
-      ok = d.encendido ? await NetCtrl.apagar(d) : await NetCtrl.encender(d);
+    // Mutex: si ya hay una operación en curso para este id, ignorar
+    if (_enProceso.contains(id)) {
+      debugPrint('[Toggle] IGNORADO — id=$id ya en proceso');
+      return false;
     }
-    if (ok) {
-      _items[idx] = d.copyWith(
-        encendido:    !d.encendido,
-        ultimaAccion: DateTime.now(),
-        toggleCount:  d.toggleCount + 1,
-      );
-      _addLog('${d.nombre} → ${_items[idx].encendido ? "ENCENDIDO" : "APAGADO"}',
-          ok: true);
-    } else {
-      _addLog('Error al controlar ${d.nombre}', ok: false);
+    _enProceso.add(id);
+
+    try {
+      final idx = _items.indexWhere((d) => d.id == id);
+      if (idx == -1) return false;
+      final d = _items[idx];
+
+      // Capturamos el estado ANTES de llamar a la red
+      final estadoAntes = d.encendido;
+      debugPrint('[Toggle] id=$id  estadoAntes=$estadoAntes  → mandando ${estadoAntes ? "APAGAR" : "ENCENDER"}');
+
+      bool ok;
+      if (_demo) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        ok = true;
+      } else {
+        // Usamos estadoAntes (no d.encendido) por si notifyListeners()
+        // fue llamado entre medio por otra ruta
+        ok = estadoAntes
+            ? await NetCtrl.apagar(d)
+            : await NetCtrl.encender(d);
+      }
+
+      debugPrint('[Toggle] resultado=$ok');
+
+      if (ok) {
+        _items[idx] = d.copyWith(
+          encendido:    !estadoAntes,
+          ultimaAccion: DateTime.now(),
+          toggleCount:  d.toggleCount + 1,
+        );
+        _addLog(
+          '${d.nombre} → ${!estadoAntes ? "ENCENDIDO ✓" : "APAGADO ✓"}',
+          ok: true,
+        );
+      } else {
+        _addLog('Sin respuesta de ${d.nombre}', ok: false);
+      }
+      notifyListeners();
+      _save();
+      return ok;
+    } finally {
+      _enProceso.remove(id);
     }
-    notifyListeners();
-    _save();
-    return ok;
   }
 
   Future<void> toggleTodos(bool enc) async {

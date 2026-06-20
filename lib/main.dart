@@ -309,7 +309,7 @@ class NetCtrl {
 
   static Future<bool> _get(String url) async {
     try {
-      debugPrint('[Net] GET $url');
+      debugPrint('[Net] GET ' + url);
       final resp = await http.get(
         Uri.parse(url),
         headers: {
@@ -317,10 +317,23 @@ class NetCtrl {
           'Cache-Control': 'no-cache',
         },
       ).timeout(_timeout);
-      debugPrint('[Net] <- HTTP ${resp.statusCode}  body: ${resp.body.length > 80 ? resp.body.substring(0, 80) : resp.body}');
-      return resp.statusCode < 500;
+      debugPrint('[Net] <- HTTP ' + resp.statusCode.toString());
+      // Cualquier respuesta HTTP = el servidor recibió el comando = OK
+      // Solo falla si hay excepción (timeout, sin conexión, IP incorrecta)
+      return true;
     } catch (e) {
-      debugPrint('[Net] Error: $e');
+      debugPrint('[Net] Error: ' + e.toString());
+      return false;
+    }
+  },
+      ).timeout(_timeout);
+      debugPrint('[Net] <- HTTP ${resp.statusCode}  body: ${resp.body.length > 80 ? resp.body.substring(0, 80) : resp.body}');
+      // Cualquier respuesta del servidor = comando recibido = OK
+      // Web Remote Droid puede devolver 200, 404 o cualquier código
+      // Lo único que indica falla real es una excepción (timeout, sin conexión)
+      return true;
+    } catch (e) {
+      debugPrint('[Net] Error: \$e');
       return false;
     }
   }

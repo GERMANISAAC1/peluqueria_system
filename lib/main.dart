@@ -18,7 +18,6 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -290,120 +289,61 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.2  — HTTP/1.0 + Connection:close
+// CONTROLADOR DE RED  v4.3  — http.get() para todos los modos
 // ────────────────────────────────────────────────────────────────
-//  CAUSA RAÍZ DEL PROBLEMA "no prende/apaga":
-//  http.get() usa HTTP/1.1 con keep-alive. Muchos firmwares IoT
-//  (Tasmota, Shelly, genéricos) esperan que el cliente cierre
-//  la conexión para ejecutar el comando. Con keep-alive nunca
-//  reciben el EOF y descartan la request silenciosamente.
+//  PROBLEMA CON SOCKET HTTP/1.0:
+//  Web Remote Droid (y otros servidores Android) no cierran la
+//  conexión TCP inmediatamente. El forEach esperaba EOF y se
+//  bloqueaba hasta timeout → el comando llegaba tarde o nunca.
 //
-//  SOLUCIÓN: Socket TCP con HTTP/1.0 + "Connection: close".
-//  El firmware recibe la request completa, ejecuta el comando,
-//  responde y cierra. La app lee hasta EOF y confirma.
+//  SOLUCIÓN: http.get() con headers Connection:close para TODOS
+//  los modos. El paquete http maneja HTTP/1.1 correctamente y
+//  no requiere EOF para considerar la respuesta completa.
 //
-//  Timeout: 5s para comandos, 4s para ping.
+//  Para Tasmota/Shelly que necesitan cierre rápido: el header
+//  "Connection: close" le indica al servidor que cierre al terminar,
+//  lo que es suficiente para que ejecute el comando.
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  static const _cmdTimeout  = Duration(seconds: 5);
-  static const _pingTimeout = Duration(seconds: 4);
+  static const _timeout = Duration(seconds: 6);
 
-  // ── Socket HTTP/1.0 — el único método que envía comandos ────
-  // Construye la request a mano con HTTP/1.0 + Connection:close,
-  // lee TODA la respuesta hasta EOF y devuelve true si HTTP < 500.
-  static Future<bool> _socketGet(String host, int port, String path) async {
-    Socket? socket;
+  static Future<bool> _get(String url) async {
     try {
-      debugPrint('[Net] TCP $host:$port$path');
-      socket = await Socket.connect(host, port)
-          .timeout(_cmdTimeout);
-
-      // HTTP/1.0 para que el servidor cierre la conexión al terminar
-      final request =
-          'GET $path HTTP/1.0\r\n'
-          'Host: $host\r\n'
-          'Connection: close\r\n'
-          '\r\n';
-      socket.write(request);
-      await socket.flush();
-
-      // Leer respuesta completa hasta EOF
-      final buf = StringBuffer();
-      await socket
-          .cast<List<int>>()
-          .transform(const Utf8Decoder(allowMalformed: true))
-          .timeout(_cmdTimeout)
-          .forEach((chunk) => buf.write(chunk));
-
-      final response = buf.toString();
-      debugPrint('[Net] Respuesta: ${response.length > 120 ? response.substring(0, 120) : response}');
-
-      // Extraer código HTTP de la primera línea
-      final firstLine = response.split('\n').first.trim();
-      final parts = firstLine.split(' ');
-      if (parts.length >= 2) {
-        final code = int.tryParse(parts[1]) ?? 0;
-        debugPrint('[Net] HTTP $code');
-        return code > 0 && code < 500;
-      }
-      // Si no hay código HTTP pero hubo respuesta, igual consideramos OK
-      return response.isNotEmpty;
-    } catch (e) {
-      debugPrint('[Net] Error TCP: $e');
-      return false;
-    } finally {
-      socket?.destroy();
-    }
-  }
-
-  // ── Para modo URL (https o dominios) usa http.get() normal ──
-  // ngrok/Cloudflare/DDNS usan HTTPS y manejan keep-alive bien.
-  static Future<bool> _httpGet(String url) async {
-    try {
-      debugPrint('[Net] HTTP GET $url');
+      debugPrint('[Net] GET $url');
       final resp = await http.get(
         Uri.parse(url),
-        headers: {'Connection': 'close'},
-      ).timeout(_cmdTimeout);
-      debugPrint('[Net] HTTP ${resp.statusCode}');
+        headers: {
+          'Connection': 'close',
+          'Cache-Control': 'no-cache',
+        },
+      ).timeout(_timeout);
+      debugPrint('[Net] <- HTTP ${resp.statusCode}  body: ${resp.body.length > 80 ? resp.body.substring(0, 80) : resp.body}');
       return resp.statusCode < 500;
     } catch (e) {
-      debugPrint('[Net] Error HTTP: $e');
+      debugPrint('[Net] Error: $e');
       return false;
     }
   }
 
-  // ── Envía comando con 1 reintento si falla ──────────────────
-  static Future<bool> _cmd(Dispositivo d, String path) async {
-    bool ok;
-    if (d.modo == ModoConexion.url) {
-      final base = d.urlBase.trim().replaceAll(RegExp(r'/$'), '');
-      ok = await _httpGet('$base$path');
-    } else {
-      ok = await _socketGet(d.ip.trim(), d.puerto, path);
-    }
-    if (ok) return true;
-    // 1 reintento con la MISMA acción
-    await Future.delayed(const Duration(milliseconds: 600));
+  // Envía comando con 1 reintento si falla
+  static Future<bool> _cmd(String url) async {
+    if (await _get(url)) return true;
+    await Future.delayed(const Duration(milliseconds: 500));
     debugPrint('[Net] Reintentando...');
-    if (d.modo == ModoConexion.url) {
-      final base = d.urlBase.trim().replaceAll(RegExp(r'/$'), '');
-      return _httpGet('$base$path');
-    }
-    return _socketGet(d.ip.trim(), d.puerto, path);
+    return _get(url);
   }
 
   static Future<bool> encender(Dispositivo d) {
-    debugPrint('[Net] ENCENDER ${d.nombre}  path=${d.tipo.pathOn}');
-    return _cmd(d, d.tipo.pathOn);
+    debugPrint('[Net] ENCENDER ${d.nombre}  url=${d.urlOn}');
+    return _cmd(d.urlOn);
   }
 
   static Future<bool> apagar(Dispositivo d) {
-    debugPrint('[Net] APAGAR ${d.nombre}  path=${d.tipo.pathOff}');
-    return _cmd(d, d.tipo.pathOff);
+    debugPrint('[Net] APAGAR   ${d.nombre}  url=${d.urlOff}');
+    return _cmd(d.urlOff);
   }
 
-  // ── Ping: no ejecuta ningún comando ─────────────────────────
+  // Ping: GET a la raíz, no ejecuta ningún comando
   static Future<bool> pingRaw({
     required ModoConexion modo,
     required String ip,
@@ -411,13 +351,12 @@ class NetCtrl {
     required String urlBase,
     required TipoD tipo,
   }) async {
-    if (modo == ModoConexion.url) {
-      return _httpGet(urlBase.trim());
-    }
-    // Para Tasmota: /cm?cmnd=Status (solo consulta, no ejecuta)
-    // Para el resto: GET / (raíz)
-    final path = tipo == TipoD.tasmota ? '/cm?cmnd=Status' : '/';
-    return _socketGet(ip.trim(), puerto, path);
+    final url = switch (modo) {
+      ModoConexion.url => urlBase.trim(),
+      _                => 'http://${ip.trim()}:$puerto/',
+    };
+    if (url.isEmpty) return false;
+    return _get(url);
   }
 }
 

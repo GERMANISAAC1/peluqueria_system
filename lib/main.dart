@@ -18,6 +18,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -126,17 +127,16 @@ extension TipoDX on TipoD {
         TipoD.otro    => C.t2,
       };
   String get pathOn => switch (this) {
-        // Tasmota: %20 en vez de + — más compatible con todos los firmwares
-        TipoD.tasmota => '/cm?cmnd=Power%20On',
-        // Sonoff LAN: la url es solo la raíz + path, el body lo pone NetCtrl
-        TipoD.sonoff  => '/zeroconf/switch',
+        // Tasmota: + (URL form-encoded), NO %20
+        TipoD.tasmota => '/cm?cmnd=Power+On',
+        TipoD.sonoff  => '/control?cmd=on',
         TipoD.shelly  => '/relay/0?turn=on',
         TipoD.celular => '/flash/on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
-        TipoD.tasmota => '/cm?cmnd=Power%20Off',
-        TipoD.sonoff  => '/zeroconf/switch',
+        TipoD.tasmota => '/cm?cmnd=Power+Off',
+        TipoD.sonoff  => '/control?cmd=off',
         TipoD.shelly  => '/relay/0?turn=off',
         TipoD.celular => '/flash/off',
         TipoD.otro    => '/off',
@@ -290,86 +290,120 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.1  — BUGS DE APAGADO CORREGIDOS
+// CONTROLADOR DE RED  v4.2  — HTTP/1.0 + Connection:close
 // ────────────────────────────────────────────────────────────────
-//  PROBLEMA ORIGINAL: el reintento usaba la misma variable 'url'
-//  pero encender/apagar compartían _enviar(), lo que hacía que
-//  en ciertos casos el estado local no coincidiera con el real.
+//  CAUSA RAÍZ DEL PROBLEMA "no prende/apaga":
+//  http.get() usa HTTP/1.1 con keep-alive. Muchos firmwares IoT
+//  (Tasmota, Shelly, genéricos) esperan que el cliente cierre
+//  la conexión para ejecutar el comando. Con keep-alive nunca
+//  reciben el EOF y descartan la request silenciosamente.
 //
-//  CORRECCIONES:
-//  1. encender() y apagar() son métodos independientes.
-//  2. Tasmota: Power%20On / Power%20Off (no Power+On/Off).
-//  3. Tasmota: también soporta /cm?cmnd=Power%20Toggle como fallback.
-//  4. Sonoff LAN: POST JSON a /zeroconf/switch.
-//  5. Ping usa /cm?cmnd=Status (Tasmota) o GET / — NO ejecuta nada.
-//  6. El notifier tiene mutex por id para evitar doble toggle.
+//  SOLUCIÓN: Socket TCP con HTTP/1.0 + "Connection: close".
+//  El firmware recibe la request completa, ejecuta el comando,
+//  responde y cierra. La app lee hasta EOF y confirma.
+//
+//  Timeout: 5s para comandos, 4s para ping.
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  static const _timeout = Duration(seconds: 6);
+  static const _cmdTimeout  = Duration(seconds: 5);
+  static const _pingTimeout = Duration(seconds: 4);
 
-  static Future<bool> _get(String url) async {
+  // ── Socket HTTP/1.0 — el único método que envía comandos ────
+  // Construye la request a mano con HTTP/1.0 + Connection:close,
+  // lee TODA la respuesta hasta EOF y devuelve true si HTTP < 500.
+  static Future<bool> _socketGet(String host, int port, String path) async {
+    Socket? socket;
     try {
-      debugPrint('[Net] GET $url');
-      final resp = await http.get(Uri.parse(url)).timeout(_timeout);
-      debugPrint('[Net] <- ${resp.statusCode}  ${resp.body.length > 100 ? resp.body.substring(0,100) : resp.body}');
+      debugPrint('[Net] TCP $host:$port$path');
+      socket = await Socket.connect(host, port)
+          .timeout(_cmdTimeout);
+
+      // HTTP/1.0 para que el servidor cierre la conexión al terminar
+      final request =
+          'GET $path HTTP/1.0\r\n'
+          'Host: $host\r\n'
+          'Connection: close\r\n'
+          '\r\n';
+      socket.write(request);
+      await socket.flush();
+
+      // Leer respuesta completa hasta EOF
+      final buf = StringBuffer();
+      await socket
+          .cast<List<int>>()
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .timeout(_cmdTimeout)
+          .forEach((chunk) => buf.write(chunk));
+
+      final response = buf.toString();
+      debugPrint('[Net] Respuesta: ${response.length > 120 ? response.substring(0, 120) : response}');
+
+      // Extraer código HTTP de la primera línea
+      final firstLine = response.split('\n').first.trim();
+      final parts = firstLine.split(' ');
+      if (parts.length >= 2) {
+        final code = int.tryParse(parts[1]) ?? 0;
+        debugPrint('[Net] HTTP $code');
+        return code > 0 && code < 500;
+      }
+      // Si no hay código HTTP pero hubo respuesta, igual consideramos OK
+      return response.isNotEmpty;
+    } catch (e) {
+      debugPrint('[Net] Error TCP: $e');
+      return false;
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  // ── Para modo URL (https o dominios) usa http.get() normal ──
+  // ngrok/Cloudflare/DDNS usan HTTPS y manejan keep-alive bien.
+  static Future<bool> _httpGet(String url) async {
+    try {
+      debugPrint('[Net] HTTP GET $url');
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Connection': 'close'},
+      ).timeout(_cmdTimeout);
+      debugPrint('[Net] HTTP ${resp.statusCode}');
       return resp.statusCode < 500;
     } catch (e) {
-      debugPrint('[Net] GET error: $e');
+      debugPrint('[Net] Error HTTP: $e');
       return false;
     }
   }
 
-  static Future<bool> _post(String url, String body) async {
-    try {
-      debugPrint('[Net] POST $url  $body');
-      final resp = await http
-          .post(Uri.parse(url),
-              headers: {'Content-Type': 'application/json'},
-              body: body)
-          .timeout(_timeout);
-      debugPrint('[Net] <- ${resp.statusCode}');
-      return resp.statusCode < 500;
-    } catch (e) {
-      debugPrint('[Net] POST error: $e');
-      return false;
+  // ── Envía comando con 1 reintento si falla ──────────────────
+  static Future<bool> _cmd(Dispositivo d, String path) async {
+    bool ok;
+    if (d.modo == ModoConexion.url) {
+      final base = d.urlBase.trim().replaceAll(RegExp(r'/$'), '');
+      ok = await _httpGet('$base$path');
+    } else {
+      ok = await _socketGet(d.ip.trim(), d.puerto, path);
     }
-  }
-
-  // Envía GET con 1 reintento usando siempre la MISMA url
-  static Future<bool> _getConReintento(String url) async {
-    if (await _get(url)) return true;
-    await Future.delayed(const Duration(milliseconds: 500));
-    debugPrint('[Net] Reintentando GET $url');
-    return _get(url);
-  }
-
-  static Future<bool> encender(Dispositivo d) async {
-    debugPrint('[Net] ENCENDER ${d.nombre}  url=${d.urlOn}');
-    if (d.tipo == TipoD.sonoff) {
-      final ok = await _post(d.urlOn,
-          '{"switch":"on","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
-      if (ok) return true;
-      await Future.delayed(const Duration(milliseconds: 500));
-      return _post(d.urlOn,
-          '{"switch":"on","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
+    if (ok) return true;
+    // 1 reintento con la MISMA acción
+    await Future.delayed(const Duration(milliseconds: 600));
+    debugPrint('[Net] Reintentando...');
+    if (d.modo == ModoConexion.url) {
+      final base = d.urlBase.trim().replaceAll(RegExp(r'/$'), '');
+      return _httpGet('$base$path');
     }
-    return _getConReintento(d.urlOn);
+    return _socketGet(d.ip.trim(), d.puerto, path);
   }
 
-  static Future<bool> apagar(Dispositivo d) async {
-    debugPrint('[Net] APAGAR ${d.nombre}  url=${d.urlOff}');
-    if (d.tipo == TipoD.sonoff) {
-      final ok = await _post(d.urlOff,
-          '{"switch":"off","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
-      if (ok) return true;
-      await Future.delayed(const Duration(milliseconds: 500));
-      return _post(d.urlOff,
-          '{"switch":"off","sequence":"${DateTime.now().millisecondsSinceEpoch}"}');
-    }
-    return _getConReintento(d.urlOff);
+  static Future<bool> encender(Dispositivo d) {
+    debugPrint('[Net] ENCENDER ${d.nombre}  path=${d.tipo.pathOn}');
+    return _cmd(d, d.tipo.pathOn);
   }
 
-  // Ping seguro: usa Status en Tasmota (no ejecuta nada), raíz en el resto
+  static Future<bool> apagar(Dispositivo d) {
+    debugPrint('[Net] APAGAR ${d.nombre}  path=${d.tipo.pathOff}');
+    return _cmd(d, d.tipo.pathOff);
+  }
+
+  // ── Ping: no ejecuta ningún comando ─────────────────────────
   static Future<bool> pingRaw({
     required ModoConexion modo,
     required String ip,
@@ -377,13 +411,13 @@ class NetCtrl {
     required String urlBase,
     required TipoD tipo,
   }) async {
-    final base = switch (modo) {
-      ModoConexion.url => urlBase.trim().replaceAll(RegExp(r'/$'), ''),
-      _                => 'http://${ip.trim()}:$puerto',
-    };
-    if (base.isEmpty) return false;
-    final testUrl = tipo == TipoD.tasmota ? '$base/cm?cmnd=Status' : base;
-    return _get(testUrl);
+    if (modo == ModoConexion.url) {
+      return _httpGet(urlBase.trim());
+    }
+    // Para Tasmota: /cm?cmnd=Status (solo consulta, no ejecuta)
+    // Para el resto: GET / (raíz)
+    final path = tipo == TipoD.tasmota ? '/cm?cmnd=Status' : '/';
+    return _socketGet(ip.trim(), puerto, path);
   }
 }
 
@@ -1609,6 +1643,22 @@ class _DispCardState extends State<_DispCard> {
                   style: const TextStyle(fontSize: 11, color: C.t3)),
             ]),
             const SizedBox(width: 10),
+            // Diagnóstico de red
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => DiagnosticoPage(d: d)),
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                    color: C.blueGlow, borderRadius: R.xs),
+                child: const Icon(Icons.wifi_find_rounded,
+                    size: 15, color: C.blue),
+              ),
+            ),
+            const SizedBox(width: 6),
             // Borrar
             GestureDetector(
               onTap: () => showDialog(
@@ -2206,6 +2256,147 @@ class _LogTile extends StatelessWidget {
     return '${t.day}/${t.month}/${t.year} '
         '${t.hour}:${t.minute.toString().padLeft(2, '0')}';
   }
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// PÁGINA: DIAGNÓSTICO DE RED — muestra qué URL se llama y el resultado
+// Acceso: botón en la tarjeta de dispositivo (ícono wifi_find)
+// ════════════════════════════════════════════════════════════════
+class DiagnosticoPage extends StatefulWidget {
+  final Dispositivo d;
+  const DiagnosticoPage({super.key, required this.d});
+  @override
+  State<DiagnosticoPage> createState() => _DiagnosticoPageState();
+}
+
+class _DiagnosticoPageState extends State<DiagnosticoPage> {
+  final List<_DiagLog> _logs = [];
+  bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    setState(() { _logs.clear(); _running = true; });
+
+    final d = widget.d;
+    _log('Dispositivo: ${d.nombre}', null);
+    _log('Firmware:    ${d.tipo.label}', null);
+    _log('Modo:        ${d.modo.label}', null);
+    _log('Conexión:    ${d.conexionDisplay}', null);
+    _log('─────────────────────────────', null);
+    _log('URL ENCENDER: ${d.urlOn}', null);
+    _log('URL APAGAR:   ${d.urlOff}', null);
+    _log('─────────────────────────────', null);
+
+    // Test 1: ping raíz
+    _log('▶ Probando conexión base...', null);
+    try {
+      final url = d.modo == ModoConexion.url
+          ? d.urlBase.trim()
+          : 'http://${d.ip.trim()}:${d.puerto}';
+      final resp = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 5));
+      _log('  GET $url', true);
+      _log('  Respuesta: HTTP ${resp.statusCode}', resp.statusCode < 500);
+    } catch (e) {
+      _log('  ERROR: $e', false);
+      _log('  → Verifica IP/URL y que estés en la misma red', false);
+    }
+
+    _log('─────────────────────────────', null);
+
+    // Test 2: comando ON
+    _log('▶ Probando comando ENCENDER...', null);
+    _log('  ${d.urlOn}', null);
+    final okOn = await NetCtrl.encender(d);
+    _log('  Resultado: ${okOn ? "OK ✓" : "FALLÓ ✗"}', okOn);
+    if (!okOn) _log('  → Sin respuesta. Verifica IP y red.', false);
+
+    _log('─────────────────────────────', null);
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    // Test 3: comando OFF
+    _log('▶ Probando comando APAGAR...', null);
+    _log('  ${d.urlOff}', null);
+    final okOff = await NetCtrl.apagar(d);
+    _log('  Resultado: ${okOff ? "OK ✓" : "FALLÓ ✗"}', okOff);
+    if (!okOff) _log('  → Sin respuesta. Verifica IP y red.', false);
+
+    _log('─────────────────────────────', null);
+    _log('✓ Diagnóstico completo', true);
+    setState(() => _running = false);
+  }
+
+  void _log(String msg, bool? ok) {
+    setState(() => _logs.add(_DiagLog(msg, ok)));
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: C.bg,
+        appBar: AppBar(
+          backgroundColor: C.surface,
+          title: Text('Diagnóstico: ${widget.d.nombre}',
+              style: const TextStyle(
+                  color: C.t1, fontWeight: FontWeight.w700, fontSize: 15)),
+          actions: [
+            if (!_running)
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded, color: C.blue),
+                onPressed: _run,
+                tooltip: 'Repetir diagnóstico',
+              ),
+          ],
+        ),
+        body: Column(children: [
+          if (_running)
+            const LinearProgressIndicator(
+                color: C.blue, backgroundColor: C.border),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(14),
+              itemCount: _logs.length,
+              itemBuilder: (_, i) {
+                final l = _logs[i];
+                Color col = C.t2;
+                if (l.ok == true)  col = C.green;
+                if (l.ok == false) col = C.red;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(l.msg,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: col,
+                          fontFamily: 'monospace')),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _running ? null : _run,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Repetir prueba'),
+              ),
+            ),
+          ),
+        ]),
+      );
+}
+
+class _DiagLog {
+  final String msg;
+  final bool? ok;
+  _DiagLog(this.msg, this.ok);
 }
 
 // ════════════════════════════════════════════════════════════════

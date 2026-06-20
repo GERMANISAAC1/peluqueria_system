@@ -333,7 +333,7 @@ class NetCtrl {
       // Lo único que indica falla real es una excepción (timeout, sin conexión)
       return true;
     } catch (e) {
-      debugPrint('[Net] Error: \$e');
+      debugPrint('[Net] Error: ' + e.toString());
       return false;
     }
   }

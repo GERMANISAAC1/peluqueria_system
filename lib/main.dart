@@ -289,74 +289,34 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.3  — http.get() para todos los modos
-// ────────────────────────────────────────────────────────────────
-//  PROBLEMA CON SOCKET HTTP/1.0:
-//  Web Remote Droid (y otros servidores Android) no cierran la
-//  conexión TCP inmediatamente. El forEach esperaba EOF y se
-//  bloqueaba hasta timeout → el comando llegaba tarde o nunca.
-//
-//  SOLUCIÓN: http.get() con headers Connection:close para TODOS
-//  los modos. El paquete http maneja HTTP/1.1 correctamente y
-//  no requiere EOF para considerar la respuesta completa.
-//
-//  Para Tasmota/Shelly que necesitan cierre rápido: el header
-//  "Connection: close" le indica al servidor que cierre al terminar,
-//  lo que es suficiente para que ejecute el comando.
+// CONTROLADOR DE RED  v4.3
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 6);
 
   static Future<bool> _get(String url) async {
     try {
-      debugPrint('[Net] GET ' + url);
       final resp = await http.get(
         Uri.parse(url),
-        headers: {
-          'Connection': 'close',
-          'Cache-Control': 'no-cache',
-        },
+        headers: {'Connection': 'close', 'Cache-Control': 'no-cache'},
       ).timeout(_timeout);
-      debugPrint('[Net] <- HTTP ' + resp.statusCode.toString());
-      // Cualquier respuesta HTTP = el servidor recibió el comando = OK
-      // Solo falla si hay excepción (timeout, sin conexión, IP incorrecta)
+      // Cualquier respuesta = comando recibido. Solo falla si hay excepcion.
       return true;
     } catch (e) {
-      debugPrint('[Net] Error: ' + e.toString());
-      return false;
-    }
-  },
-      ).timeout(_timeout);
-      debugPrint('[Net] <- HTTP ${resp.statusCode}  body: ${resp.body.length > 80 ? resp.body.substring(0, 80) : resp.body}');
-      // Cualquier respuesta del servidor = comando recibido = OK
-      // Web Remote Droid puede devolver 200, 404 o cualquier código
-      // Lo único que indica falla real es una excepción (timeout, sin conexión)
-      return true;
-    } catch (e) {
-      debugPrint('[Net] Error: ' + e.toString());
       return false;
     }
   }
 
-  // Envía comando con 1 reintento si falla
   static Future<bool> _cmd(String url) async {
     if (await _get(url)) return true;
     await Future.delayed(const Duration(milliseconds: 500));
-    debugPrint('[Net] Reintentando...');
     return _get(url);
   }
 
-  static Future<bool> encender(Dispositivo d) {
-    debugPrint('[Net] ENCENDER ${d.nombre}  url=${d.urlOn}');
-    return _cmd(d.urlOn);
-  }
+  static Future<bool> encender(Dispositivo d) => _cmd(d.urlOn);
 
-  static Future<bool> apagar(Dispositivo d) {
-    debugPrint('[Net] APAGAR   ${d.nombre}  url=${d.urlOff}');
-    return _cmd(d.urlOff);
-  }
+  static Future<bool> apagar(Dispositivo d) => _cmd(d.urlOff);
 
-  // Ping: GET a la raíz, no ejecuta ningún comando
   static Future<bool> pingRaw({
     required ModoConexion modo,
     required String ip,
@@ -364,15 +324,13 @@ class NetCtrl {
     required String urlBase,
     required TipoD tipo,
   }) async {
-    final url = switch (modo) {
-      ModoConexion.url => urlBase.trim(),
-      _                => 'http://${ip.trim()}:$puerto/',
-    };
+    final url = modo == ModoConexion.url
+        ? urlBase.trim()
+        : 'http://${ip.trim()}:$puerto/';
     if (url.isEmpty) return false;
     return _get(url);
   }
 }
-
 // ════════════════════════════════════════════════════════════════
 // REPOSITORIO
 // ════════════════════════════════════════════════════════════════

@@ -19,6 +19,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -289,27 +290,48 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.3
+// CONTROLADOR DE RED  v4.4
+// ────────────────────────────────────────────────────────────────
+// USA HttpClient nativo de Dart (dart:io) en lugar del paquete http.
+// Motivo: en APK release el paquete http tiene timeout silencioso
+// en redes hotspot. HttpClient nativo bypasea esa restricción,
+// desactiva la verificación de certificados para HTTP local,
+// y cierra la conexión explícitamente después de cada request.
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  static const _timeout = Duration(seconds: 6);
+  static const _timeout = Duration(seconds: 8);
 
   static Future<bool> _get(String url) async {
+    HttpClient? client;
     try {
-      final resp = await http.get(
-        Uri.parse(url),
-        headers: {'Connection': 'close', 'Cache-Control': 'no-cache'},
-      ).timeout(_timeout);
-      // Cualquier respuesta = comando recibido. Solo falla si hay excepcion.
+      client = HttpClient();
+      // Desactivar verificación SSL para IPs locales
+      client.badCertificateCallback = (cert, host, port) => true;
+      client.connectionTimeout = _timeout;
+
+      final uri = Uri.parse(url);
+      final request = await client
+          .getUrl(uri)
+          .timeout(_timeout);
+      request.headers.set('Connection', 'close');
+      request.headers.set('Cache-Control', 'no-cache');
+
+      final response = await request.close().timeout(_timeout);
+      // Consumir el body para liberar la conexión
+      await response.drain<void>();
+
+      // Cualquier respuesta = OK. Solo falla con excepción.
       return true;
     } catch (e) {
       return false;
+    } finally {
+      client?.close(force: true);
     }
   }
 
   static Future<bool> _cmd(String url) async {
     if (await _get(url)) return true;
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 600));
     return _get(url);
   }
 
@@ -1637,6 +1659,12 @@ class _AddFormState extends State<_AddForm> {
   }
 
   // Muestra la URL que se usará en tiempo real
+  String get _ipValida {
+    final ip = _cIp.text.trim();
+    if (ip.isEmpty || ip == '0.0.0.0') return false.toString();
+    return true.toString();
+  }
+
   String get _urlPreview {
     try {
       if (_modo == ModoConexion.url) {
@@ -1883,8 +1911,28 @@ class _AddFormState extends State<_AddForm> {
                 ),
               ] else ...[
                 _Lbl(_modo == ModoConexion.lan
-                    ? 'IP local (192.168.x.x)'
+                    ? 'IP local del dispositivo (ej: 192.168.1.45)'
                     : 'IP del dispositivo'),
+                // Aviso: cómo encontrar la IP
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: C.orangeGlow,
+                    borderRadius: R.xs,
+                    border: Border.all(color: C.orange.withOpacity(0.4)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.info_outline_rounded, size: 14, color: C.orange),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(
+                      _tipo == TipoD.celular
+                          ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra (NO uses 0.0.0.0)'
+                          : 'Busca la IP en la interfaz web del dispositivo o en tu router. NO uses 0.0.0.0',
+                      style: const TextStyle(fontSize: 10, color: C.orange),
+                    )),
+                  ]),
+                ),
                 TextFormField(
                   controller: _cIp,
                   style: const TextStyle(color: C.t1),
@@ -1895,10 +1943,12 @@ class _AddFormState extends State<_AddForm> {
                       InputDecoration(hintText: _modo.hint),
                   onChanged: (_) =>
                       setState(() => _pingOk = null),
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty
-                          ? 'IP requerida'
-                          : null,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'IP requerida';
+                    if (v.trim() == '0.0.0.0') return 'IP inválida. Usa la IP real de tu red WiFi (ej: 192.168.1.45)';
+                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') return 'No uses localhost. Usa la IP WiFi del dispositivo';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
                 const _Lbl('Puerto'),

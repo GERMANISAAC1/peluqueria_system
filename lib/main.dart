@@ -1135,6 +1135,7 @@ class _EmptyControl extends StatelessWidget {
           ),
         ),
       );
+}
 
 // ════════════════════════════════════════════════════════════════
 // PÁGINA: HABITACIONES
@@ -2348,7 +2349,7 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES
+// WIDGETS REUTILIZABLES - CORREGIDOS
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;
@@ -2387,11 +2388,13 @@ class _IconBtn extends StatelessWidget {
   final Color color;
   final String tooltip;
   final VoidCallback onTap;
-  const _IconBtn(
-      {required this.icon,
-      required this.color,
-      required this.tooltip,
-      required this.onTap});
+  const _IconBtn({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+  
   @override
   Widget build(BuildContext context) => Tooltip(
         message: tooltip,
@@ -2414,8 +2417,12 @@ class _IconBtn extends StatelessWidget {
 class _DeleteDialog extends StatelessWidget {
   final String nombre;
   final VoidCallback onConfirm;
-  const _DeleteDialog(
-      {required this.nombre, required this.onConfirm});
+  
+  const _DeleteDialog({
+    required this.nombre,
+    required this.onConfirm,
+  });
+  
   @override
   Widget build(BuildContext context) => AlertDialog(
         backgroundColor: C.card,
@@ -2433,8 +2440,7 @@ class _DeleteDialog extends StatelessWidget {
           ),
           TextButton(
             onPressed: onConfirm,
-            style:
-                TextButton.styleFrom(foregroundColor: C.red),
+            style: TextButton.styleFrom(foregroundColor: C.red),
             child: const Text('Eliminar'),
           ),
         ],

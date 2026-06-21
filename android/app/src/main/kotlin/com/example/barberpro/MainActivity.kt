@@ -1,4 +1,4 @@
-package com.example.gym
+package com.example.domotica
 
 import android.os.Handler
 import android.os.Looper

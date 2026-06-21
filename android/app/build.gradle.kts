@@ -5,12 +5,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.barberpro"
+    namespace = "com.example.domotica"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
-        applicationId = "com.example.barberpro"
+        applicationId = "com.example.domotica"
         minSdk = 21
         targetSdk = 36
         versionCode = 1

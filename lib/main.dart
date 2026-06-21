@@ -290,19 +290,18 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.5  — Doble intento: HttpClient + http.get
+// CONTROLADOR DE RED  v5.0
 // ────────────────────────────────────────────────────────────────
-// Estrategia:
-//  1. Intenta con HttpClient nativo (dart:io) — más bajo nivel
-//  2. Si falla, intenta con http.get() del paquete http
-//  3. Si ambos fallan, reintenta con HttpClient
-// Esto cubre todos los escenarios: hotspot, LAN, datos móviles.
-// Cualquier respuesta del servidor = éxito (el comando llegó).
+// Estrategia dual: HttpClient nativo primero, http.get como fallback.
+// - HttpClient: conexión TCP directa, funciona en hotspot
+// - http.get: fallback para HTTPS y túneles
+// - Cualquier respuesta del servidor = éxito (comando recibido)
+// - Solo falla si hay excepción (timeout, sin conexión)
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 8);
 
-  // Intento 1: HttpClient nativo
+  // Método 1: HttpClient nativo dart:io
   static Future<bool> _getNativo(String url) async {
     HttpClient? client;
     try {
@@ -311,6 +310,7 @@ class NetCtrl {
       client.connectionTimeout = _timeout;
       final req = await client.getUrl(Uri.parse(url)).timeout(_timeout);
       req.headers.set(HttpHeaders.connectionHeader, 'close');
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
       final res = await req.close().timeout(_timeout);
       await res.drain<void>();
       return true;
@@ -321,7 +321,7 @@ class NetCtrl {
     }
   }
 
-  // Intento 2: paquete http
+  // Método 2: paquete http (fallback)
   static Future<bool> _getPaquete(String url) async {
     try {
       await http.get(
@@ -334,13 +334,10 @@ class NetCtrl {
     }
   }
 
-  // Envía comando con ambos métodos en cascada
+  // Envía comando: intenta nativo → paquete → reintento nativo
   static Future<bool> _cmd(String url) async {
-    // Intento 1: HttpClient
     if (await _getNativo(url)) return true;
-    // Intento 2: http.get
     if (await _getPaquete(url)) return true;
-    // Intento 3: reintento HttpClient
     await Future.delayed(const Duration(milliseconds: 500));
     return _getNativo(url);
   }
@@ -441,9 +438,14 @@ class DispositivosNotifier extends ChangeNotifier {
       } else {
         // Usamos estadoAntes (no d.encendido) por si notifyListeners()
         // fue llamado entre medio por otra ruta
-        ok = estadoAntes
-            ? await NetCtrl.apagar(d)
-            : await NetCtrl.encender(d);
+        // Para todos los tipos: usar estadoAntes para decidir
+      // Si estadoAntes=true → apagar, si false → encender
+      // El estado se actualiza SOLO si el comando tiene éxito
+      if (estadoAntes) {
+        ok = await NetCtrl.apagar(d);
+      } else {
+        ok = await NetCtrl.encender(d);
+      }
       }
 
       debugPrint('[Toggle] resultado=$ok');

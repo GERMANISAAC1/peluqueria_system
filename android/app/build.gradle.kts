@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.gym"
+    namespace = "com.example.barberpro"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 

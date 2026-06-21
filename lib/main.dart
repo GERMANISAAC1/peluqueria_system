@@ -290,52 +290,63 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.4
+// CONTROLADOR DE RED  v4.5  — Doble intento: HttpClient + http.get
 // ────────────────────────────────────────────────────────────────
-// USA HttpClient nativo de Dart (dart:io) en lugar del paquete http.
-// Motivo: en APK release el paquete http tiene timeout silencioso
-// en redes hotspot. HttpClient nativo bypasea esa restricción,
-// desactiva la verificación de certificados para HTTP local,
-// y cierra la conexión explícitamente después de cada request.
+// Estrategia:
+//  1. Intenta con HttpClient nativo (dart:io) — más bajo nivel
+//  2. Si falla, intenta con http.get() del paquete http
+//  3. Si ambos fallan, reintenta con HttpClient
+// Esto cubre todos los escenarios: hotspot, LAN, datos móviles.
+// Cualquier respuesta del servidor = éxito (el comando llegó).
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 8);
 
-  static Future<bool> _get(String url) async {
+  // Intento 1: HttpClient nativo
+  static Future<bool> _getNativo(String url) async {
     HttpClient? client;
     try {
       client = HttpClient();
-      // Desactivar verificación SSL para IPs locales
       client.badCertificateCallback = (cert, host, port) => true;
       client.connectionTimeout = _timeout;
-
-      final uri = Uri.parse(url);
-      final request = await client.getUrl(uri).timeout(_timeout);
-      request.headers.set('Connection', 'close');
-      request.headers.set('Cache-Control', 'no-cache');
-
-      final response = await request.close().timeout(_timeout);
-      // Consumir el body para liberar la conexión
-      await response.drain<void>();
-
-      // Cualquier respuesta = OK. Solo falla con excepción.
+      final req = await client.getUrl(Uri.parse(url)).timeout(_timeout);
+      req.headers.set(HttpHeaders.connectionHeader, 'close');
+      final res = await req.close().timeout(_timeout);
+      await res.drain<void>();
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     } finally {
       client?.close(force: true);
     }
   }
 
+  // Intento 2: paquete http
+  static Future<bool> _getPaquete(String url) async {
+    try {
+      await http.get(
+        Uri.parse(url),
+        headers: {'Connection': 'close'},
+      ).timeout(_timeout);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Envía comando con ambos métodos en cascada
   static Future<bool> _cmd(String url) async {
-    if (await _get(url)) return true;
-    await Future.delayed(const Duration(milliseconds: 600));
-    return _get(url);
+    // Intento 1: HttpClient
+    if (await _getNativo(url)) return true;
+    // Intento 2: http.get
+    if (await _getPaquete(url)) return true;
+    // Intento 3: reintento HttpClient
+    await Future.delayed(const Duration(milliseconds: 500));
+    return _getNativo(url);
   }
 
   static Future<bool> encender(Dispositivo d) => _cmd(d.urlOn);
-
-  static Future<bool> apagar(Dispositivo d) => _cmd(d.urlOff);
+  static Future<bool> apagar(Dispositivo d)   => _cmd(d.urlOff);
 
   static Future<bool> pingRaw({
     required ModoConexion modo,
@@ -348,7 +359,8 @@ class NetCtrl {
         ? urlBase.trim()
         : 'http://${ip.trim()}:$puerto/';
     if (url.isEmpty) return false;
-    return _get(url);
+    if (await _getNativo(url)) return true;
+    return _getPaquete(url);
   }
 }
 // ════════════════════════════════════════════════════════════════
@@ -1656,6 +1668,13 @@ class _AddFormState extends State<_AddForm> {
     super.dispose();
   }
 
+  // Muestra la URL que se usará en tiempo real
+  String get _ipValida {
+    final ip = _cIp.text.trim();
+    if (ip.isEmpty || ip == '0.0.0.0') return false.toString();
+    return true.toString();
+  }
+
   String get _urlPreview {
     try {
       if (_modo == ModoConexion.url) {
@@ -1901,7 +1920,9 @@ class _AddFormState extends State<_AddForm> {
                   },
                 ),
               ] else ...[
-                const _Lbl('IP del dispositivo'),
+                _Lbl(_modo == ModoConexion.lan
+                    ? 'IP local del dispositivo (ej: 192.168.1.45)'
+                    : 'IP del dispositivo'),
                 // Aviso: cómo encontrar la IP
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -1916,8 +1937,8 @@ class _AddFormState extends State<_AddForm> {
                     const SizedBox(width: 8),
                     Expanded(child: Text(
                       _tipo == TipoD.celular
-                          ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra'
-                          : 'Busca la IP en la interfaz web del dispositivo o en tu router',
+                          ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra (NO uses 0.0.0.0)'
+                          : 'Busca la IP en la interfaz web del dispositivo o en tu router. NO uses 0.0.0.0',
                       style: const TextStyle(fontSize: 10, color: C.orange),
                     )),
                   ]),
@@ -1934,8 +1955,8 @@ class _AddFormState extends State<_AddForm> {
                       setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'IP requerida';
-                    if (v.trim() == '0.0.0.0') return 'IP inválida';
-                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') return 'No uses localhost';
+                    if (v.trim() == '0.0.0.0') return 'IP inválida. Usa la IP real de tu red WiFi (ej: 192.168.1.45)';
+                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') return 'No uses localhost. Usa la IP WiFi del dispositivo';
                     return null;
                   },
                 ),
@@ -2349,7 +2370,7 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES - CORREGIDOS
+// WIDGETS REUTILIZABLES
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;
@@ -2388,13 +2409,11 @@ class _IconBtn extends StatelessWidget {
   final Color color;
   final String tooltip;
   final VoidCallback onTap;
-  const _IconBtn({
-    required this.icon,
-    required this.color,
-    required this.tooltip,
-    required this.onTap,
-  });
-  
+  const _IconBtn(
+      {required this.icon,
+      required this.color,
+      required this.tooltip,
+      required this.onTap});
   @override
   Widget build(BuildContext context) => Tooltip(
         message: tooltip,
@@ -2417,12 +2436,8 @@ class _IconBtn extends StatelessWidget {
 class _DeleteDialog extends StatelessWidget {
   final String nombre;
   final VoidCallback onConfirm;
-  
-  const _DeleteDialog({
-    required this.nombre,
-    required this.onConfirm,
-  });
-  
+  const _DeleteDialog(
+      {required this.nombre, required this.onConfirm});
   @override
   Widget build(BuildContext context) => AlertDialog(
         backgroundColor: C.card,
@@ -2440,7 +2455,8 @@ class _DeleteDialog extends StatelessWidget {
           ),
           TextButton(
             onPressed: onConfirm,
-            style: TextButton.styleFrom(foregroundColor: C.red),
+            style:
+                TextButton.styleFrom(foregroundColor: C.red),
             child: const Text('Eliminar'),
           ),
         ],

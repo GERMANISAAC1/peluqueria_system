@@ -2254,52 +2254,70 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     setState(() { _logs.clear(); _running = true; });
 
     final d = widget.d;
-    _log('Dispositivo: ${d.nombre}', null);
-    _log('Firmware:    ${d.tipo.label}', null);
-    _log('Modo:        ${d.modo.label}', null);
-    _log('Conexión:    ${d.conexionDisplay}', null);
+    _log('Dispositivo: ' + d.nombre, null);
+    _log('Firmware:    ' + d.tipo.label, null);
+    _log('Modo:        ' + d.modo.label, null);
+    _log('Conexion:    ' + d.conexionDisplay, null);
     _log('─────────────────────────────', null);
-    _log('URL ENCENDER: ${d.urlOn}', null);
-    _log('URL APAGAR:   ${d.urlOff}', null);
+    _log('URL ON:  ' + d.urlOn, null);
+    _log('URL OFF: ' + d.urlOff, null);
     _log('─────────────────────────────', null);
 
-    // Test 1: ping raíz
-    _log('▶ Probando conexión base...', null);
+    // Test 1: ping con ambos métodos
+    _log('▶ Probando conexion base...', null);
+    final baseUrl = d.modo == ModoConexion.url
+        ? d.urlBase.trim()
+        : 'http://' + d.ip.trim() + ':' + d.puerto.toString();
+    
+    bool baseOk = false;
+    // Intento con HttpClient nativo
     try {
-      final url = d.modo == ModoConexion.url
-          ? d.urlBase.trim()
-          : 'http://${d.ip.trim()}:${d.puerto}';
-      final resp = await http
-          .get(Uri.parse(url))
+      final client = HttpClient();
+      client.badCertificateCallback = (cert, host, port) => true;
+      client.connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(Uri.parse(baseUrl))
           .timeout(const Duration(seconds: 5));
-      _log('  GET $url', true);
-      _log('  Respuesta: HTTP ${resp.statusCode}', resp.statusCode < 500);
-    } catch (e) {
-      _log('  ERROR: $e', false);
-      _log('  → Verifica IP/URL y que estés en la misma red', false);
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      await res.drain<void>();
+      client.close(force: true);
+      baseOk = true;
+    } catch (_) {}
+    
+    // Intento con http.get si falló el nativo
+    if (!baseOk) {
+      try {
+        await http.get(Uri.parse(baseUrl))
+            .timeout(const Duration(seconds: 5));
+        baseOk = true;
+      } catch (e) {
+        _log('  ERROR: ' + e.toString(), false);
+      }
     }
 
+    _log('  Conexion base: ' + (baseOk ? 'OK ✓' : 'FALLO ✗'), baseOk);
     _log('─────────────────────────────', null);
 
-    // Test 2: comando ON
-    _log('▶ Probando comando ENCENDER...', null);
-    _log('  ${d.urlOn}', null);
+    // Test 2: ENCENDER
+    _log('▶ Probando ENCENDER...', null);
+    _log('  ' + d.urlOn, null);
     final okOn = await NetCtrl.encender(d);
-    _log('  Resultado: ${okOn ? "OK ✓" : "FALLÓ ✗"}', okOn);
-    if (!okOn) _log('  → Sin respuesta. Verifica IP y red.', false);
+    _log('  Resultado: ' + (okOn ? 'OK ✓ (linterna encendida)' : 'FALLO ✗'), okOn);
 
     _log('─────────────────────────────', null);
-    await Future.delayed(const Duration(milliseconds: 800));
+    await Future.delayed(const Duration(milliseconds: 1000));
 
-    // Test 3: comando OFF
-    _log('▶ Probando comando APAGAR...', null);
-    _log('  ${d.urlOff}', null);
+    // Test 3: APAGAR
+    _log('▶ Probando APAGAR...', null);
+    _log('  ' + d.urlOff, null);
     final okOff = await NetCtrl.apagar(d);
-    _log('  Resultado: ${okOff ? "OK ✓" : "FALLÓ ✗"}', okOff);
-    if (!okOff) _log('  → Sin respuesta. Verifica IP y red.', false);
+    _log('  Resultado: ' + (okOff ? 'OK ✓ (linterna apagada)' : 'FALLO ✗'), okOff);
 
     _log('─────────────────────────────', null);
-    _log('✓ Diagnóstico completo', true);
+    if (okOn && okOff) {
+      _log('✓ TODO OK — encender y apagar funcionan', true);
+    } else {
+      _log('✗ Revisa la conexion y la IP', false);
+    }
     setState(() => _running = false);
   }
 

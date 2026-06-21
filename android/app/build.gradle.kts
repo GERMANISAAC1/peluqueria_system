@@ -10,7 +10,7 @@ android {
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
-        applicationId = "com.example.gym"
+        applicationId = "com.example.barberpro"
         minSdk = 21
         targetSdk = 36
         versionCode = 1

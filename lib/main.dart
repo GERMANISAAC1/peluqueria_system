@@ -1905,7 +1905,8 @@ class _AddFormState extends State<_AddForm> {
                                 ? Icons.check_circle_rounded
                                 : Icons.error_rounded,
                         size: 16,
-                        color: _pingOk == null                            ? C.t2
+                        color: _pingOk == null
+                            ? C.t2
                             : _pingOk!
                                 ? C.green
                                 : C.red),
@@ -2232,7 +2233,7 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES - CORREGIDOS
+// WIDGETS REUTILIZABLES - CORREGIDOS FINAL
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;

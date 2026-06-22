@@ -6,20 +6,10 @@
 // ║  1. LAN   — IP privada 192.168.x.x  (misma WiFi)               ║
 // ║  2. MÓVIL — IP:puerto directa desde cualquier red               ║
 // ║  3. URL   — URL completa (ngrok, Cloudflare Tunnel, DDNS)       ║
-// ╠══════════════════════════════════════════════════════════════════╣
-// ║  pubspec.yaml:                                                  ║
-// ║    shared_preferences: ^2.3.0                                   ║
-// ║    http: ^1.2.0                                                 ║
-// ║                                                                 ║
-// ║  AndroidManifest.xml — dentro de <application>:                 ║
-// ║    android:usesCleartextTraffic="true"                          ║
-// ║  Dentro de <manifest>:                                          ║
-// ║    <uses-permission android:name="android.permission.INTERNET"/>║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -127,18 +117,17 @@ extension TipoDX on TipoD {
         TipoD.otro    => C.t2,
       };
   String get pathOn => switch (this) {
-        // Tasmota: + (URL form-encoded), NO %20
         TipoD.tasmota => '/cm?cmnd=Power+On',
         TipoD.sonoff  => '/control?cmd=on',
         TipoD.shelly  => '/relay/0?turn=on',
-        TipoD.celular => '/flash/on',  // Web Remote Droid usa /flash/on
+        TipoD.celular => '/flash/on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
         TipoD.sonoff  => '/control?cmd=off',
         TipoD.shelly  => '/relay/0?turn=off',
-        TipoD.celular => '/flash/off', // Web Remote Droid usa /flash/off
+        TipoD.celular => '/flash/off',
         TipoD.otro    => '/off',
       };
   static TipoD fromStr(String s) => TipoD.values
@@ -290,61 +279,81 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.4  CON DEBUG
+// CONTROLADOR DE RED  v4.5 - CORREGIDO PARA CELULAR
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  static const _timeout = Duration(seconds: 8);
+  static const _timeout = Duration(seconds: 5);
+  static const _maxRetries = 2;
 
   static Future<bool> _get(String url) async {
-    HttpClient? client;
-    try {
-      print('🌐 [DEBUG] Intentando conectar a: $url');
-
-      client = HttpClient();
-      client.badCertificateCallback = (cert, host, port) => true;
-      client.connectionTimeout = _timeout;
-
-      final uri = Uri.parse(url);
-      final request = await client.getUrl(uri).timeout(_timeout);
-      request.headers.set('Connection', 'close');
-      request.headers.set('Cache-Control', 'no-cache');
-
-      final response = await request.close().timeout(_timeout);
-      await response.drain<void>();
-
-      print('✅ [DEBUG] Conexión exitosa a: $url');
-      print('   Status Code: ${response.statusCode}');
-      return true;
-    } catch (e) {
-      print('❌ [DEBUG] ERROR conectando a: $url');
-      print('   Error: $e');
-      print('   Tipo de error: ${e.runtimeType}');
-      return false;
-    } finally {
-      client?.close(force: true);
+    for (int i = 0; i < _maxRetries; i++) {
+      try {
+        print('📡 GET (${i+1}/$_maxRetries): $url');
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(_timeout);
+        
+        print('📡 Respuesta: ${response.statusCode} - ${response.body}');
+        
+        // Aceptamos cualquier respuesta exitosa
+        if (response.statusCode >= 200 && response.statusCode < 500) {
+          return true;
+        }
+        return false;
+      } catch (e) {
+        print('❌ Error GET: $e');
+        if (i < _maxRetries - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
     }
+    return false;
+  }
+
+  static Future<bool> _post(String url) async {
+    for (int i = 0; i < _maxRetries; i++) {
+      try {
+        print('📡 POST (${i+1}/$_maxRetries): $url');
+        final response = await http
+            .post(Uri.parse(url))
+            .timeout(_timeout);
+        
+        print('📡 Respuesta POST: ${response.statusCode} - ${response.body}');
+        
+        if (response.statusCode >= 200 && response.statusCode < 500) {
+          return true;
+        }
+        return false;
+      } catch (e) {
+        print('❌ Error POST: $e');
+        if (i < _maxRetries - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+    return false;
   }
 
   static Future<bool> _cmd(String url) async {
-    print('🔧 [DEBUG] Ejecutando comando: $url');
-    if (await _get(url)) {
-      print('✅ [DEBUG] Comando exitoso: $url');
-      return true;
-    }
-    print('🔄 [DEBUG] Reintentando comando (delay 600ms): $url');
-    await Future.delayed(const Duration(milliseconds: 600));
+    // Primero GET
+    if (await _get(url)) return true;
+    
+    // Si GET falla, intentar POST
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (await _post(url)) return true;
+    
+    // Último intento
+    await Future.delayed(const Duration(milliseconds: 500));
     return _get(url);
   }
 
-  static Future<bool> encender(Dispositivo d) {
-    print('🔛 [DEBUG] ENCENDER llamado para: ${d.nombre}');
-    print('   URL: ${d.urlOn}');
+  static Future<bool> encender(Dispositivo d) async {
+    print('🔌 ENCENDER: ${d.urlOn}');
     return _cmd(d.urlOn);
   }
 
-  static Future<bool> apagar(Dispositivo d) {
-    print('🔴 [DEBUG] APAGAR llamado para: ${d.nombre}');
-    print('   URL: ${d.urlOff}');
+  static Future<bool> apagar(Dispositivo d) async {
+    print('🔌 APAGAR: ${d.urlOff}');
     return _cmd(d.urlOff);
   }
 
@@ -359,7 +368,6 @@ class NetCtrl {
         ? urlBase.trim()
         : 'http://${ip.trim()}:$puerto/';
     if (url.isEmpty) return false;
-    print('🏓 [DEBUG] Ping a: $url');
     return _get(url);
   }
 }
@@ -430,7 +438,7 @@ class DispositivosNotifier extends ChangeNotifier {
       final d = _items[idx];
 
       final estadoAntes = d.encendido;
-      print('🔄 [Toggle] id=$id  estadoAntes=$estadoAntes  → mandando ${estadoAntes ? "APAGAR" : "ENCENDER"}');
+      debugPrint('[Toggle] id=$id  estadoAntes=$estadoAntes');
 
       bool ok;
       if (_demo) {
@@ -442,7 +450,7 @@ class DispositivosNotifier extends ChangeNotifier {
             : await NetCtrl.encender(d);
       }
 
-      print('🔄 [Toggle] resultado=$ok');
+      debugPrint('[Toggle] resultado=$ok');
 
       if (ok) {
         _items[idx] = d.copyWith(
@@ -533,15 +541,14 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:                   Colors.transparent,
-    statusBarIconBrightness:          Brightness.light,
-    systemNavigationBarColor:         Color(0xFF070B14),
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Color(0xFF070B14),
     systemNavigationBarIconBrightness: Brightness.light,
   ));
   final prefs = await SharedPreferences.getInstance();
   runApp(DomoticaApp(
-      notifier:
-          DispositivosNotifier(DispositivoRepo.cargar(prefs), prefs)));
+      notifier: DispositivosNotifier(DispositivoRepo.cargar(prefs), prefs)));
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -582,7 +589,8 @@ class DomoticaApp extends StatelessWidget {
             brightness: Brightness.dark,
             scaffoldBackgroundColor: C.bg,
             colorScheme: const ColorScheme.dark(
-              primary: C.blue, secondary: C.green,
+              primary: C.blue,
+              secondary: C.green,
               surface: C.surface,
               onSurface: C.t1,
               onPrimary: Colors.white,
@@ -664,9 +672,9 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     const items = [
       (Icons.power_settings_new_rounded, 'Control'),
-      (Icons.home_rounded,               'Habitaciones'),
-      (Icons.devices_rounded,            'Dispositivos'),
-      (Icons.history_rounded,            'Historial'),
+      (Icons.home_rounded, 'Habitaciones'),
+      (Icons.devices_rounded, 'Dispositivos'),
+      (Icons.history_rounded, 'Historial'),
     ];
     return Container(
       decoration: const BoxDecoration(
@@ -741,9 +749,9 @@ class _ControlPageState extends State<ControlPage> {
     return AnimatedBuilder(
       animation: widget.notifier,
       builder: (_, __) {
-        final n    = widget.notifier;
-        final enc  = n.encendidos;
-        final tot  = n.items.length;
+        final n = widget.notifier;
+        final enc = n.encendidos;
+        final tot = n.items.length;
 
         return Scaffold(
           backgroundColor: C.bg,
@@ -754,8 +762,7 @@ class _ControlPageState extends State<ControlPage> {
                 expandedHeight: 130,
                 backgroundColor: C.surface,
                 flexibleSpace: FlexibleSpaceBar(
-                  background: _ControlHeader(
-                      enc: enc, total: tot, demo: n.demo),
+                  background: _ControlHeader(enc: enc, total: tot, demo: n.demo),
                 ),
                 title: Row(children: [
                   const Text('Control',
@@ -804,8 +811,7 @@ class _ControlPageState extends State<ControlPage> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       child: Icon(Icons.science_rounded,
-                          size: 20,
-                          color: n.demo ? C.orange : C.t3),
+                          size: 20, color: n.demo ? C.orange : C.t3),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -815,16 +821,15 @@ class _ControlPageState extends State<ControlPage> {
                 const SliverFillRemaining(child: _EmptyControl())
               else
                 SliverPadding(
-                  padding:
-                      const EdgeInsets.fromLTRB(14, 14, 14, 100),
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 100),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (_, i) {
                         final d = n.items[i];
                         return _ControlCard(
                           key: ValueKey(d.id),
-                          d:        d,
-                          busy:     _busy.contains(d.id),
+                          d: d,
+                          busy: _busy.contains(d.id),
                           onToggle: () => _toggle(d.id),
                         );
                       },
@@ -840,7 +845,6 @@ class _ControlPageState extends State<ControlPage> {
   }
 }
 
-// ── Header compacto ──────────────────────────────────────────────
 class _ControlHeader extends StatelessWidget {
   final int enc, total;
   final bool demo;
@@ -881,8 +885,7 @@ class _ControlHeader extends StatelessWidget {
                       value: v,
                       minHeight: 6,
                       backgroundColor: C.border,
-                      valueColor:
-                          const AlwaysStoppedAnimation(C.blue),
+                      valueColor: const AlwaysStoppedAnimation(C.blue),
                     ),
                   ),
                 ),
@@ -917,17 +920,12 @@ class _PercentRing extends StatelessWidget {
           Text(
             '${total == 0 ? 0 : (enc * 100 ~/ total)}%',
             style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: C.t1),
+                fontSize: 12, fontWeight: FontWeight.w700, color: C.t1),
           ),
         ]),
       );
 }
 
-// ════════════════════════════════════════════════════════════════
-// TARJETA DE CONTROL
-// ════════════════════════════════════════════════════════════════
 class _ControlCard extends StatelessWidget {
   final Dispositivo d;
   final bool busy;
@@ -942,12 +940,8 @@ class _ControlCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final col = d.encendido ? d.tipo.color : C.t3;
-    final bgCol = d.encendido
-        ? d.tipo.color.withOpacity(0.10)
-        : C.card;
-    final borderCol = d.encendido
-        ? d.tipo.color.withOpacity(0.45)
-        : C.border;
+    final bgCol = d.encendido ? d.tipo.color.withOpacity(0.10) : C.card;
+    final borderCol = d.encendido ? d.tipo.color.withOpacity(0.45) : C.border;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
@@ -955,28 +949,23 @@ class _ControlCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: bgCol,
         borderRadius: R.sm,
-        border: Border.all(
-            color: borderCol, width: d.encendido ? 1.5 : 0.5),
+        border: Border.all(color: borderCol, width: d.encendido ? 1.5 : 0.5),
       ),
       child: InkWell(
         onTap: busy ? null : onToggle,
         borderRadius: R.sm,
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 280),
               width: 50,
               height: 50,
               decoration: BoxDecoration(
-                color: d.encendido
-                    ? d.tipo.color.withOpacity(0.18)
-                    : C.surface,
+                color: d.encendido ? d.tipo.color.withOpacity(0.18) : C.surface,
                 borderRadius: R.sm,
               ),
-              child: Icon(d.cat.icon,
-                  size: 26, color: col),
+              child: Icon(d.cat.icon, size: 26, color: col),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1003,8 +992,7 @@ class _ControlCard extends StatelessWidget {
                     Expanded(
                       child: Text(d.conexionDisplay,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 10, color: C.t3)),
+                          style: const TextStyle(fontSize: 10, color: C.t3)),
                     ),
                   ]),
                 ],
@@ -1013,9 +1001,9 @@ class _ControlCard extends StatelessWidget {
             const SizedBox(width: 12),
             _PowerButton(
               encendido: d.encendido,
-              busy:      busy,
-              color:     d.tipo.color,
-              onTap:     busy ? null : onToggle,
+              busy: busy,
+              color: d.tipo.color,
+              onTap: busy ? null : onToggle,
             ),
           ]),
         ),
@@ -1024,7 +1012,6 @@ class _ControlCard extends StatelessWidget {
   }
 }
 
-// ── Botón de encendido/apagado ───────────────────────────────────
 class _PowerButton extends StatelessWidget {
   final bool encendido, busy;
   final Color color;
@@ -1046,10 +1033,7 @@ class _PowerButton extends StatelessWidget {
           child: SizedBox(
             width: 28,
             height: 28,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: color,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 3, color: color),
           ),
         ),
       );
@@ -1063,15 +1047,9 @@ class _PowerButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: encendido ? color : C.surface,
           shape: BoxShape.circle,
-          border: Border.all(
-              color: encendido ? color : C.border, width: 1.5),
+          border: Border.all(color: encendido ? color : C.border, width: 1.5),
           boxShadow: encendido
-              ? [
-                  BoxShadow(
-                      color: color.withOpacity(0.35),
-                      blurRadius: 14,
-                      spreadRadius: 2)
-                ]
+              ? [BoxShadow(color: color.withOpacity(0.35), blurRadius: 14, spreadRadius: 2)]
               : [],
         ),
         child: Icon(
@@ -1084,7 +1062,6 @@ class _PowerButton extends StatelessWidget {
   }
 }
 
-// ── Estado vacío ──────────────────────────────────────────────────
 class _EmptyControl extends StatelessWidget {
   const _EmptyControl();
   @override
@@ -1096,17 +1073,15 @@ class _EmptyControl extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(
-                    color: C.blueGlow, shape: BoxShape.circle),
-                child: const Icon(Icons.devices_other_rounded,
-                    size: 48, color: C.blue),
+                decoration:
+                    const BoxDecoration(color: C.blueGlow, shape: BoxShape.circle),
+                child:
+                    const Icon(Icons.devices_other_rounded, size: 48, color: C.blue),
               ),
               const SizedBox(height: 20),
               const Text('Sin dispositivos',
                   style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: C.t1)),
+                      fontSize: 18, fontWeight: FontWeight.w700, color: C.t1)),
               const SizedBox(height: 8),
               const Text(
                 'Toca la pestaña "Dispositivos"\ny agrega el primero.',
@@ -1151,7 +1126,7 @@ class _HabPageState extends State<HabitacionesPage> {
     return AnimatedBuilder(
       animation: widget.notifier,
       builder: (_, __) {
-        final n    = widget.notifier;
+        final n = widget.notifier;
         final habs = n.habitaciones;
         if (!habs.contains(_sel)) _sel = 'Todas';
         final items = n.porHabitacion(_sel);
@@ -1163,14 +1138,11 @@ class _HabPageState extends State<HabitacionesPage> {
               pinned: true,
               backgroundColor: C.surface,
               title: const Text('Habitaciones',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700, color: C.t1)),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(52),
                 child: _HabTabs(
-                    habs: habs,
-                    sel:  _sel,
-                    onSel: (h) => setState(() => _sel = h)),
+                    habs: habs, sel: _sel, onSel: (h) => setState(() => _sel = h)),
               ),
             ),
             if (items.isEmpty)
@@ -1190,9 +1162,9 @@ class _HabPageState extends State<HabitacionesPage> {
                 sliver: SliverGrid(
                   delegate: SliverChildBuilderDelegate(
                     (_, i) => _DevTile(
-                      key:     ValueKey(items[i].id),
-                      d:       items[i],
-                      busy:    _busy.contains(items[i].id),
+                      key: ValueKey(items[i].id),
+                      d: items[i],
+                      busy: _busy.contains(items[i].id),
                       onToggle: () => _toggle(items[i].id),
                     ),
                     childCount: items.length,
@@ -1201,7 +1173,7 @@ class _HabPageState extends State<HabitacionesPage> {
                       const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
-                    mainAxisSpacing:  12,
+                    mainAxisSpacing: 12,
                     childAspectRatio: 0.82,
                   ),
                 ),
@@ -1224,8 +1196,7 @@ class _HabTabs extends StatelessWidget {
         height: 46,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           itemCount: habs.length,
           separatorBuilder: (_, __) => const SizedBox(width: 8),
           itemBuilder: (_, i) {
@@ -1235,13 +1206,11 @@ class _HabTabs extends StatelessWidget {
               onTap: () => onSel(h),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
                   color: active ? C.blue : C.surface,
                   borderRadius: R.xl,
-                  border: Border.all(
-                      color: active ? C.blue : C.border),
+                  border: Border.all(color: active ? C.blue : C.border),
                 ),
                 child: Text(h,
                     style: TextStyle(
@@ -1295,20 +1264,17 @@ class _DevTile extends StatelessWidget {
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
-                        color: d.encendido
-                            ? col.withOpacity(0.22)
-                            : C.surface,
+                        color: d.encendido ? col.withOpacity(0.22) : C.surface,
                         borderRadius: R.sm,
                       ),
                       child: Icon(d.cat.icon,
-                          size: 22,
-                          color: d.encendido ? col : C.t3),
+                          size: 22, color: d.encendido ? col : C.t3),
                     ),
                     _PowerButton(
                       encendido: d.encendido,
-                      busy:      busy,
-                      color:     col,
-                      onTap:     busy ? null : onToggle,
+                      busy: busy,
+                      color: col,
+                      onTap: busy ? null : onToggle,
                     ),
                   ]),
               const Spacer(),
@@ -1355,8 +1321,8 @@ class _DispPageState extends State<DispositivosPage> {
     return AnimatedBuilder(
       animation: widget.notifier,
       builder: (_, __) {
-        final n  = widget.notifier;
-        final q  = _query.toLowerCase();
+        final n = widget.notifier;
+        final q = _query.toLowerCase();
         final filtered = n.items
             .where((d) =>
                 d.nombre.toLowerCase().contains(q) ||
@@ -1372,8 +1338,7 @@ class _DispPageState extends State<DispositivosPage> {
               pinned: true,
               backgroundColor: C.surface,
               title: const Text('Dispositivos',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700, color: C.t1)),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(56),
                 child: Padding(
@@ -1389,8 +1354,7 @@ class _DispPageState extends State<DispositivosPage> {
                           ? IconButton(
                               icon: const Icon(Icons.clear_rounded,
                                   color: C.t3, size: 18),
-                              onPressed: () =>
-                                  setState(() => _query = ''))
+                              onPressed: () => setState(() => _query = ''))
                           : null,
                     ),
                   ),
@@ -1401,9 +1365,7 @@ class _DispPageState extends State<DispositivosPage> {
               SliverFillRemaining(
                 child: Center(
                   child: Text(
-                    n.items.isEmpty
-                        ? 'Sin dispositivos aún'
-                        : 'Sin resultados',
+                    n.items.isEmpty ? 'Sin dispositivos aún' : 'Sin resultados',
                     style: const TextStyle(color: C.t2),
                   ),
                 ),
@@ -1413,8 +1375,7 @@ class _DispPageState extends State<DispositivosPage> {
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 100),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (_, i) =>
-                        _DispCard(d: filtered[i], notifier: n),
+                    (_, i) => _DispCard(d: filtered[i], notifier: n),
                     childCount: filtered.length,
                   ),
                 ),
@@ -1437,8 +1398,7 @@ class _DispPageState extends State<DispositivosPage> {
         backgroundColor: C.surface,
         isScrollControlled: true,
         shape: const RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.vertical(top: Radius.circular(24))),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
         builder: (_) => _AddForm(notifier: widget.notifier),
       );
 }
@@ -1466,7 +1426,7 @@ class _DispCardState extends State<_DispCard> {
 
   @override
   Widget build(BuildContext context) {
-    final d   = widget.d;
+    final d = widget.d;
     final col = d.tipo.color;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
@@ -1491,8 +1451,7 @@ class _DispCardState extends State<_DispCard> {
                 color: d.encendido ? col.withOpacity(0.18) : C.surface,
                 borderRadius: R.xs,
               ),
-              child: Icon(d.cat.icon,
-                  size: 22, color: d.encendido ? col : C.t3),
+              child: Icon(d.cat.icon, size: 22, color: d.encendido ? col : C.t3),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1519,8 +1478,7 @@ class _DispCardState extends State<_DispCard> {
                 ? SizedBox(
                     width: 28,
                     height: 28,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: col))
+                    child: CircularProgressIndicator(strokeWidth: 2, color: col))
                 : Switch(
                     value: d.encendido,
                     onChanged: (_) => _toggle(),
@@ -1528,11 +1486,8 @@ class _DispCardState extends State<_DispCard> {
                     activeTrackColor: col,
                     inactiveThumbColor: C.t3,
                     inactiveTrackColor: C.surface,
-                    trackOutlineColor:
-                        WidgetStateProperty.resolveWith((s) =>
-                            d.encendido
-                                ? col.withOpacity(0.4)
-                                : C.border),
+                    trackOutlineColor: WidgetStateProperty.resolveWith((s) =>
+                        d.encendido ? col.withOpacity(0.4) : C.border),
                   ),
           ]),
           const SizedBox(height: 8),
@@ -1557,15 +1512,13 @@ class _DispCardState extends State<_DispCard> {
             GestureDetector(
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                    builder: (_) => DiagnosticoPage(d: d)),
+                MaterialPageRoute(builder: (_) => DiagnosticoPage(d: d)),
               ),
               child: Container(
                 padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                    color: C.blueGlow, borderRadius: R.xs),
-                child: const Icon(Icons.wifi_find_rounded,
-                    size: 15, color: C.blue),
+                decoration: BoxDecoration(color: C.blueGlow, borderRadius: R.xs),
+                child:
+                    const Icon(Icons.wifi_find_rounded, size: 15, color: C.blue),
               ),
             ),
             const SizedBox(width: 6),
@@ -1582,10 +1535,9 @@ class _DispCardState extends State<_DispCard> {
               ),
               child: Container(
                 padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                    color: C.redGlow, borderRadius: R.xs),
-                child: const Icon(Icons.delete_outline_rounded,
-                    size: 15, color: C.red),
+                decoration: BoxDecoration(color: C.redGlow, borderRadius: R.xs),
+                child:
+                    const Icon(Icons.delete_outline_rounded, size: 15, color: C.red),
               ),
             ),
           ]),
@@ -1606,24 +1558,27 @@ class _AddForm extends StatefulWidget {
 }
 
 class _AddFormState extends State<_AddForm> {
-  final _fk      = GlobalKey<FormState>();
+  final _fk = GlobalKey<FormState>();
   final _cNombre = TextEditingController();
-  final _cIp     = TextEditingController();
-  final _cPuerto = TextEditingController(text: '80');
-  final _cUrl    = TextEditingController();
-  final _cHab    = TextEditingController(text: 'General');
+  final _cIp = TextEditingController();
+  final _cPuerto = TextEditingController(text: '8888');
+  final _cUrl = TextEditingController();
+  final _cHab = TextEditingController(text: 'General');
 
-  TipoD        _tipo    = TipoD.tasmota;
-  CatArtefacto _cat     = CatArtefacto.enchufe;
-  ModoConexion _modo    = ModoConexion.lan;
-  bool _saving          = false;
-  bool _pinging         = false;
+  TipoD _tipo = TipoD.celular; // Por defecto Celular
+  CatArtefacto _cat = CatArtefacto.luz;
+  ModoConexion _modo = ModoConexion.movil; // Por defecto IP directa
+  bool _saving = false;
+  bool _pinging = false;
   bool? _pingOk;
 
   @override
   void dispose() {
-    _cNombre.dispose(); _cIp.dispose(); _cPuerto.dispose();
-    _cUrl.dispose(); _cHab.dispose();
+    _cNombre.dispose();
+    _cIp.dispose();
+    _cPuerto.dispose();
+    _cUrl.dispose();
+    _cHab.dispose();
     super.dispose();
   }
 
@@ -1633,11 +1588,9 @@ class _AddFormState extends State<_AddForm> {
         final base = _cUrl.text.trim().replaceAll(RegExp(r'/$'), '');
         return base.isEmpty ? '(ingresa la URL)' : '$base${_tipo.pathOn}';
       } else {
-        final ip  = _cIp.text.trim();
-        final p   = _cPuerto.text.trim();
-        return ip.isEmpty
-            ? '(ingresa la IP)'
-            : 'http://$ip:$p${_tipo.pathOn}';
+        final ip = _cIp.text.trim();
+        final p = _cPuerto.text.trim();
+        return ip.isEmpty ? '(ingresa la IP)' : 'http://$ip:$p${_tipo.pathOn}';
       }
     } catch (_) {
       return '—';
@@ -1649,7 +1602,9 @@ class _AddFormState extends State<_AddForm> {
     return Padding(
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 20, right: 20, top: 20),
+          left: 20,
+          right: 20,
+          top: 20),
       child: Form(
         key: _fk,
         child: SingleChildScrollView(
@@ -1659,48 +1614,47 @@ class _AddFormState extends State<_AddForm> {
             children: [
               Center(
                 child: Container(
-                  width: 36, height: 4,
-                  decoration: BoxDecoration(
-                      color: C.border, borderRadius: R.xl),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(color: C.border, borderRadius: R.xl),
                 ),
               ),
               const SizedBox(height: 16),
               const Text('Agregar dispositivo',
                   style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: C.t1)),
+                      fontSize: 17, fontWeight: FontWeight.w700, color: C.t1)),
               const SizedBox(height: 4),
               const Text(
-                'El dispositivo se agrega directamente. '
-                'Usa "Probar conexión" para verificar antes si quieres.',
+                'Configura tu dispositivo para controlarlo desde la app.',
                 style: TextStyle(fontSize: 11, color: C.t2),
               ),
               const SizedBox(height: 18),
+
               const _Lbl('Nombre'),
               TextFormField(
                 controller: _cNombre,
                 style: const TextStyle(color: C.t1),
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                    hintText: 'Ej: Lámpara sala'),
-                validator: (v) => v == null || v.trim().isEmpty
-                    ? 'Requerido'
-                    : null,
+                decoration: const InputDecoration(hintText: 'Ej: Lámpara sala'),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 14),
+
               const _Lbl('Habitación / Zona'),
               TextFormField(
                 controller: _cHab,
                 style: const TextStyle(color: C.t1),
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                    hintText: 'Sala, Cocina, Dormitorio...'),
+                decoration:
+                    const InputDecoration(hintText: 'Sala, Cocina, Dormitorio...'),
               ),
               const SizedBox(height: 14),
+
               const _Lbl('Tipo de artefacto'),
               Wrap(
-                spacing: 8, runSpacing: 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: CatArtefacto.values.map((c) {
                   final sel = c == _cat;
                   final col = c.color;
@@ -1708,17 +1662,15 @@ class _AddFormState extends State<_AddForm> {
                     onTap: () => setState(() => _cat = c),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: sel ? col.withOpacity(0.18) : C.surface,
                         borderRadius: R.xs,
-                        border: Border.all(
-                            color: sel ? col : C.border),
+                        border: Border.all(color: sel ? col : C.border),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(c.icon,
-                            size: 13, color: sel ? col : C.t3),
+                        Icon(c.icon, size: 13, color: sel ? col : C.t3),
                         const SizedBox(width: 5),
                         Text(c.label,
                             style: TextStyle(
@@ -1731,9 +1683,11 @@ class _AddFormState extends State<_AddForm> {
                 }).toList(),
               ),
               const SizedBox(height: 14),
+
               const _Lbl('Firmware / Tipo'),
               Wrap(
-                spacing: 8, runSpacing: 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: TipoD.values.map((t) {
                   final sel = t == _tipo;
                   return GestureDetector(
@@ -1748,20 +1702,15 @@ class _AddFormState extends State<_AddForm> {
                     }),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 7),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                        color: sel
-                            ? t.color.withOpacity(0.2)
-                            : C.surface,
+                        color: sel ? t.color.withOpacity(0.2) : C.surface,
                         borderRadius: R.xs,
-                        border: Border.all(
-                            color: sel ? t.color : C.border),
+                        border: Border.all(color: sel ? t.color : C.border),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(t.icon,
-                            size: 13,
-                            color: sel ? t.color : C.t3),
+                        Icon(t.icon, size: 13, color: sel ? t.color : C.t3),
                         const SizedBox(width: 5),
                         Text(t.label,
                             style: TextStyle(
@@ -1774,15 +1723,15 @@ class _AddFormState extends State<_AddForm> {
                 }).toList(),
               ),
               const SizedBox(height: 16),
+
               const _Lbl('Modo de conexión'),
               ...ModoConexion.values.map((m) {
                 final sel = m == _modo;
                 return GestureDetector(
                   onTap: () => setState(() {
-                    _modo   = m;
+                    _modo = m;
                     _pingOk = null;
-                    if (m == ModoConexion.movil &&
-                        _tipo == TipoD.celular) {
+                    if (m == ModoConexion.movil && _tipo == TipoD.celular) {
                       _cPuerto.text = '8888';
                     }
                   }),
@@ -1791,9 +1740,7 @@ class _AddFormState extends State<_AddForm> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: sel
-                          ? m.color.withOpacity(0.10)
-                          : C.surface,
+                      color: sel ? m.color.withOpacity(0.10) : C.surface,
                       borderRadius: R.sm,
                       border: Border.all(
                           color: sel ? m.color : C.border,
@@ -1801,22 +1748,18 @@ class _AddFormState extends State<_AddForm> {
                     ),
                     child: Row(children: [
                       Container(
-                        width: 32, height: 32,
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
-                          color: sel
-                              ? m.color.withOpacity(0.18)
-                              : C.card,
+                          color: sel ? m.color.withOpacity(0.18) : C.card,
                           borderRadius: R.xs,
                         ),
-                        child: Icon(m.icon,
-                            size: 16,
-                            color: sel ? m.color : C.t3),
+                        child: Icon(m.icon, size: 16, color: sel ? m.color : C.t3),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(m.label,
                                 style: TextStyle(
@@ -1825,28 +1768,26 @@ class _AddFormState extends State<_AddForm> {
                                     color: sel ? m.color : C.t1)),
                             const SizedBox(height: 2),
                             Text(m.descripcion,
-                                style: const TextStyle(
-                                    fontSize: 10, color: C.t2)),
+                                style: const TextStyle(fontSize: 10, color: C.t2)),
                           ],
                         ),
                       ),
                       if (sel)
-                        Icon(Icons.check_circle_rounded,
-                            size: 18, color: m.color),
+                        Icon(Icons.check_circle_rounded, size: 18, color: m.color),
                     ]),
                   ),
                 );
               }),
+
               if (_modo == ModoConexion.url) ...[
                 const _Lbl('URL base del dispositivo'),
                 TextFormField(
                   controller: _cUrl,
                   style: const TextStyle(color: C.t1),
                   keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                      hintText: 'https://abc123.ngrok.io'),
-                  onChanged: (_) =>
-                      setState(() => _pingOk = null),
+                  decoration:
+                      const InputDecoration(hintText: 'https://abc123.ngrok.io'),
+                  onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) {
                       return 'URL requerida';
@@ -1868,30 +1809,34 @@ class _AddFormState extends State<_AddForm> {
                     border: Border.all(color: C.orange.withOpacity(0.4)),
                   ),
                   child: Row(children: [
-                    const Icon(Icons.info_outline_rounded, size: 14, color: C.orange),
+                    const Icon(Icons.info_outline_rounded,
+                        size: 14, color: C.orange),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(
-                      _tipo == TipoD.celular
-                          ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra'
-                          : 'Busca la IP en la interfaz web del dispositivo o en tu router',
-                      style: const TextStyle(fontSize: 10, color: C.orange),
-                    )),
+                    Expanded(
+                      child: Text(
+                        _tipo == TipoD.celular
+                            ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra'
+                            : 'Busca la IP en la interfaz web del dispositivo o en tu router',
+                        style: const TextStyle(fontSize: 10, color: C.orange),
+                      ),
+                    ),
                   ]),
                 ),
                 TextFormField(
                   controller: _cIp,
                   style: const TextStyle(color: C.t1),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(
-                          decimal: true),
-                  decoration:
-                      InputDecoration(hintText: _modo.hint),
-                  onChanged: (_) =>
-                      setState(() => _pingOk = null),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    hintText: _modo.hint,
+                    hintText: '10.151.28.43',
+                  ),
+                  onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'IP requerida';
                     if (v.trim() == '0.0.0.0') return 'IP inválida';
-                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') return 'No uses localhost';
+                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') {
+                      return 'No uses localhost';
+                    }
                     return null;
                   },
                 ),
@@ -1902,8 +1847,7 @@ class _AddFormState extends State<_AddForm> {
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: C.t1),
                   decoration: InputDecoration(
-                      hintText:
-                          _tipo == TipoD.celular ? '8888' : '80'),
+                      hintText: _tipo == TipoD.celular ? '8888' : '80'),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) {
                       return 'Requerido';
@@ -1916,36 +1860,35 @@ class _AddFormState extends State<_AddForm> {
                 ),
               ],
               const SizedBox(height: 16),
+
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: C.blueGlow,
                   borderRadius: R.xs,
-                  border: Border.all(
-                      color: C.blue.withOpacity(0.3)),
+                  border: Border.all(color: C.blue.withOpacity(0.3)),
                 ),
                 child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(children: [
-                        Icon(Icons.link_rounded,
-                            size: 12, color: C.blue),
-                        SizedBox(width: 6),
-                        Text('URL que se llamará al encender:',
-                            style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: C.blue)),
-                      ]),
-                      const SizedBox(height: 4),
-                      Text(_urlPreview,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: C.t2,
-                              fontFamily: 'monospace')),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.link_rounded, size: 12, color: C.blue),
+                      SizedBox(width: 6),
+                      Text('URL que se llamará al encender:',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: C.blue)),
                     ]),
+                    const SizedBox(height: 4),
+                    Text(_urlPreview,
+                        style: const TextStyle(
+                            fontSize: 11, color: C.t2, fontFamily: 'monospace')),
+                  ],
+                ),
               ),
               const SizedBox(height: 14),
+
               OutlinedButton.icon(
                 onPressed: _pinging ? null : _doPing,
                 icon: _pinging
@@ -1990,11 +1933,11 @@ class _AddFormState extends State<_AddForm> {
                           : _pingOk!
                               ? C.green
                               : C.orange),
-                  shape: const RoundedRectangleBorder(
-                      borderRadius: R.xs),
+                  shape: const RoundedRectangleBorder(borderRadius: R.xs),
                 ),
               ),
               const SizedBox(height: 10),
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -2004,8 +1947,7 @@ class _AddFormState extends State<_AddForm> {
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white))
+                              strokeWidth: 2, color: Colors.white))
                       : const Text('Agregar dispositivo'),
                 ),
               ),
@@ -2019,30 +1961,36 @@ class _AddFormState extends State<_AddForm> {
 
   Future<void> _doPing() async {
     if (!_fk.currentState!.validate()) return;
-    setState(() { _pinging = true; _pingOk = null; });
+    setState(() {
+      _pinging = true;
+      _pingOk = null;
+    });
     final ok = await NetCtrl.pingRaw(
-      modo:    _modo,
-      ip:      _cIp.text.trim(),
-      puerto:  int.tryParse(_cPuerto.text.trim()) ?? 80,
+      modo: _modo,
+      ip: _cIp.text.trim(),
+      puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
       urlBase: _cUrl.text.trim(),
-      tipo:    _tipo,
+      tipo: _tipo,
     );
-    if (mounted) setState(() { _pinging = false; _pingOk = ok; });
+    if (mounted) setState(() {
+      _pinging = false;
+      _pingOk = ok;
+    });
   }
 
   Future<void> _doSave() async {
     if (!_fk.currentState!.validate()) return;
     setState(() => _saving = true);
     final ok = await widget.notifier.agregar(
-      nombre:     _cNombre.text,
-      tipo:       _tipo,
-      cat:        _cat,
-      modo:       _modo,
-      ip:         _cIp.text,
-      puerto:     int.tryParse(_cPuerto.text.trim()) ?? 80,
-      urlBase:    _cUrl.text,
+      nombre: _cNombre.text,
+      tipo: _tipo,
+      cat: _cat,
+      modo: _modo,
+      ip: _cIp.text,
+      puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
+      urlBase: _cUrl.text,
       habitacion: _cHab.text,
-      skipPing:   true,
+      skipPing: true,
     );
     if (mounted) {
       setState(() => _saving = false);
@@ -2073,16 +2021,14 @@ class HistorialPage extends StatelessWidget {
           appBar: AppBar(
             backgroundColor: C.surface,
             title: const Text('Historial',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, color: C.t1)),
+                style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
           ),
           body: log.isEmpty
               ? const Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.history_rounded,
-                          size: 46, color: C.t3),
+                      Icon(Icons.history_rounded, size: 46, color: C.t3),
                       SizedBox(height: 12),
                       Text('Sin actividad aún',
                           style: TextStyle(color: C.t2)),
@@ -2092,8 +2038,7 @@ class HistorialPage extends StatelessWidget {
               : ListView.builder(
                   padding: const EdgeInsets.all(14),
                   itemCount: log.length,
-                  itemBuilder: (_, i) =>
-                      _LogTile(e: log[i]),
+                  itemBuilder: (_, i) => _LogTile(e: log[i]),
                 ),
         );
       },
@@ -2107,8 +2052,7 @@ class _LogTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           color: C.card,
           borderRadius: R.xs,
@@ -2133,13 +2077,10 @@ class _LogTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(e.msg,
-                    style: const TextStyle(
-                        fontSize: 13, color: C.t1)),
+                Text(e.msg, style: const TextStyle(fontSize: 13, color: C.t1)),
                 const SizedBox(height: 2),
                 Text(_fmt(e.ts),
-                    style: const TextStyle(
-                        fontSize: 11, color: C.t3)),
+                    style: const TextStyle(fontSize: 11, color: C.t3)),
               ],
             ),
           ),
@@ -2150,7 +2091,7 @@ class _LogTile extends StatelessWidget {
     final d = DateTime.now().difference(t);
     if (d.inSeconds < 60) return 'hace ${d.inSeconds}s';
     if (d.inMinutes < 60) return 'hace ${d.inMinutes}m';
-    if (d.inHours < 24)   return 'hace ${d.inHours}h';
+    if (d.inHours < 24) return 'hace ${d.inHours}h';
     return '${t.day}/${t.month}/${t.year} '
         '${t.hour}:${t.minute.toString().padLeft(2, '0')}';
   }
@@ -2177,7 +2118,10 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
   }
 
   Future<void> _run() async {
-    setState(() { _logs.clear(); _running = true; });
+    setState(() {
+      _logs.clear();
+      _running = true;
+    });
 
     final d = widget.d;
     _log('Dispositivo: ${d.nombre}', null);
@@ -2194,9 +2138,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
       final url = d.modo == ModoConexion.url
           ? d.urlBase.trim()
           : 'http://${d.ip.trim()}:${d.puerto}';
-      final resp = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 5));
+      final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
       _log('  GET $url', true);
       _log('  Respuesta: HTTP ${resp.statusCode}', resp.statusCode < 500);
     } catch (e) {
@@ -2205,6 +2147,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     }
 
     _log('─────────────────────────────', null);
+
     _log('▶ Probando comando ENCENDER...', null);
     _log('  ${d.urlOn}', null);
     final okOn = await NetCtrl.encender(d);
@@ -2248,8 +2191,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
         ),
         body: Column(children: [
           if (_running)
-            const LinearProgressIndicator(
-                color: C.blue, backgroundColor: C.border),
+            const LinearProgressIndicator(color: C.blue, backgroundColor: C.border),
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(14),
@@ -2257,15 +2199,13 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
               itemBuilder: (_, i) {
                 final l = _logs[i];
                 Color col = C.t2;
-                if (l.ok == true)  col = C.green;
+                if (l.ok == true) col = C.green;
                 if (l.ok == false) col = C.red;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(l.msg,
                       style: TextStyle(
-                          fontSize: 12,
-                          color: col,
-                          fontFamily: 'monospace')),
+                          fontSize: 12, color: col, fontFamily: 'monospace')),
                 );
               },
             ),
@@ -2300,15 +2240,10 @@ class _MicroBadge extends StatelessWidget {
   const _MicroBadge(this.text, {required this.col});
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-            color: col.withOpacity(0.14), borderRadius: R.xl),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(color: col.withOpacity(0.14), borderRadius: R.xl),
         child: Text(text,
-            style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: col)),
+            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: col)),
       );
 }
 
@@ -2319,10 +2254,7 @@ class _Lbl extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(text,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: C.t2)),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: C.t2)),
       );
 }
 
@@ -2337,7 +2269,7 @@ class _IconBtn extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
   });
-  
+
   @override
   Widget build(BuildContext context) => Tooltip(
         message: tooltip,
@@ -2360,12 +2292,12 @@ class _IconBtn extends StatelessWidget {
 class _DeleteDialog extends StatelessWidget {
   final String nombre;
   final VoidCallback onConfirm;
-  
+
   const _DeleteDialog({
     required this.nombre,
     required this.onConfirm,
   });
-  
+
   @override
   Widget build(BuildContext context) => AlertDialog(
         backgroundColor: C.card,

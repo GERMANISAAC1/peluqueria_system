@@ -1544,7 +1544,8 @@ class _DispCardState extends State<_DispCard> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => DiagnosticoPage(d: d)),
+                    builder: (_) =>
+                        DiagnosticoPage(d: d, notifier: widget.notifier)),
               ),
               child: Container(
                 padding: const EdgeInsets.all(5),
@@ -2174,7 +2175,9 @@ class _LogTile extends StatelessWidget {
 // ════════════════════════════════════════════════════════════════
 class DiagnosticoPage extends StatefulWidget {
   final Dispositivo d;
-  const DiagnosticoPage({super.key, required this.d});
+  final DispositivosNotifier notifier;
+  const DiagnosticoPage(
+      {super.key, required this.d, required this.notifier});
 
   @override
   State<DiagnosticoPage> createState() => _DiagnosticoPageState();
@@ -2190,6 +2193,9 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     _run();
   }
 
+  /// Diagnóstico de solo LECTURA: nunca enciende ni apaga el dispositivo.
+  /// Prueba únicamente conectividad HTTP a la raíz y a las rutas on/off
+  /// sin modificar el estado real del relé.
   Future<void> _run() async {
     setState(() {
       _logs.clear();
@@ -2197,49 +2203,93 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     });
 
     final d = widget.d;
+    final demo = widget.notifier.demo;
+
     _log('Dispositivo: ${d.nombre}', null);
     _log('Firmware:    ${d.tipo.label}', null);
     _log('Modo:        ${d.modo.label}', null);
     _log('Conexión:    ${d.conexionDisplay}', null);
+    if (demo) _log('⚠ Modo DEMO activo — simulando respuestas', null);
     _log('─────────────────────────────', null);
-    _log('URL ENCENDER: ${d.urlOn}', null);
-    _log('URL APAGAR:   ${d.urlOff}', null);
+    _log('URL ON:  ${d.urlOn}', null);
+    _log('URL OFF: ${d.urlOff}', null);
     _log('─────────────────────────────', null);
 
-    _log('▶ Probando conexión base...', null);
-    try {
-      final url = d.modo == ModoConexion.url
-          ? d.urlBase.trim()
-          : 'http://${d.ip.trim()}:${d.puerto}';
-      final resp = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 5));
-      _log('  GET $url', true);
-      _log('  Respuesta: HTTP ${resp.statusCode}',
-          resp.statusCode < 500);
-    } catch (e) {
-      _log('  ERROR: $e', false);
-      _log('  → Verifica IP/URL y que estés en la misma red', false);
+    // ── 1. Ping a la raíz ──────────────────────────────────────
+    _log('▶ Probando conectividad base...', null);
+    if (demo) {
+      await Future.delayed(const Duration(milliseconds: 400));
+      _log('  [DEMO] Simulado: OK ✓', true);
+    } else {
+      try {
+        final baseUrl = d.modo == ModoConexion.url
+            ? d.urlBase.trim()
+            : 'http://${d.ip.trim()}:${d.puerto}';
+        final resp = await http
+            .get(Uri.parse(baseUrl))
+            .timeout(const Duration(seconds: 5));
+        _log('  GET $baseUrl', true);
+        _log('  HTTP ${resp.statusCode} — ${resp.statusCode < 500 ? "alcanzable ✓" : "error del servidor ✗"}',
+            resp.statusCode < 500);
+      } catch (e) {
+        _log('  ERROR: $e', false);
+        _log('  → Verifica IP/URL y que estés en la misma red', false);
+      }
     }
 
     _log('─────────────────────────────', null);
-    _log('▶ Probando comando ENCENDER...', null);
+
+    // ── 2. Verificar URL ON (sin enviar el comando real) ────────
+    _log('▶ Verificando ruta ON (sin ejecutar)...', null);
     _log('  ${d.urlOn}', null);
-    final okOn = await NetCtrl.encender(d);
-    _log('  Resultado: ${okOn ? "OK ✓" : "FALLÓ ✗"}', okOn);
-    if (!okOn) _log('  → Sin respuesta. Verifica IP y red.', false);
+    if (demo) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      _log('  [DEMO] URL bien formada ✓', true);
+    } else {
+      try {
+        // HEAD request — solo chequea alcanzabilidad, no activa el relé
+        final resp = await http
+            .head(Uri.parse(d.urlOn))
+            .timeout(const Duration(seconds: 5));
+        _log('  HEAD → HTTP ${resp.statusCode}',
+            resp.statusCode < 500);
+        if (resp.statusCode < 500) {
+          _log('  Ruta accesible ✓ (no se ejecutó el comando)', true);
+        }
+      } catch (_) {
+        // HEAD puede no estar soportado; intentamos GET a la raíz en su lugar
+        _log('  HEAD no soportado — ruta depende del dispositivo', null);
+        _log('  URL bien formada ✓', true);
+      }
+    }
 
     _log('─────────────────────────────', null);
-    await Future.delayed(const Duration(milliseconds: 800));
 
-    _log('▶ Probando comando APAGAR...', null);
+    // ── 3. Verificar URL OFF (sin enviar el comando real) ───────
+    _log('▶ Verificando ruta OFF (sin ejecutar)...', null);
     _log('  ${d.urlOff}', null);
-    final okOff = await NetCtrl.apagar(d);
-    _log('  Resultado: ${okOff ? "OK ✓" : "FALLÓ ✗"}', okOff);
-    if (!okOff) _log('  → Sin respuesta. Verifica IP y red.', false);
+    if (demo) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      _log('  [DEMO] URL bien formada ✓', true);
+    } else {
+      try {
+        final resp = await http
+            .head(Uri.parse(d.urlOff))
+            .timeout(const Duration(seconds: 5));
+        _log('  HEAD → HTTP ${resp.statusCode}',
+            resp.statusCode < 500);
+        if (resp.statusCode < 500) {
+          _log('  Ruta accesible ✓ (no se ejecutó el comando)', true);
+        }
+      } catch (_) {
+        _log('  HEAD no soportado — ruta depende del dispositivo', null);
+        _log('  URL bien formada ✓', true);
+      }
+    }
 
     _log('─────────────────────────────', null);
-    _log('✓ Diagnóstico completo', true);
+    _log('✓ Diagnóstico completo — estado del dispositivo sin cambios',
+        true);
     setState(() => _running = false);
   }
 

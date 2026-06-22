@@ -291,9 +291,6 @@ class Dispositivo {
 
 // ════════════════════════════════════════════════════════════════
 // CONTROLADOR DE RED  v4.4  CON DEBUG
-// ────────────────────────────────────────────────────────────────
-// USA HttpClient nativo de Dart (dart:io) en lugar del paquete http.
-// Incluye DEBUG para ver qué URLs se están llamando y qué errores hay.
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 8);
@@ -301,11 +298,9 @@ class NetCtrl {
   static Future<bool> _get(String url) async {
     HttpClient? client;
     try {
-      // 🔍 DEBUG: Muestra la URL que se está intentando
       print('🌐 [DEBUG] Intentando conectar a: $url');
 
       client = HttpClient();
-      // Desactivar verificación SSL para IPs locales
       client.badCertificateCallback = (cert, host, port) => true;
       client.connectionTimeout = _timeout;
 
@@ -315,15 +310,12 @@ class NetCtrl {
       request.headers.set('Cache-Control', 'no-cache');
 
       final response = await request.close().timeout(_timeout);
-      // Consumir el body para liberar la conexión
       await response.drain<void>();
 
-      // 🔍 DEBUG: Conexión exitosa
       print('✅ [DEBUG] Conexión exitosa a: $url');
       print('   Status Code: ${response.statusCode}');
       return true;
     } catch (e) {
-      // 🔍 DEBUG: Error detallado
       print('❌ [DEBUG] ERROR conectando a: $url');
       print('   Error: $e');
       print('   Tipo de error: ${e.runtimeType}');
@@ -403,7 +395,6 @@ class DispositivosNotifier extends ChangeNotifier {
   int _nextId = 1;
   bool _demo  = false;
   final List<LogEntry> _log = [];
-  // Mutex por id: evita que dos llamadas simultáneas inviertan el estado
   final Set<int> _enProceso = {};
 
   DispositivosNotifier(List<Dispositivo> items, this._prefs)
@@ -427,7 +418,6 @@ class DispositivosNotifier extends ChangeNotifier {
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
   Future<bool> toggle(int id) async {
-    // Mutex: si ya hay una operación en curso para este id, ignorar
     if (_enProceso.contains(id)) {
       debugPrint('[Toggle] IGNORADO — id=$id ya en proceso');
       return false;
@@ -439,7 +429,6 @@ class DispositivosNotifier extends ChangeNotifier {
       if (idx == -1) return false;
       final d = _items[idx];
 
-      // Capturamos el estado ANTES de llamar a la red
       final estadoAntes = d.encendido;
       print('🔄 [Toggle] id=$id  estadoAntes=$estadoAntes  → mandando ${estadoAntes ? "APAGAR" : "ENCENDER"}');
 
@@ -1128,6 +1117,7 @@ class _EmptyControl extends StatelessWidget {
           ),
         ),
       );
+}
 
 // ════════════════════════════════════════════════════════════════
 // PÁGINA: HABITACIONES

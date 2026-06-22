@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  DOMÓTICA PRO  v4.0  —  Optimizado para control real            ║
+// ║  DOMÓTICA PRO  v5.0  —  Producción                              ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
@@ -13,22 +13,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 // TOKENS DE DISEÑO
 // ════════════════════════════════════════════════════════════════
 class C {
-  static const bg = Color(0xFF070B14);
+  static const bg      = Color(0xFF070B14);
   static const surface = Color(0xFF0D1220);
-  static const card = Color(0xFF131A2E);
-  static const cardHi = Color(0xFF1A2340);
-  static const border = Color(0xFF1E2845);
-  static const blue = Color(0xFF4F8EF7);
-  static const blueGlow = Color(0x264F8EF7);
-  static const green = Color(0xFF2ECC8E);
-  static const greenGlow = Color(0x262ECC8E);
-  static const orange = Color(0xFFFF9142);
+  static const card    = Color(0xFF131A2E);
+  static const cardHi  = Color(0xFF1A2340);
+  static const border  = Color(0xFF1E2845);
+  static const blue    = Color(0xFF4F8EF7);
+  static const blueGlow   = Color(0x264F8EF7);
+  static const green   = Color(0xFF2ECC8E);
+  static const greenGlow  = Color(0x262ECC8E);
+  static const orange  = Color(0xFFFF9142);
   static const orangeGlow = Color(0x26FF9142);
-  static const red = Color(0xFFFF4D6A);
-  static const redGlow = Color(0x26FF4D6A);
-  static const purple = Color(0xFF9B6DFF);
+  static const red     = Color(0xFFFF4D6A);
+  static const redGlow    = Color(0x26FF4D6A);
+  static const purple  = Color(0xFF9B6DFF);
   static const purpleGlow = Color(0x269B6DFF);
-  static const yellow = Color(0xFFFFCC44);
+  static const yellow  = Color(0xFFFFCC44);
   static const yellowGlow = Color(0x26FFCC44);
   static const t1 = Color(0xFFF0F4FF);
   static const t2 = Color(0xFF7B8DB8);
@@ -44,40 +44,47 @@ class R {
 }
 
 // ════════════════════════════════════════════════════════════════
+// CONSTANTES DE PRODUCCIÓN
+// ════════════════════════════════════════════════════════════════
+class AppConfig {
+  static const cmdTimeout   = Duration(seconds: 6);
+  static const pingTimeout  = Duration(seconds: 4);
+  static const maxRetries   = 2;
+  static const retryDelay   = Duration(milliseconds: 400);
+  static const maxLogItems  = 300;
+  static const storageKey   = 'domotica_v5';
+}
+
+// ════════════════════════════════════════════════════════════════
 // MODO DE CONEXIÓN
 // ════════════════════════════════════════════════════════════════
 enum ModoConexion { lan, movil, url }
 
 extension ModoConexionX on ModoConexion {
   String get label => switch (this) {
-        ModoConexion.lan => 'LAN / WiFi',
+        ModoConexion.lan   => 'LAN / WiFi',
         ModoConexion.movil => 'IP directa',
-        ModoConexion.url => 'URL completa',
+        ModoConexion.url   => 'URL completa',
       };
   String get hint => switch (this) {
-        ModoConexion.lan => '192.168.1.100',
+        ModoConexion.lan   => '192.168.1.100',
         ModoConexion.movil => '10.151.28.43',
-        ModoConexion.url => 'https://mi-tunel.ngrok.io',
+        ModoConexion.url   => 'https://mi-tunel.ngrok.io',
       };
   String get descripcion => switch (this) {
-        ModoConexion.lan => 'Misma red WiFi. IP privada (192.168.x.x).',
+        ModoConexion.lan   => 'Misma red WiFi. IP privada (192.168.x.x).',
         ModoConexion.movil => 'Cualquier red. IP pública + puerto abierto.',
-        ModoConexion.url => 'URL completa. Túneles ngrok, Cloudflare, DDNS.',
+        ModoConexion.url   => 'URL completa. Túneles ngrok, Cloudflare, DDNS.',
       };
   IconData get icon => switch (this) {
-        ModoConexion.lan => Icons.wifi_rounded,
+        ModoConexion.lan   => Icons.wifi_rounded,
         ModoConexion.movil => Icons.signal_cellular_alt_rounded,
-        ModoConexion.url => Icons.public_rounded,
+        ModoConexion.url   => Icons.public_rounded,
       };
   Color get color => switch (this) {
-        ModoConexion.lan => C.green,
+        ModoConexion.lan   => C.green,
         ModoConexion.movil => C.orange,
-        ModoConexion.url => C.purple,
-      };
-  Color get glow => switch (this) {
-        ModoConexion.lan => C.greenGlow,
-        ModoConexion.movil => C.orangeGlow,
-        ModoConexion.url => C.purpleGlow,
+        ModoConexion.url   => C.purple,
       };
   static ModoConexion fromStr(String s) => ModoConexion.values
       .firstWhere((e) => e.name == s, orElse: () => ModoConexion.lan);
@@ -91,38 +98,38 @@ enum TipoD { tasmota, sonoff, shelly, celular, otro }
 extension TipoDX on TipoD {
   String get label => switch (this) {
         TipoD.tasmota => 'Tasmota',
-        TipoD.sonoff => 'Sonoff',
-        TipoD.shelly => 'Shelly',
+        TipoD.sonoff  => 'Sonoff',
+        TipoD.shelly  => 'Shelly',
         TipoD.celular => 'Celular',
-        TipoD.otro => 'Genérico',
+        TipoD.otro    => 'Genérico',
       };
   IconData get icon => switch (this) {
         TipoD.tasmota => Icons.electrical_services_rounded,
-        TipoD.sonoff => Icons.bolt_rounded,
-        TipoD.shelly => Icons.router_rounded,
+        TipoD.sonoff  => Icons.bolt_rounded,
+        TipoD.shelly  => Icons.router_rounded,
         TipoD.celular => Icons.smartphone_rounded,
-        TipoD.otro => Icons.settings_input_hdmi_rounded,
+        TipoD.otro    => Icons.settings_input_hdmi_rounded,
       };
   Color get color => switch (this) {
         TipoD.tasmota => C.blue,
-        TipoD.sonoff => C.orange,
-        TipoD.shelly => C.green,
+        TipoD.sonoff  => C.orange,
+        TipoD.shelly  => C.green,
         TipoD.celular => C.yellow,
-        TipoD.otro => C.t2,
+        TipoD.otro    => C.t2,
       };
   String get pathOn => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+On',
-        TipoD.sonoff => '/control?cmd=on',
-        TipoD.shelly => '/relay/0?turn=on',
+        TipoD.sonoff  => '/control?cmd=on',
+        TipoD.shelly  => '/relay/0?turn=on',
         TipoD.celular => '/flash/on',
-        TipoD.otro => '/on',
+        TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
-        TipoD.sonoff => '/control?cmd=off',
-        TipoD.shelly => '/relay/0?turn=off',
+        TipoD.sonoff  => '/control?cmd=off',
+        TipoD.shelly  => '/relay/0?turn=off',
         TipoD.celular => '/flash/off',
-        TipoD.otro => '/off',
+        TipoD.otro    => '/off',
       };
   static TipoD fromStr(String s) => TipoD.values
       .firstWhere((e) => e.name == s.toLowerCase(), orElse: () => TipoD.otro);
@@ -132,34 +139,47 @@ enum CatArtefacto { luz, ventilador, televisor, aire, enchufe, calefactor, otro 
 
 extension CatX on CatArtefacto {
   String get label => switch (this) {
-        CatArtefacto.luz => 'Luz',
+        CatArtefacto.luz        => 'Luz',
         CatArtefacto.ventilador => 'Ventilador',
-        CatArtefacto.televisor => 'Televisor',
-        CatArtefacto.aire => 'A/C',
-        CatArtefacto.enchufe => 'Enchufe',
+        CatArtefacto.televisor  => 'Televisor',
+        CatArtefacto.aire       => 'A/C',
+        CatArtefacto.enchufe    => 'Enchufe',
         CatArtefacto.calefactor => 'Calefactor',
-        CatArtefacto.otro => 'Otro',
+        CatArtefacto.otro       => 'Otro',
       };
   IconData get icon => switch (this) {
-        CatArtefacto.luz => Icons.light_rounded,
+        CatArtefacto.luz        => Icons.light_rounded,
         CatArtefacto.ventilador => Icons.air_rounded,
-        CatArtefacto.televisor => Icons.tv_rounded,
-        CatArtefacto.aire => Icons.ac_unit_rounded,
-        CatArtefacto.enchufe => Icons.power_rounded,
+        CatArtefacto.televisor  => Icons.tv_rounded,
+        CatArtefacto.aire       => Icons.ac_unit_rounded,
+        CatArtefacto.enchufe    => Icons.power_rounded,
         CatArtefacto.calefactor => Icons.local_fire_department_rounded,
-        CatArtefacto.otro => Icons.device_unknown_rounded,
+        CatArtefacto.otro       => Icons.device_unknown_rounded,
       };
   Color get color => switch (this) {
-        CatArtefacto.luz => C.yellow,
+        CatArtefacto.luz        => C.yellow,
         CatArtefacto.ventilador => C.blue,
-        CatArtefacto.televisor => C.purple,
-        CatArtefacto.aire => C.blue,
-        CatArtefacto.enchufe => C.green,
+        CatArtefacto.televisor  => C.purple,
+        CatArtefacto.aire       => C.blue,
+        CatArtefacto.enchufe    => C.green,
         CatArtefacto.calefactor => C.orange,
-        CatArtefacto.otro => C.t2,
+        CatArtefacto.otro       => C.t2,
       };
   static CatArtefacto fromStr(String s) => CatArtefacto.values
       .firstWhere((e) => e.name == s, orElse: () => CatArtefacto.otro);
+}
+
+// ════════════════════════════════════════════════════════════════
+// RESULTADO DE COMANDO
+// ════════════════════════════════════════════════════════════════
+enum CmdStatus { ok, timeout, error, offline }
+
+class CmdResult {
+  final CmdStatus status;
+  final String? detail;
+  bool get ok => status == CmdStatus.ok;
+  const CmdResult(this.status, {this.detail});
+  static const success = CmdResult(CmdStatus.ok);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -185,6 +205,8 @@ class Dispositivo {
   bool encendido;
   DateTime? ultimaAccion;
   int toggleCount;
+  // Nuevo: estado de conectividad conocido
+  bool? online;
 
   Dispositivo({
     required this.id,
@@ -199,6 +221,7 @@ class Dispositivo {
     this.encendido = false,
     this.ultimaAccion,
     this.toggleCount = 0,
+    this.online,
   });
 
   String get urlOn {
@@ -260,108 +283,113 @@ class Dispositivo {
         habitacion: j['habitacion'] as String? ?? 'General',
         encendido: j['encendido'] as bool? ?? false,
         toggleCount: j['toggleCount'] as int? ?? 0,
-        ultimaAccion: j['ultimaAccion'] != null
-            ? DateTime.tryParse(j['ultimaAccion'] as String)
-            : null,
       );
 
   Dispositivo copyWith({
+    String? nombre,
+    TipoD? tipo,
+    CatArtefacto? cat,
+    ModoConexion? modo,
+    String? ip,
+    int? puerto,
+    String? urlBase,
+    String? habitacion,
     bool? encendido,
     DateTime? ultimaAccion,
     int? toggleCount,
+    bool? online,
   }) =>
       Dispositivo(
         id: id,
-        nombre: nombre,
-        tipo: tipo,
-        cat: cat,
-        modo: modo,
-        ip: ip,
-        puerto: puerto,
-        urlBase: urlBase,
-        habitacion: habitacion,
+        nombre: nombre ?? this.nombre,
+        tipo: tipo ?? this.tipo,
+        cat: cat ?? this.cat,
+        modo: modo ?? this.modo,
+        ip: ip ?? this.ip,
+        puerto: puerto ?? this.puerto,
+        urlBase: urlBase ?? this.urlBase,
+        habitacion: habitacion ?? this.habitacion,
         encendido: encendido ?? this.encendido,
         ultimaAccion: ultimaAccion ?? this.ultimaAccion,
         toggleCount: toggleCount ?? this.toggleCount,
+        online: online ?? this.online,
       );
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED
+// CONTROLADOR DE RED — producción
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  static const _timeout = Duration(seconds: 5);
-  static const _maxRetries = 2;
-
-  static Future<bool> _get(String url) async {
-    for (int i = 0; i < _maxRetries; i++) {
-      try {
-        final response = await http.get(Uri.parse(url)).timeout(_timeout);
-        if (response.statusCode >= 200 && response.statusCode < 500) {
-          return true;
-        }
-        return false;
-      } catch (e) {
-        if (i < _maxRetries - 1) {
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-      }
+  static Future<CmdResult> _tryGet(String url) async {
+    try {
+      final r = await http.get(Uri.parse(url)).timeout(AppConfig.cmdTimeout);
+      if (r.statusCode >= 200 && r.statusCode < 500) return CmdResult.success;
+      return CmdResult(CmdStatus.error, detail: 'HTTP ${r.statusCode}');
+    } on TimeoutException {
+      return const CmdResult(CmdStatus.timeout);
+    } catch (e) {
+      return CmdResult(CmdStatus.offline, detail: e.toString());
     }
-    return false;
   }
 
-  static Future<bool> _post(String url) async {
-    for (int i = 0; i < _maxRetries; i++) {
-      try {
-        final response = await http.post(Uri.parse(url)).timeout(_timeout);
-        if (response.statusCode >= 200 && response.statusCode < 500) {
-          return true;
-        }
-        return false;
-      } catch (e) {
-        if (i < _maxRetries - 1) {
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-      }
+  static Future<CmdResult> _tryPost(String url) async {
+    try {
+      final r = await http.post(Uri.parse(url)).timeout(AppConfig.cmdTimeout);
+      if (r.statusCode >= 200 && r.statusCode < 500) return CmdResult.success;
+      return CmdResult(CmdStatus.error, detail: 'HTTP ${r.statusCode}');
+    } on TimeoutException {
+      return const CmdResult(CmdStatus.timeout);
+    } catch (e) {
+      return CmdResult(CmdStatus.offline, detail: e.toString());
     }
-    return false;
   }
 
-  static Future<bool> _cmd(String url) async {
-    if (await _get(url)) return true;
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (await _post(url)) return true;
-    await Future.delayed(const Duration(milliseconds: 500));
-    return _get(url);
+  /// GET → reintento → POST → reintento GET final
+  static Future<CmdResult> _cmd(String url) async {
+    for (int i = 0; i < AppConfig.maxRetries; i++) {
+      final r = await _tryGet(url);
+      if (r.ok) return r;
+      await Future.delayed(AppConfig.retryDelay);
+    }
+    // Fallback POST (algunos firmwares lo requieren)
+    final rPost = await _tryPost(url);
+    if (rPost.ok) return rPost;
+    await Future.delayed(AppConfig.retryDelay);
+    return _tryGet(url);
   }
 
-  static Future<bool> encender(Dispositivo d) => _cmd(d.urlOn);
-  static Future<bool> apagar(Dispositivo d) => _cmd(d.urlOff);
+  static Future<CmdResult> encender(Dispositivo d) => _cmd(d.urlOn);
+  static Future<CmdResult> apagar(Dispositivo d)   => _cmd(d.urlOff);
 
-  static Future<bool> pingRaw({
+  static Future<bool> ping({
     required ModoConexion modo,
     required String ip,
     required int puerto,
     required String urlBase,
-    required TipoD tipo,
   }) async {
     final url = modo == ModoConexion.url
         ? urlBase.trim()
         : 'http://${ip.trim()}:$puerto/';
     if (url.isEmpty) return false;
-    return _get(url);
+    final r = await _tryGet(url);
+    return r.ok;
   }
+
+  static Future<bool> pingDispositivo(Dispositivo d) => ping(
+        modo: d.modo,
+        ip: d.ip,
+        puerto: d.puerto,
+        urlBase: d.urlBase,
+      );
 }
 
 // ════════════════════════════════════════════════════════════════
 // REPOSITORIO
 // ════════════════════════════════════════════════════════════════
 class DispositivoRepo {
-  static const _k = 'domotica_v4';
-
   static List<Dispositivo> cargar(SharedPreferences p) {
     try {
-      final raw = p.getString(_k);
+      final raw = p.getString(AppConfig.storageKey);
       if (raw == null) return [];
       return (jsonDecode(raw) as List)
           .map((e) => Dispositivo.fromJson(e as Map<String, dynamic>))
@@ -371,8 +399,12 @@ class DispositivoRepo {
     }
   }
 
-  static void guardar(SharedPreferences p, List<Dispositivo> items) =>
-      p.setString(_k, jsonEncode(items.map((d) => d.toJson()).toList()));
+  static Future<void> guardar(
+      SharedPreferences p, List<Dispositivo> items) async {
+    await p.setString(
+        AppConfig.storageKey,
+        jsonEncode(items.map((d) => d.toJson()).toList()));
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -393,10 +425,11 @@ class DispositivosNotifier extends ChangeNotifier {
     }
   }
 
-  List<Dispositivo> get items => List.unmodifiable(_items);
-  bool get demo => _demo;
-  List<LogEntry> get log => List.unmodifiable(_log.reversed.toList());
-  int get encendidos => _items.where((d) => d.encendido).length;
+  List<Dispositivo> get items     => List.unmodifiable(_items);
+  bool              get demo      => _demo;
+  List<LogEntry>    get log       => List.unmodifiable(_log.reversed.toList());
+  int               get encendidos => _items.where((d) => d.encendido).length;
+  bool              get enProceso  => _enProceso.isNotEmpty;
 
   List<String> get habitaciones {
     final set = _items.map((d) => d.habitacion).toSet().toList()..sort();
@@ -406,43 +439,56 @@ class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> porHabitacion(String h) =>
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
-  Future<bool> toggle(int id) async {
-    if (_enProceso.contains(id)) return false;
+  bool esBusy(int id) => _enProceso.contains(id);
+
+  // ── Toggle con resultado detallado ──────────────────────────
+  Future<CmdResult> toggle(int id) async {
+    if (_enProceso.contains(id)) {
+      return const CmdResult(CmdStatus.error, detail: 'Ya en proceso');
+    }
     _enProceso.add(id);
+    notifyListeners();
 
     try {
       final idx = _items.indexWhere((d) => d.id == id);
-      if (idx == -1) return false;
+      if (idx == -1) return const CmdResult(CmdStatus.error);
       final d = _items[idx];
-
       final estadoAntes = d.encendido;
 
-      bool ok;
+      CmdResult result;
       if (_demo) {
-        await Future.delayed(const Duration(milliseconds: 300));
-        ok = true;
+        await Future.delayed(const Duration(milliseconds: 350));
+        result = CmdResult.success;
       } else {
-        ok = estadoAntes ? await NetCtrl.apagar(d) : await NetCtrl.encender(d);
+        result = estadoAntes ? await NetCtrl.apagar(d) : await NetCtrl.encender(d);
       }
 
-      if (ok) {
+      if (result.ok) {
         _items[idx] = d.copyWith(
           encendido: !estadoAntes,
           ultimaAccion: DateTime.now(),
           toggleCount: d.toggleCount + 1,
+          online: true,
         );
         _addLog(
           '${d.nombre} → ${!estadoAntes ? "ENCENDIDO ✓" : "APAGADO ✓"}',
           ok: true,
         );
       } else {
-        _addLog('Sin respuesta de ${d.nombre}', ok: false);
+        _items[idx] = d.copyWith(online: false);
+        final motivo = switch (result.status) {
+          CmdStatus.timeout => 'Tiempo de espera agotado',
+          CmdStatus.offline => 'Sin conexión al dispositivo',
+          _ => result.detail ?? 'Error desconocido',
+        };
+        _addLog('${d.nombre} — $motivo', ok: false);
       }
       notifyListeners();
       _save();
-      return ok;
+      return result;
     } finally {
       _enProceso.remove(id);
+      notifyListeners();
     }
   }
 
@@ -464,10 +510,11 @@ class DispositivosNotifier extends ChangeNotifier {
     bool skipPing = true,
   }) async {
     if (!skipPing) {
-      final ok = await NetCtrl.pingRaw(
-          modo: modo, ip: ip, puerto: puerto, urlBase: urlBase, tipo: tipo);
+      final ok = await NetCtrl.ping(
+          modo: modo, ip: ip, puerto: puerto, urlBase: urlBase);
       if (!ok) return false;
     }
+    final hab = habitacion.trim().isEmpty ? 'General' : habitacion.trim();
     _items.add(Dispositivo(
       id: _nextId++,
       nombre: nombre.trim(),
@@ -477,12 +524,42 @@ class DispositivosNotifier extends ChangeNotifier {
       ip: ip.trim(),
       puerto: puerto,
       urlBase: urlBase.trim(),
-      habitacion: habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
+      habitacion: hab,
     ));
-    _addLog('Dispositivo "$nombre" agregado', ok: true);
+    _addLog('Dispositivo "${nombre.trim()}" agregado', ok: true);
     notifyListeners();
     _save();
     return true;
+  }
+
+  // ── NUEVO: Editar dispositivo existente ─────────────────────
+  void editar({
+    required int id,
+    required String nombre,
+    required TipoD tipo,
+    required CatArtefacto cat,
+    required ModoConexion modo,
+    required String ip,
+    required int puerto,
+    required String urlBase,
+    required String habitacion,
+  }) {
+    final idx = _items.indexWhere((d) => d.id == id);
+    if (idx == -1) return;
+    final hab = habitacion.trim().isEmpty ? 'General' : habitacion.trim();
+    _items[idx] = _items[idx].copyWith(
+      nombre: nombre.trim(),
+      tipo: tipo,
+      cat: cat,
+      modo: modo,
+      ip: ip.trim(),
+      puerto: puerto,
+      urlBase: urlBase.trim(),
+      habitacion: hab,
+    );
+    _addLog('Dispositivo "${nombre.trim()}" actualizado', ok: true);
+    notifyListeners();
+    _save();
   }
 
   void eliminar(int id) {
@@ -498,9 +575,14 @@ class DispositivosNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  void limpiarLog() {
+    _log.clear();
+    notifyListeners();
+  }
+
   void _addLog(String msg, {required bool ok}) {
     _log.add(LogEntry(DateTime.now(), msg, ok));
-    if (_log.length > 200) _log.removeAt(0);
+    if (_log.length > AppConfig.maxLogItems) _log.removeAt(0);
   }
 
   void _save() => DispositivoRepo.guardar(_prefs, _items);
@@ -545,6 +627,14 @@ void snack(BuildContext ctx, String msg, {bool error = false}) {
     shape: const RoundedRectangleBorder(borderRadius: R.sm),
     duration: const Duration(seconds: 4),
   ));
+}
+
+String _fmtTs(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inSeconds < 60) return 'hace ${d.inSeconds}s';
+  if (d.inMinutes < 60) return 'hace ${d.inMinutes}m';
+  if (d.inHours < 24)   return 'hace ${d.inHours}h';
+  return '${t.day}/${t.month}/${t.year} ${t.hour}:${t.minute.toString().padLeft(2, '0')}';
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -598,10 +688,9 @@ class DomoticaApp extends StatelessWidget {
                 backgroundColor: C.blue,
                 foregroundColor: Colors.white,
                 shape: const RoundedRectangleBorder(borderRadius: R.xs),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                textStyle: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 15),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
               ),
             ),
           ),
@@ -701,7 +790,7 @@ class _BottomNav extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// PÁGINA PRINCIPAL: CONTROL
+// PÁGINA: CONTROL
 // ════════════════════════════════════════════════════════════════
 class ControlPage extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -712,18 +801,16 @@ class ControlPage extends StatefulWidget {
 }
 
 class _ControlPageState extends State<ControlPage> {
-  final Set<int> _busy = {};
-
   Future<void> _toggle(int id) async {
-    if (_busy.contains(id)) return;
-    setState(() => _busy.add(id));
-    final ok = await widget.notifier.toggle(id);
-    if (mounted) {
-      setState(() => _busy.remove(id));
-      if (!ok) {
-        final d = widget.notifier.items.firstWhere((x) => x.id == id);
-        snack(context, 'Sin respuesta de "${d.nombre}"', error: true);
-      }
+    final result = await widget.notifier.toggle(id);
+    if (mounted && !result.ok) {
+      final d = widget.notifier.items.firstWhere((x) => x.id == id);
+      final msg = switch (result.status) {
+        CmdStatus.timeout => '"${d.nombre}" no respondió (timeout)',
+        CmdStatus.offline => '"${d.nombre}" sin conexión',
+        _                 => 'Error en "${d.nombre}"',
+      };
+      snack(context, msg, error: true);
     }
   }
 
@@ -735,94 +822,87 @@ class _ControlPageState extends State<ControlPage> {
         final n = widget.notifier;
         final enc = n.encendidos;
         final tot = n.items.length;
-
         return Scaffold(
           backgroundColor: C.bg,
-          body: CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                pinned: true,
-                expandedHeight: 130,
-                backgroundColor: C.surface,
-                flexibleSpace: FlexibleSpaceBar(
-                  background:
-                      _ControlHeader(enc: enc, total: tot, demo: n.demo),
-                ),
-                title: Row(children: [
-                  const Text('Control',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                          color: C.t1)),
-                  const SizedBox(width: 8),
-                  if (n.demo)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: C.orangeGlow,
-                        borderRadius: R.xl,
-                        border:
-                            Border.all(color: C.orange.withOpacity(0.4)),
-                      ),
-                      child: const Text('DEMO',
-                          style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: C.orange)),
+          body: CustomScrollView(slivers: [
+            SliverAppBar(
+              pinned: true,
+              expandedHeight: 130,
+              backgroundColor: C.surface,
+              flexibleSpace: FlexibleSpaceBar(
+                background: _ControlHeader(enc: enc, total: tot),
+              ),
+              title: Row(children: [
+                const Text('Control',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 18, color: C.t1)),
+                const SizedBox(width: 8),
+                if (n.demo)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: C.orangeGlow,
+                      borderRadius: R.xl,
+                      border: Border.all(color: C.orange.withOpacity(0.4)),
                     ),
-                ]),
-                actions: [
-                  if (tot > 0) ...[
-                    _IconBtn(
-                      icon: Icons.power_off_rounded,
-                      color: C.red,
-                      tooltip: 'Apagar todo',
-                      onTap: () => n.toggleTodos(false),
-                    ),
-                    const SizedBox(width: 6),
-                    _IconBtn(
-                      icon: Icons.power_rounded,
-                      color: C.green,
-                      tooltip: 'Encender todo',
-                      onTap: () => n.toggleTodos(true),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  GestureDetector(
-                    onTap: n.toggleDemo,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      child: Icon(Icons.science_rounded,
-                          size: 20, color: n.demo ? C.orange : C.t3),
-                    ),
+                    child: const Text('DEMO',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: C.orange)),
+                  ),
+              ]),
+              actions: [
+                if (tot > 0) ...[
+                  _IconBtn(
+                    icon: Icons.power_off_rounded,
+                    color: C.red,
+                    tooltip: 'Apagar todo',
+                    onTap: () => n.toggleTodos(false),
                   ),
                   const SizedBox(width: 6),
+                  _IconBtn(
+                    icon: Icons.power_rounded,
+                    color: C.green,
+                    tooltip: 'Encender todo',
+                    onTap: () => n.toggleTodos(true),
+                  ),
+                  const SizedBox(width: 4),
                 ],
-              ),
-              if (n.items.isEmpty)
-                const SliverFillRemaining(child: _EmptyControl())
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 100),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (_, i) {
-                        final d = n.items[i];
-                        return _ControlCard(
-                          key: ValueKey(d.id),
-                          d: d,
-                          busy: _busy.contains(d.id),
-                          onToggle: () => _toggle(d.id),
-                        );
-                      },
-                      childCount: n.items.length,
-                    ),
+                GestureDetector(
+                  onTap: n.toggleDemo,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Icon(Icons.science_rounded,
+                        size: 20, color: n.demo ? C.orange : C.t3),
                   ),
                 ),
-            ],
-          ),
+                const SizedBox(width: 6),
+              ],
+            ),
+            if (n.items.isEmpty)
+              const SliverFillRemaining(child: _EmptyControl())
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 100),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) {
+                      final d = n.items[i];
+                      return _ControlCard(
+                        key: ValueKey(d.id),
+                        d: d,
+                        busy: n.esBusy(d.id),
+                        onToggle: () => _toggle(d.id),
+                      );
+                    },
+                    childCount: n.items.length,
+                  ),
+                ),
+              ),
+          ]),
         );
       },
     );
@@ -831,9 +911,7 @@ class _ControlPageState extends State<ControlPage> {
 
 class _ControlHeader extends StatelessWidget {
   final int enc, total;
-  final bool demo;
-  const _ControlHeader(
-      {required this.enc, required this.total, required this.demo});
+  const _ControlHeader({required this.enc, required this.total});
 
   @override
   Widget build(BuildContext context) {
@@ -857,9 +935,7 @@ class _ControlHeader extends StatelessWidget {
               children: [
                 Text('$enc de $total encendidos',
                     style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: C.t1)),
+                        fontSize: 22, fontWeight: FontWeight.w800, color: C.t1)),
                 const SizedBox(height: 6),
                 ClipRRect(
                   borderRadius: R.xl,
@@ -878,7 +954,7 @@ class _ControlHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 16),
-          _PercentRing(pct: pct, enc: enc, total: total),
+          _PercentRing(enc: enc, total: total),
         ],
       ),
     );
@@ -886,10 +962,8 @@ class _ControlHeader extends StatelessWidget {
 }
 
 class _PercentRing extends StatelessWidget {
-  final double pct;
   final int enc, total;
-  const _PercentRing(
-      {required this.pct, required this.enc, required this.total});
+  const _PercentRing({required this.enc, required this.total});
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -925,10 +999,9 @@ class _ControlCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col = d.encendido ? d.tipo.color : C.t3;
-    final bgCol = d.encendido ? d.tipo.color.withOpacity(0.10) : C.card;
-    final borderCol =
-        d.encendido ? d.tipo.color.withOpacity(0.45) : C.border;
+    final col      = d.encendido ? d.tipo.color : C.t3;
+    final bgCol    = d.encendido ? d.tipo.color.withOpacity(0.10) : C.card;
+    final borderCol = d.encendido ? d.tipo.color.withOpacity(0.45) : C.border;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
@@ -936,27 +1009,38 @@ class _ControlCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: bgCol,
         borderRadius: R.sm,
-        border:
-            Border.all(color: borderCol, width: d.encendido ? 1.5 : 0.5),
+        border: Border.all(color: borderCol, width: d.encendido ? 1.5 : 0.5),
       ),
       child: InkWell(
         onTap: busy ? null : onToggle,
         borderRadius: R.sm,
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 280),
               width: 50,
               height: 50,
               decoration: BoxDecoration(
-                color: d.encendido
-                    ? d.tipo.color.withOpacity(0.18)
-                    : C.surface,
+                color: d.encendido ? d.tipo.color.withOpacity(0.18) : C.surface,
                 borderRadius: R.sm,
               ),
-              child: Icon(d.cat.icon, size: 26, color: col),
+              child: Stack(alignment: Alignment.center, children: [
+                Icon(d.cat.icon, size: 26, color: col),
+                // Indicador online/offline
+                if (d.online != null)
+                  Positioned(
+                    bottom: 4, right: 4,
+                    child: Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: d.online! ? C.green : C.red,
+                        border: Border.all(color: C.card, width: 1.5),
+                      ),
+                    ),
+                  ),
+              ]),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -983,8 +1067,7 @@ class _ControlCard extends StatelessWidget {
                     Expanded(
                       child: Text(d.conexionDisplay,
                           overflow: TextOverflow.ellipsis,
-                          style:
-                              const TextStyle(fontSize: 10, color: C.t3)),
+                          style: const TextStyle(fontSize: 10, color: C.t3)),
                     ),
                   ]),
                 ],
@@ -1019,12 +1102,10 @@ class _PowerButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (busy) {
       return SizedBox(
-        width: 56,
-        height: 56,
+        width: 56, height: 56,
         child: Center(
           child: SizedBox(
-            width: 28,
-            height: 28,
+            width: 28, height: 28,
             child: CircularProgressIndicator(strokeWidth: 3, color: color),
           ),
         ),
@@ -1034,27 +1115,18 @@ class _PowerButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 280),
-        width: 56,
-        height: 56,
+        width: 56, height: 56,
         decoration: BoxDecoration(
           color: encendido ? color : C.surface,
           shape: BoxShape.circle,
-          border:
-              Border.all(color: encendido ? color : C.border, width: 1.5),
+          border: Border.all(color: encendido ? color : C.border, width: 1.5),
           boxShadow: encendido
-              ? [
-                  BoxShadow(
-                      color: color.withOpacity(0.35),
-                      blurRadius: 14,
-                      spreadRadius: 2)
-                ]
+              ? [BoxShadow(
+                  color: color.withOpacity(0.35), blurRadius: 14, spreadRadius: 2)]
               : [],
         ),
-        child: Icon(
-          Icons.power_settings_new_rounded,
-          size: 24,
-          color: encendido ? Colors.white : C.t3,
-        ),
+        child: Icon(Icons.power_settings_new_rounded,
+            size: 24, color: encendido ? Colors.white : C.t3),
       ),
     );
   }
@@ -1075,17 +1147,15 @@ class _EmptyControl extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(
-                    color: C.blueGlow, shape: BoxShape.circle),
+                decoration:
+                    const BoxDecoration(color: C.blueGlow, shape: BoxShape.circle),
                 child: const Icon(Icons.devices_other_rounded,
                     size: 48, color: C.blue),
               ),
               const SizedBox(height: 20),
               const Text('Sin dispositivos',
                   style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: C.t1)),
+                      fontSize: 18, fontWeight: FontWeight.w700, color: C.t1)),
               const SizedBox(height: 8),
               const Text(
                 'Toca la pestaña "Dispositivos"\ny agrega el primero.',
@@ -1111,18 +1181,12 @@ class HabitacionesPage extends StatefulWidget {
 
 class _HabPageState extends State<HabitacionesPage> {
   String _sel = 'Todas';
-  final Set<int> _busy = {};
 
   Future<void> _toggle(int id) async {
-    if (_busy.contains(id)) return;
-    setState(() => _busy.add(id));
-    final ok = await widget.notifier.toggle(id);
-    if (mounted) {
-      setState(() => _busy.remove(id));
-      if (!ok) {
-        final d = widget.notifier.items.firstWhere((x) => x.id == id);
-        snack(context, 'Sin respuesta de "${d.nombre}"', error: true);
-      }
+    final result = await widget.notifier.toggle(id);
+    if (mounted && !result.ok) {
+      final d = widget.notifier.items.firstWhere((x) => x.id == id);
+      snack(context, 'Sin respuesta de "${d.nombre}"', error: true);
     }
   }
 
@@ -1143,8 +1207,7 @@ class _HabPageState extends State<HabitacionesPage> {
               pinned: true,
               backgroundColor: C.surface,
               title: const Text('Habitaciones',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(52),
                 child: _HabTabs(
@@ -1172,7 +1235,7 @@ class _HabPageState extends State<HabitacionesPage> {
                     (_, i) => _DevTile(
                       key: ValueKey(items[i].id),
                       d: items[i],
-                      busy: _busy.contains(items[i].id),
+                      busy: n.esBusy(items[i].id),
                       onToggle: () => _toggle(items[i].id),
                     ),
                     childCount: items.length,
@@ -1197,16 +1260,14 @@ class _HabTabs extends StatelessWidget {
   final List<String> habs;
   final String sel;
   final void Function(String) onSel;
-  const _HabTabs(
-      {required this.habs, required this.sel, required this.onSel});
+  const _HabTabs({required this.habs, required this.sel, required this.onSel});
 
   @override
   Widget build(BuildContext context) => SizedBox(
         height: 46,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           itemCount: habs.length,
           separatorBuilder: (_, __) => const SizedBox(width: 8),
           itemBuilder: (_, i) {
@@ -1221,8 +1282,7 @@ class _HabTabs extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: active ? C.blue : C.surface,
                   borderRadius: R.xl,
-                  border:
-                      Border.all(color: active ? C.blue : C.border),
+                  border: Border.all(color: active ? C.blue : C.border),
                 ),
                 child: Text(h,
                     style: TextStyle(
@@ -1240,12 +1300,8 @@ class _DevTile extends StatelessWidget {
   final Dispositivo d;
   final bool busy;
   final VoidCallback onToggle;
-  const _DevTile({
-    super.key,
-    required this.d,
-    required this.busy,
-    required this.onToggle,
-  });
+  const _DevTile(
+      {super.key, required this.d, required this.busy, required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
@@ -1269,29 +1325,26 @@ class _DevTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 280),
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: d.encendido
-                            ? col.withOpacity(0.22)
-                            : C.surface,
-                        borderRadius: R.sm,
-                      ),
-                      child: Icon(d.cat.icon,
-                          size: 22,
-                          color: d.encendido ? col : C.t3),
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 280),
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      color: d.encendido ? col.withOpacity(0.22) : C.surface,
+                      borderRadius: R.sm,
                     ),
-                    _PowerButton(
-                      encendido: d.encendido,
-                      busy: busy,
-                      color: col,
-                      onTap: busy ? null : onToggle,
-                    ),
-                  ]),
+                    child: Icon(d.cat.icon,
+                        size: 22, color: d.encendido ? col : C.t3),
+                  ),
+                  _PowerButton(
+                    encendido: d.encendido,
+                    busy: busy,
+                    color: col,
+                    onTap: busy ? null : onToggle,
+                  ),
+                ],
+              ),
               const Spacer(),
               Text(d.nombre,
                   maxLines: 2,
@@ -1354,8 +1407,7 @@ class _DispPageState extends State<DispositivosPage> {
               pinned: true,
               backgroundColor: C.surface,
               title: const Text('Dispositivos',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(56),
                 child: Padding(
@@ -1365,14 +1417,13 @@ class _DispPageState extends State<DispositivosPage> {
                     style: const TextStyle(color: C.t1, fontSize: 14),
                     decoration: InputDecoration(
                       hintText: 'Buscar...',
-                      prefixIcon: const Icon(Icons.search_rounded,
-                          color: C.t3, size: 20),
+                      prefixIcon:
+                          const Icon(Icons.search_rounded, color: C.t3, size: 20),
                       suffixIcon: _query.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear_rounded,
                                   color: C.t3, size: 18),
-                              onPressed: () =>
-                                  setState(() => _query = ''))
+                              onPressed: () => setState(() => _query = ''))
                           : null,
                     ),
                   ),
@@ -1383,9 +1434,7 @@ class _DispPageState extends State<DispositivosPage> {
               SliverFillRemaining(
                 child: Center(
                   child: Text(
-                    n.items.isEmpty
-                        ? 'Sin dispositivos aún'
-                        : 'Sin resultados',
+                    n.items.isEmpty ? 'Sin dispositivos aún' : 'Sin resultados',
                     style: const TextStyle(color: C.t2),
                   ),
                 ),
@@ -1395,15 +1444,17 @@ class _DispPageState extends State<DispositivosPage> {
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 100),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (_, i) =>
-                        _DispCard(d: filtered[i], notifier: n),
+                    (_, i) => _DispCard(
+                        key: ValueKey(filtered[i].id),
+                        d: filtered[i],
+                        notifier: n),
                     childCount: filtered.length,
                   ),
                 ),
               ),
           ]),
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _showAddSheet(context),
+            onPressed: () => _showDeviceSheet(context, notifier: n),
             backgroundColor: C.blue,
             icon: const Icon(Icons.add_rounded),
             label: const Text('Agregar',
@@ -1413,47 +1464,43 @@ class _DispPageState extends State<DispositivosPage> {
       },
     );
   }
+}
 
-  void _showAddSheet(BuildContext context) => showModalBottomSheet(
-        context: context,
-        backgroundColor: C.surface,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (_) => _AddForm(notifier: widget.notifier),
-      );
+void _showDeviceSheet(BuildContext context,
+    {required DispositivosNotifier notifier, Dispositivo? edit}) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: C.surface,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (_) => _DeviceForm(notifier: notifier, edit: edit),
+  );
 }
 
 class _DispCard extends StatefulWidget {
   final Dispositivo d;
   final DispositivosNotifier notifier;
-  const _DispCard({required this.d, required this.notifier});
+  const _DispCard({super.key, required this.d, required this.notifier});
 
   @override
   State<_DispCard> createState() => _DispCardState();
 }
 
 class _DispCardState extends State<_DispCard> {
-  bool _busy = false;
-
   Future<void> _toggle() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    final ok = await widget.notifier.toggle(widget.d.id);
-    if (mounted) {
-      setState(() => _busy = false);
-      if (!ok) {
-        snack(context, 'Sin respuesta de "${widget.d.nombre}"',
-            error: true);
-      }
+    final result = await widget.notifier.toggle(widget.d.id);
+    if (mounted && !result.ok) {
+      snack(context, 'Sin respuesta de "${widget.d.nombre}"', error: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final d = widget.d;
+    final d   = widget.d;
     final col = d.tipo.color;
+    final busy = widget.notifier.esBusy(d.id);
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       margin: const EdgeInsets.only(bottom: 10),
@@ -1471,14 +1518,26 @@ class _DispCardState extends State<_DispCard> {
           Row(children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 280),
-              width: 44,
-              height: 44,
+              width: 44, height: 44,
               decoration: BoxDecoration(
                 color: d.encendido ? col.withOpacity(0.18) : C.surface,
                 borderRadius: R.xs,
               ),
-              child: Icon(d.cat.icon,
-                  size: 22, color: d.encendido ? col : C.t3),
+              child: Stack(alignment: Alignment.center, children: [
+                Icon(d.cat.icon, size: 22, color: d.encendido ? col : C.t3),
+                if (d.online != null)
+                  Positioned(
+                    bottom: 3, right: 3,
+                    child: Container(
+                      width: 7, height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: d.online! ? C.green : C.red,
+                        border: Border.all(color: C.card, width: 1.5),
+                      ),
+                    ),
+                  ),
+              ]),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1487,9 +1546,7 @@ class _DispCardState extends State<_DispCard> {
                 children: [
                   Text(d.nombre,
                       style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: C.t1)),
+                          fontSize: 14, fontWeight: FontWeight.w600, color: C.t1)),
                   const SizedBox(height: 4),
                   Row(children: [
                     _MicroBadge(d.tipo.label, col: col),
@@ -1501,12 +1558,10 @@ class _DispCardState extends State<_DispCard> {
                 ],
               ),
             ),
-            _busy
+            busy
                 ? SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: col))
+                    width: 28, height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: col))
                 : Switch(
                     value: d.encendido,
                     onChanged: (_) => _toggle(),
@@ -1514,11 +1569,8 @@ class _DispCardState extends State<_DispCard> {
                     activeTrackColor: col,
                     inactiveThumbColor: C.t3,
                     inactiveTrackColor: C.surface,
-                    trackOutlineColor:
-                        WidgetStateProperty.resolveWith((s) =>
-                            d.encendido
-                                ? col.withOpacity(0.4)
-                                : C.border),
+                    trackOutlineColor: WidgetStateProperty.resolveWith(
+                        (s) => d.encendido ? col.withOpacity(0.4) : C.border),
                   ),
           ]),
           const SizedBox(height: 8),
@@ -1533,30 +1585,37 @@ class _DispCardState extends State<_DispCard> {
                   style: const TextStyle(fontSize: 11, color: C.t3)),
             ),
             const SizedBox(width: 8),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.toggle_on_rounded, size: 12, color: C.t3),
-              const SizedBox(width: 3),
-              Text('${d.toggleCount} ops',
-                  style: const TextStyle(fontSize: 11, color: C.t3)),
-            ]),
+            Text('${d.toggleCount} ops',
+                style: const TextStyle(fontSize: 11, color: C.t3)),
             const SizedBox(width: 10),
-            GestureDetector(
+            // Diagnóstico
+            _CardAction(
+              icon: Icons.wifi_find_rounded,
+              color: C.blue,
+              bg: C.blueGlow,
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) =>
-                        DiagnosticoPage(d: d, notifier: widget.notifier)),
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                    color: C.blueGlow, borderRadius: R.xs),
-                child: const Icon(Icons.wifi_find_rounded,
-                    size: 15, color: C.blue),
+                  builder: (_) =>
+                      DiagnosticoPage(d: d, notifier: widget.notifier),
+                ),
               ),
             ),
             const SizedBox(width: 6),
-            GestureDetector(
+            // Editar
+            _CardAction(
+              icon: Icons.edit_rounded,
+              color: C.purple,
+              bg: C.purpleGlow,
+              onTap: () => _showDeviceSheet(context,
+                  notifier: widget.notifier, edit: d),
+            ),
+            const SizedBox(width: 6),
+            // Eliminar
+            _CardAction(
+              icon: Icons.delete_outline_rounded,
+              color: C.red,
+              bg: C.redGlow,
               onTap: () => showDialog(
                 context: context,
                 builder: (_) => _DeleteDialog(
@@ -1567,13 +1626,6 @@ class _DispCardState extends State<_DispCard> {
                   },
                 ),
               ),
-              child: Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                    color: C.redGlow, borderRadius: R.xs),
-                child: const Icon(Icons.delete_outline_rounded,
-                    size: 15, color: C.red),
-              ),
             ),
           ]),
         ]),
@@ -1582,39 +1634,74 @@ class _DispCardState extends State<_DispCard> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// FORMULARIO AGREGAR
-// ════════════════════════════════════════════════════════════════
-class _AddForm extends StatefulWidget {
-  final DispositivosNotifier notifier;
-  const _AddForm({required this.notifier});
+class _CardAction extends StatelessWidget {
+  final IconData icon;
+  final Color color, bg;
+  final VoidCallback onTap;
+  const _CardAction(
+      {required this.icon,
+      required this.color,
+      required this.bg,
+      required this.onTap});
 
   @override
-  State<_AddForm> createState() => _AddFormState();
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(color: bg, borderRadius: R.xs),
+          child: Icon(icon, size: 15, color: color),
+        ),
+      );
 }
 
-class _AddFormState extends State<_AddForm> {
-  final _fk = GlobalKey<FormState>();
-  final _cNombre = TextEditingController();
-  final _cIp = TextEditingController();
-  final _cPuerto = TextEditingController(text: '8888');
-  final _cUrl = TextEditingController();
-  final _cHab = TextEditingController(text: 'General');
+// ════════════════════════════════════════════════════════════════
+// FORMULARIO AGREGAR / EDITAR
+// ════════════════════════════════════════════════════════════════
+class _DeviceForm extends StatefulWidget {
+  final DispositivosNotifier notifier;
+  final Dispositivo? edit; // null = agregar, non-null = editar
+  const _DeviceForm({required this.notifier, this.edit});
 
-  TipoD _tipo = TipoD.celular;
-  CatArtefacto _cat = CatArtefacto.luz;
-  ModoConexion _modo = ModoConexion.movil;
-  bool _saving = false;
+  @override
+  State<_DeviceForm> createState() => _DeviceFormState();
+}
+
+class _DeviceFormState extends State<_DeviceForm> {
+  final _fk      = GlobalKey<FormState>();
+  late final TextEditingController _cNombre;
+  late final TextEditingController _cIp;
+  late final TextEditingController _cPuerto;
+  late final TextEditingController _cUrl;
+  late final TextEditingController _cHab;
+
+  late TipoD       _tipo;
+  late CatArtefacto _cat;
+  late ModoConexion _modo;
+  bool _saving  = false;
   bool _pinging = false;
   bool? _pingOk;
 
+  bool get _isEdit => widget.edit != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.edit;
+    _cNombre = TextEditingController(text: e?.nombre ?? '');
+    _cIp     = TextEditingController(text: e?.ip ?? '');
+    _cPuerto = TextEditingController(text: (e?.puerto ?? 8888).toString());
+    _cUrl    = TextEditingController(text: e?.urlBase ?? '');
+    _cHab    = TextEditingController(text: e?.habitacion ?? 'General');
+    _tipo    = e?.tipo ?? TipoD.celular;
+    _cat     = e?.cat  ?? CatArtefacto.luz;
+    _modo    = e?.modo ?? ModoConexion.movil;
+  }
+
   @override
   void dispose() {
-    _cNombre.dispose();
-    _cIp.dispose();
-    _cPuerto.dispose();
-    _cUrl.dispose();
-    _cHab.dispose();
+    _cNombre.dispose(); _cIp.dispose();
+    _cPuerto.dispose(); _cUrl.dispose(); _cHab.dispose();
     super.dispose();
   }
 
@@ -1623,13 +1710,10 @@ class _AddFormState extends State<_AddForm> {
       if (_modo == ModoConexion.url) {
         final base = _cUrl.text.trim().replaceAll(RegExp(r'/$'), '');
         return base.isEmpty ? '(ingresa la URL)' : '$base${_tipo.pathOn}';
-      } else {
-        final ip = _cIp.text.trim();
-        final p = _cPuerto.text.trim();
-        return ip.isEmpty
-            ? '(ingresa la IP)'
-            : 'http://$ip:$p${_tipo.pathOn}';
       }
+      final ip = _cIp.text.trim();
+      final p  = _cPuerto.text.trim();
+      return ip.isEmpty ? '(ingresa la IP)' : 'http://$ip:$p${_tipo.pathOn}';
     } catch (_) {
       return '—';
     }
@@ -1640,9 +1724,7 @@ class _AddFormState extends State<_AddForm> {
     return Padding(
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 20,
-          right: 20,
-          top: 20),
+          left: 20, right: 20, top: 20),
       child: Form(
         key: _fk,
         child: SingleChildScrollView(
@@ -1652,24 +1734,25 @@ class _AddFormState extends State<_AddForm> {
             children: [
               Center(
                 child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: C.border, borderRadius: R.xl),
+                  width: 36, height: 4,
+                  decoration:
+                      BoxDecoration(color: C.border, borderRadius: R.xl),
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Agregar dispositivo',
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: C.t1)),
+              Text(_isEdit ? 'Editar dispositivo' : 'Agregar dispositivo',
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w700, color: C.t1)),
               const SizedBox(height: 4),
-              const Text(
-                'Configura tu dispositivo para controlarlo desde la app.',
-                style: TextStyle(fontSize: 11, color: C.t2),
+              Text(
+                _isEdit
+                    ? 'Modifica los datos y guarda los cambios.'
+                    : 'Configura tu dispositivo para controlarlo desde la app.',
+                style: const TextStyle(fontSize: 11, color: C.t2),
               ),
               const SizedBox(height: 18),
+
+              // ── Nombre ──────────────────────────────────────
               const _Lbl('Nombre'),
               TextFormField(
                 controller: _cNombre,
@@ -1681,6 +1764,8 @@ class _AddFormState extends State<_AddForm> {
                     v == null || v.trim().isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 14),
+
+              // ── Habitación ──────────────────────────────────
               const _Lbl('Habitación / Zona'),
               TextFormField(
                 controller: _cHab,
@@ -1690,13 +1775,13 @@ class _AddFormState extends State<_AddForm> {
                     hintText: 'Sala, Cocina, Dormitorio...'),
               ),
               const SizedBox(height: 14),
+
+              // ── Tipo de artefacto ───────────────────────────
               const _Lbl('Tipo de artefacto'),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 8, runSpacing: 8,
                 children: CatArtefacto.values.map((c) {
                   final sel = c == _cat;
-                  final col = c.color;
                   return GestureDetector(
                     onTap: () => setState(() => _cat = c),
                     child: AnimatedContainer(
@@ -1704,33 +1789,30 @@ class _AddFormState extends State<_AddForm> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: sel ? col.withOpacity(0.18) : C.surface,
+                        color: sel ? c.color.withOpacity(0.18) : C.surface,
                         borderRadius: R.xs,
-                        border: Border.all(
-                            color: sel ? col : C.border),
+                        border: Border.all(color: sel ? c.color : C.border),
                       ),
-                      child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(c.icon,
-                                size: 13,
-                                color: sel ? col : C.t3),
-                            const SizedBox(width: 5),
-                            Text(c.label,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: sel ? col : C.t2)),
-                          ]),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(c.icon, size: 13,
+                            color: sel ? c.color : C.t3),
+                        const SizedBox(width: 5),
+                        Text(c.label,
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: sel ? c.color : C.t2)),
+                      ]),
                     ),
                   );
                 }).toList(),
               ),
               const SizedBox(height: 14),
+
+              // ── Firmware / Tipo ─────────────────────────────
               const _Lbl('Firmware / Tipo'),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 8, runSpacing: 8,
                 children: TipoD.values.map((t) {
                   final sel = t == _tipo;
                   return GestureDetector(
@@ -1748,31 +1830,27 @@ class _AddFormState extends State<_AddForm> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                        color: sel
-                            ? t.color.withOpacity(0.2)
-                            : C.surface,
+                        color: sel ? t.color.withOpacity(0.2) : C.surface,
                         borderRadius: R.xs,
-                        border: Border.all(
-                            color: sel ? t.color : C.border),
+                        border: Border.all(color: sel ? t.color : C.border),
                       ),
-                      child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(t.icon,
-                                size: 13,
-                                color: sel ? t.color : C.t3),
-                            const SizedBox(width: 5),
-                            Text(t.label,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: sel ? t.color : C.t2)),
-                          ]),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(t.icon, size: 13,
+                            color: sel ? t.color : C.t3),
+                        const SizedBox(width: 5),
+                        Text(t.label,
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: sel ? t.color : C.t2)),
+                      ]),
                     ),
                   );
                 }).toList(),
               ),
               const SizedBox(height: 16),
+
+              // ── Modo de conexión ────────────────────────────
               const _Lbl('Modo de conexión'),
               ...ModoConexion.values.map((m) {
                 final sel = m == _modo;
@@ -1780,8 +1858,7 @@ class _AddFormState extends State<_AddForm> {
                   onTap: () => setState(() {
                     _modo = m;
                     _pingOk = null;
-                    if (m == ModoConexion.movil &&
-                        _tipo == TipoD.celular) {
+                    if (m == ModoConexion.movil && _tipo == TipoD.celular) {
                       _cPuerto.text = '8888';
                     }
                   }),
@@ -1798,16 +1875,12 @@ class _AddFormState extends State<_AddForm> {
                     ),
                     child: Row(children: [
                       Container(
-                        width: 32,
-                        height: 32,
+                        width: 32, height: 32,
                         decoration: BoxDecoration(
-                          color: sel
-                              ? m.color.withOpacity(0.18)
-                              : C.card,
+                          color: sel ? m.color.withOpacity(0.18) : C.card,
                           borderRadius: R.xs,
                         ),
-                        child: Icon(m.icon,
-                            size: 16,
+                        child: Icon(m.icon, size: 16,
                             color: sel ? m.color : C.t3),
                       ),
                       const SizedBox(width: 12),
@@ -1834,6 +1907,8 @@ class _AddFormState extends State<_AddForm> {
                   ),
                 );
               }),
+
+              // ── Campos según modo ───────────────────────────
               if (_modo == ModoConexion.url) ...[
                 const _Lbl('URL base del dispositivo'),
                 TextFormField(
@@ -1844,9 +1919,7 @@ class _AddFormState extends State<_AddForm> {
                       hintText: 'https://abc123.ngrok.io'),
                   onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'URL requerida';
-                    }
+                    if (v == null || v.trim().isEmpty) return 'URL requerida';
                     if (!v.trim().startsWith('http')) {
                       return 'Debe empezar con http o https';
                     }
@@ -1861,8 +1934,7 @@ class _AddFormState extends State<_AddForm> {
                   decoration: BoxDecoration(
                     color: C.orangeGlow,
                     borderRadius: R.xs,
-                    border: Border.all(
-                        color: C.orange.withOpacity(0.4)),
+                    border: Border.all(color: C.orange.withOpacity(0.4)),
                   ),
                   child: Row(children: [
                     const Icon(Icons.info_outline_rounded,
@@ -1873,8 +1945,7 @@ class _AddFormState extends State<_AddForm> {
                         _tipo == TipoD.celular
                             ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra'
                             : 'Busca la IP en la interfaz web del dispositivo o en tu router',
-                        style: const TextStyle(
-                            fontSize: 10, color: C.orange),
+                        style: const TextStyle(fontSize: 10, color: C.orange),
                       ),
                     ),
                   ]),
@@ -1882,18 +1953,14 @@ class _AddFormState extends State<_AddForm> {
                 TextFormField(
                   controller: _cIp,
                   style: const TextStyle(color: C.t1),
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
-                  decoration:
-                      InputDecoration(hintText: _modo.hint),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(hintText: _modo.hint),
                   onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'IP requerida';
-                    }
+                    if (v == null || v.trim().isEmpty) return 'IP requerida';
                     if (v.trim() == '0.0.0.0') return 'IP inválida';
-                    if (v.trim() == 'localhost' ||
-                        v.trim() == '127.0.0.1') {
+                    if (v.trim() == 'localhost' || v.trim() == '127.0.0.1') {
                       return 'No uses localhost';
                     }
                     return null;
@@ -1906,36 +1973,34 @@ class _AddFormState extends State<_AddForm> {
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: C.t1),
                   decoration: InputDecoration(
-                      hintText:
-                          _tipo == TipoD.celular ? '8888' : '80'),
+                      hintText: _tipo == TipoD.celular ? '8888' : '80'),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'Requerido';
-                    }
-                    if (int.tryParse(v.trim()) == null) {
-                      return 'Solo números';
+                    if (v == null || v.trim().isEmpty) return 'Requerido';
+                    final n = int.tryParse(v.trim());
+                    if (n == null || n < 1 || n > 65535) {
+                      return 'Puerto inválido (1-65535)';
                     }
                     return null;
                   },
                 ),
               ],
               const SizedBox(height: 16),
+
+              // ── Preview URL ─────────────────────────────────
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: C.blueGlow,
                   borderRadius: R.xs,
-                  border:
-                      Border.all(color: C.blue.withOpacity(0.3)),
+                  border: Border.all(color: C.blue.withOpacity(0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Row(children: [
-                      Icon(Icons.link_rounded,
-                          size: 12, color: C.blue),
+                      Icon(Icons.link_rounded, size: 12, color: C.blue),
                       SizedBox(width: 6),
-                      Text('URL que se llamará al encender:',
+                      Text('URL al encender:',
                           style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
@@ -1951,12 +2016,13 @@ class _AddFormState extends State<_AddForm> {
                 ),
               ),
               const SizedBox(height: 14),
+
+              // ── Ping ────────────────────────────────────────
               OutlinedButton.icon(
                 onPressed: _pinging ? null : _doPing,
                 icon: _pinging
                     ? const SizedBox(
-                        width: 14,
-                        height: 14,
+                        width: 14, height: 14,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: C.blue))
                     : Icon(
@@ -1995,23 +2061,23 @@ class _AddFormState extends State<_AddForm> {
                           : _pingOk!
                               ? C.green
                               : C.orange),
-                  shape: const RoundedRectangleBorder(
-                      borderRadius: R.xs),
+                  shape:
+                      const RoundedRectangleBorder(borderRadius: R.xs),
                 ),
               ),
               const SizedBox(height: 10),
+
+              // ── Guardar ─────────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _saving ? null : _doSave,
                   child: _saving
                       ? const SizedBox(
-                          height: 20,
-                          width: 20,
+                          height: 20, width: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white))
-                      : const Text('Agregar dispositivo'),
+                              strokeWidth: 2, color: Colors.white))
+                      : Text(_isEdit ? 'Guardar cambios' : 'Agregar dispositivo'),
                 ),
               ),
               const SizedBox(height: 24),
@@ -2024,46 +2090,56 @@ class _AddFormState extends State<_AddForm> {
 
   Future<void> _doPing() async {
     if (!_fk.currentState!.validate()) return;
-    setState(() {
-      _pinging = true;
-      _pingOk = null;
-    });
-    final ok = await NetCtrl.pingRaw(
+    setState(() { _pinging = true; _pingOk = null; });
+    final ok = await NetCtrl.ping(
       modo: _modo,
       ip: _cIp.text.trim(),
       puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
       urlBase: _cUrl.text.trim(),
-      tipo: _tipo,
     );
-    if (mounted) {
-      setState(() {
-        _pinging = false;
-        _pingOk = ok;
-      });
-    }
+    if (mounted) setState(() { _pinging = false; _pingOk = ok; });
   }
 
   Future<void> _doSave() async {
     if (!_fk.currentState!.validate()) return;
     setState(() => _saving = true);
-    final ok = await widget.notifier.agregar(
-      nombre: _cNombre.text,
-      tipo: _tipo,
-      cat: _cat,
-      modo: _modo,
-      ip: _cIp.text,
-      puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
-      urlBase: _cUrl.text,
-      habitacion: _cHab.text,
-      skipPing: true,
-    );
-    if (mounted) {
-      setState(() => _saving = false);
-      if (ok) {
+
+    if (_isEdit) {
+      widget.notifier.editar(
+        id: widget.edit!.id,
+        nombre: _cNombre.text,
+        tipo: _tipo,
+        cat: _cat,
+        modo: _modo,
+        ip: _cIp.text,
+        puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
+        urlBase: _cUrl.text,
+        habitacion: _cHab.text,
+      );
+      if (mounted) {
         Navigator.pop(context);
-        snack(context, 'Dispositivo agregado ✓');
-      } else {
-        snack(context, 'Error al guardar', error: true);
+        snack(context, 'Dispositivo actualizado ✓');
+      }
+    } else {
+      final ok = await widget.notifier.agregar(
+        nombre: _cNombre.text,
+        tipo: _tipo,
+        cat: _cat,
+        modo: _modo,
+        ip: _cIp.text,
+        puerto: int.tryParse(_cPuerto.text.trim()) ?? 80,
+        urlBase: _cUrl.text,
+        habitacion: _cHab.text,
+        skipPing: true,
+      );
+      if (mounted) {
+        setState(() => _saving = false);
+        if (ok) {
+          Navigator.pop(context);
+          snack(context, 'Dispositivo agregado ✓');
+        } else {
+          snack(context, 'Error al guardar', error: true);
+        }
       }
     }
   }
@@ -2087,16 +2163,49 @@ class HistorialPage extends StatelessWidget {
           appBar: AppBar(
             backgroundColor: C.surface,
             title: const Text('Historial',
-                style:
-                    TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
+                style: TextStyle(fontWeight: FontWeight.w700, color: C.t1)),
+            actions: [
+              if (log.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: C.card,
+                      shape: const RoundedRectangleBorder(borderRadius: R.md),
+                      title: const Text('Limpiar historial',
+                          style: TextStyle(color: C.t1, fontSize: 16)),
+                      content: const Text('¿Borrar todo el historial?',
+                          style: TextStyle(color: C.t2)),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancelar'),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            notifier.limpiarLog();
+                            Navigator.pop(context);
+                          },
+                          style: TextButton.styleFrom(
+                              foregroundColor: C.red),
+                          child: const Text('Limpiar'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  icon: const Icon(Icons.delete_sweep_rounded,
+                      color: C.t3, size: 18),
+                  label: const Text('Limpiar',
+                      style: TextStyle(color: C.t3, fontSize: 13)),
+                ),
+            ],
           ),
           body: log.isEmpty
               ? const Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.history_rounded,
-                          size: 46, color: C.t3),
+                      Icon(Icons.history_rounded, size: 46, color: C.t3),
                       SizedBox(height: 12),
                       Text('Sin actividad aún',
                           style: TextStyle(color: C.t2)),
@@ -2121,8 +2230,7 @@ class _LogTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           color: C.card,
           borderRadius: R.xs,
@@ -2130,8 +2238,7 @@ class _LogTile extends StatelessWidget {
         ),
         child: Row(children: [
           Container(
-            width: 30,
-            height: 30,
+            width: 30, height: 30,
             decoration: BoxDecoration(
               color: (e.ok ? C.green : C.red).withOpacity(0.15),
               shape: BoxShape.circle,
@@ -2148,26 +2255,15 @@ class _LogTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(e.msg,
-                    style:
-                        const TextStyle(fontSize: 13, color: C.t1)),
+                    style: const TextStyle(fontSize: 13, color: C.t1)),
                 const SizedBox(height: 2),
-                Text(_fmt(e.ts),
-                    style:
-                        const TextStyle(fontSize: 11, color: C.t3)),
+                Text(_fmtTs(e.ts),
+                    style: const TextStyle(fontSize: 11, color: C.t3)),
               ],
             ),
           ),
         ]),
       );
-
-  String _fmt(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inSeconds < 60) return 'hace ${d.inSeconds}s';
-    if (d.inMinutes < 60) return 'hace ${d.inMinutes}m';
-    if (d.inHours < 24) return 'hace ${d.inHours}h';
-    return '${t.day}/${t.month}/${t.year} '
-        '${t.hour}:${t.minute.toString().padLeft(2, '0')}';
-  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2193,16 +2289,10 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     _run();
   }
 
-  /// Diagnóstico de solo LECTURA: nunca enciende ni apaga el dispositivo.
-  /// Prueba únicamente conectividad HTTP a la raíz y a las rutas on/off
-  /// sin modificar el estado real del relé.
   Future<void> _run() async {
-    setState(() {
-      _logs.clear();
-      _running = true;
-    });
+    setState(() { _logs.clear(); _running = true; });
 
-    final d = widget.d;
+    final d    = widget.d;
     final demo = widget.notifier.demo;
 
     _log('Dispositivo: ${d.nombre}', null);
@@ -2227,10 +2317,13 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
             : 'http://${d.ip.trim()}:${d.puerto}';
         final resp = await http
             .get(Uri.parse(baseUrl))
-            .timeout(const Duration(seconds: 5));
+            .timeout(AppConfig.pingTimeout);
         _log('  GET $baseUrl', true);
-        _log('  HTTP ${resp.statusCode} — ${resp.statusCode < 500 ? "alcanzable ✓" : "error del servidor ✗"}',
-            resp.statusCode < 500);
+        final alcanzable = resp.statusCode < 500;
+        _log('  HTTP ${resp.statusCode} — ${alcanzable ? "alcanzable ✓" : "error del servidor ✗"}',
+            alcanzable);
+      } on TimeoutException {
+        _log('  TIMEOUT — dispositivo no responde en ${AppConfig.pingTimeout.inSeconds}s', false);
       } catch (e) {
         _log('  ERROR: $e', false);
         _log('  → Verifica IP/URL y que estés en la misma red', false);
@@ -2239,7 +2332,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
 
     _log('─────────────────────────────', null);
 
-    // ── 2. Verificar URL ON (sin enviar el comando real) ────────
+    // ── 2. Verificar URL ON (solo HEAD, sin ejecutar) ──────────
     _log('▶ Verificando ruta ON (sin ejecutar)...', null);
     _log('  ${d.urlOn}', null);
     if (demo) {
@@ -2247,25 +2340,22 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
       _log('  [DEMO] URL bien formada ✓', true);
     } else {
       try {
-        // HEAD request — solo chequea alcanzabilidad, no activa el relé
         final resp = await http
             .head(Uri.parse(d.urlOn))
-            .timeout(const Duration(seconds: 5));
-        _log('  HEAD → HTTP ${resp.statusCode}',
-            resp.statusCode < 500);
-        if (resp.statusCode < 500) {
-          _log('  Ruta accesible ✓ (no se ejecutó el comando)', true);
-        }
+            .timeout(AppConfig.pingTimeout);
+        final ok = resp.statusCode < 500;
+        _log('  HEAD → HTTP ${resp.statusCode}', ok);
+        if (ok) _log('  Ruta accesible ✓ (comando no ejecutado)', true);
+      } on TimeoutException {
+        _log('  TIMEOUT en ruta ON', false);
       } catch (_) {
-        // HEAD puede no estar soportado; intentamos GET a la raíz en su lugar
-        _log('  HEAD no soportado — ruta depende del dispositivo', null);
-        _log('  URL bien formada ✓', true);
+        _log('  HEAD no soportado por este firmware — URL válida ✓', null);
       }
     }
 
     _log('─────────────────────────────', null);
 
-    // ── 3. Verificar URL OFF (sin enviar el comando real) ───────
+    // ── 3. Verificar URL OFF (solo HEAD, sin ejecutar) ─────────
     _log('▶ Verificando ruta OFF (sin ejecutar)...', null);
     _log('  ${d.urlOff}', null);
     if (demo) {
@@ -2275,27 +2365,24 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
       try {
         final resp = await http
             .head(Uri.parse(d.urlOff))
-            .timeout(const Duration(seconds: 5));
-        _log('  HEAD → HTTP ${resp.statusCode}',
-            resp.statusCode < 500);
-        if (resp.statusCode < 500) {
-          _log('  Ruta accesible ✓ (no se ejecutó el comando)', true);
-        }
+            .timeout(AppConfig.pingTimeout);
+        final ok = resp.statusCode < 500;
+        _log('  HEAD → HTTP ${resp.statusCode}', ok);
+        if (ok) _log('  Ruta accesible ✓ (comando no ejecutado)', true);
+      } on TimeoutException {
+        _log('  TIMEOUT en ruta OFF', false);
       } catch (_) {
-        _log('  HEAD no soportado — ruta depende del dispositivo', null);
-        _log('  URL bien formada ✓', true);
+        _log('  HEAD no soportado por este firmware — URL válida ✓', null);
       }
     }
 
     _log('─────────────────────────────', null);
-    _log('✓ Diagnóstico completo — estado del dispositivo sin cambios',
-        true);
+    _log('✓ Diagnóstico completo — estado del dispositivo sin cambios', true);
     setState(() => _running = false);
   }
 
-  void _log(String msg, bool? ok) {
-    setState(() => _logs.add(_DiagLog(msg, ok)));
-  }
+  void _log(String msg, bool? ok) =>
+      setState(() => _logs.add(_DiagLog(msg, ok)));
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -2304,14 +2391,11 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
           backgroundColor: C.surface,
           title: Text('Diagnóstico: ${widget.d.nombre}',
               style: const TextStyle(
-                  color: C.t1,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15)),
+                  color: C.t1, fontWeight: FontWeight.w700, fontSize: 15)),
           actions: [
             if (!_running)
               IconButton(
-                icon:
-                    const Icon(Icons.refresh_rounded, color: C.blue),
+                icon: const Icon(Icons.refresh_rounded, color: C.blue),
                 onPressed: _run,
                 tooltip: 'Repetir diagnóstico',
               ),
@@ -2328,15 +2412,13 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
               itemBuilder: (_, i) {
                 final l = _logs[i];
                 Color col = C.t2;
-                if (l.ok == true) col = C.green;
+                if (l.ok == true)  col = C.green;
                 if (l.ok == false) col = C.red;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(l.msg,
                       style: TextStyle(
-                          fontSize: 12,
-                          color: col,
-                          fontFamily: 'monospace')),
+                          fontSize: 12, color: col, fontFamily: 'monospace')),
                 );
               },
             ),
@@ -2358,7 +2440,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
 
 class _DiagLog {
   final String msg;
-  final bool? ok;
+  final bool?  ok;
   _DiagLog(this.msg, this.ok);
 }
 
@@ -2367,20 +2449,17 @@ class _DiagLog {
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;
-  final Color col;
+  final Color  col;
   const _MicroBadge(this.text, {required this.col});
 
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-            color: col.withOpacity(0.14), borderRadius: R.xl),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration:
+            BoxDecoration(color: col.withOpacity(0.14), borderRadius: R.xl),
         child: Text(text,
             style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: col)),
+                fontSize: 9, fontWeight: FontWeight.w700, color: col)),
       );
 }
 
@@ -2393,18 +2472,15 @@ class _Lbl extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(text,
             style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: C.t2)),
+                fontSize: 11, fontWeight: FontWeight.w600, color: C.t2)),
       );
 }
 
 class _IconBtn extends StatelessWidget {
   final IconData icon;
-  final Color color;
-  final String tooltip;
+  final Color    color;
+  final String   tooltip;
   final VoidCallback onTap;
-
   const _IconBtn({
     required this.icon,
     required this.color,
@@ -2418,8 +2494,7 @@ class _IconBtn extends StatelessWidget {
         child: GestureDetector(
           onTap: onTap,
           child: Container(
-            width: 34,
-            height: 34,
+            width: 34, height: 34,
             decoration: BoxDecoration(
               color: color.withOpacity(0.15),
               borderRadius: R.xs,
@@ -2432,13 +2507,9 @@ class _IconBtn extends StatelessWidget {
 }
 
 class _DeleteDialog extends StatelessWidget {
-  final String nombre;
+  final String       nombre;
   final VoidCallback onConfirm;
-
-  const _DeleteDialog({
-    required this.nombre,
-    required this.onConfirm,
-  });
+  const _DeleteDialog({required this.nombre, required this.onConfirm});
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -2457,8 +2528,7 @@ class _DeleteDialog extends StatelessWidget {
           ),
           TextButton(
             onPressed: onConfirm,
-            style:
-                TextButton.styleFrom(foregroundColor: C.red),
+            style: TextButton.styleFrom(foregroundColor: C.red),
             child: const Text('Eliminar'),
           ),
         ],

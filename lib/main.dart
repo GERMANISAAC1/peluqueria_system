@@ -2218,6 +2218,8 @@ class _DiagLog {
   _DiagLog(this.msg, this.ok);
 }
 
+
+}
 // ════════════════════════════════════════════════════════════════
 // WIDGETS REUTILIZABLES - CORREGIDOS
 // ════════════════════════════════════════════════════════════════
@@ -2250,6 +2252,7 @@ class _IconBtn extends StatelessWidget {
   final Color color;
   final String tooltip;
   final VoidCallback onTap;
+  
   const _IconBtn({
     required this.icon,
     required this.color,

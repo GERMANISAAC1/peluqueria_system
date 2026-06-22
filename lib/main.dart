@@ -1,11 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  DOMÓTICA PRO  v4.0  —  Optimizado para control real            ║
 // ║  Flutter 3.41+ · Dart 3                                         ║
-// ╠══════════════════════════════════════════════════════════════════╣
-// ║  MODOS DE CONEXIÓN:                                             ║
-// ║  1. LAN   — IP privada 192.168.x.x  (misma WiFi)               ║
-// ║  2. MÓVIL — IP:puerto directa desde cualquier red               ║
-// ║  3. URL   — URL completa (ngrok, Cloudflare Tunnel, DDNS)       ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
@@ -279,7 +274,7 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  v4.5 - CORREGIDO PARA CELULAR
+// CONTROLADOR DE RED
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   static const _timeout = Duration(seconds: 5);
@@ -1541,7 +1536,7 @@ class _DispCardState extends State<_DispCard> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// FORMULARIO AGREGAR - CORREGIDO
+// FORMULARIO AGREGAR
 // ════════════════════════════════════════════════════════════════
 class _AddForm extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -2224,7 +2219,7 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES
+// WIDGETS REUTILIZABLES - CORREGIDOS
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;

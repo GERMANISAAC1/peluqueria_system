@@ -1051,8 +1051,12 @@ class _PowerButton extends StatelessWidget {
   }
 }
 
+// ════════════════════════════════════════════════════════════════
+// ESTADO VACÍO - CORREGIDO
+// ════════════════════════════════════════════════════════════════
 class _EmptyControl extends StatelessWidget {
   const _EmptyControl();
+  
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
@@ -1062,15 +1066,25 @@ class _EmptyControl extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(24),
-                decoration:
-                    const BoxDecoration(color: C.blueGlow, shape: BoxShape.circle),
-                child:
-                    const Icon(Icons.devices_other_rounded, size: 48, color: C.blue),
+                decoration: const BoxDecoration(
+                  color: C.blueGlow, 
+                  shape: BoxShape.circle
+                ),
+                child: const Icon(
+                  Icons.devices_other_rounded, 
+                  size: 48, 
+                  color: C.blue
+                ),
               ),
               const SizedBox(height: 20),
-              const Text('Sin dispositivos',
-                  style: TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700, color: C.t1)),
+              const Text(
+                'Sin dispositivos',
+                style: TextStyle(
+                  fontSize: 18, 
+                  fontWeight: FontWeight.w700, 
+                  color: C.t1
+                ),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Toca la pestaña "Dispositivos"\ny agrega el primero.',
@@ -1891,8 +1905,7 @@ class _AddFormState extends State<_AddForm> {
                                 ? Icons.check_circle_rounded
                                 : Icons.error_rounded,
                         size: 16,
-                        color: _pingOk == null
-                            ? C.t2
+                        color: _pingOk == null                            ? C.t2
                             : _pingOk!
                                 ? C.green
                                 : C.red),
@@ -2218,8 +2231,6 @@ class _DiagLog {
   _DiagLog(this.msg, this.ok);
 }
 
-
-}
 // ════════════════════════════════════════════════════════════════
 // WIDGETS REUTILIZABLES - CORREGIDOS
 // ════════════════════════════════════════════════════════════════

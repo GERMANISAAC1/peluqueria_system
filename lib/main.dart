@@ -1,6 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  DOMÓTICA PRO  v4.0  —  Optimizado para control real            ║
-// ║  Flutter 3.41+ · Dart 3                                         ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import 'dart:async';
@@ -605,7 +604,7 @@ class DomoticaApp extends StatelessWidget {
               ),
             ),
           ),
-          home: const Shell(notifier: null),
+          home: Shell(notifier: notifier),
         ),
       );
 }
@@ -614,7 +613,7 @@ class DomoticaApp extends StatelessWidget {
 // SHELL
 // ════════════════════════════════════════════════════════════════
 class Shell extends StatefulWidget {
-  final DispositivosNotifier? notifier;
+  final DispositivosNotifier notifier;
   const Shell({super.key, required this.notifier});
 
   @override
@@ -626,7 +625,7 @@ class _ShellState extends State<Shell> {
 
   @override
   Widget build(BuildContext context) {
-    final n = widget.notifier!;
+    final n = widget.notifier;
     final pages = [
       ControlPage(notifier: n),
       HabitacionesPage(notifier: n),
@@ -2214,7 +2213,7 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES - FINAL CORREGIDO
+// WIDGETS REUTILIZABLES - CORREGIDOS FINALMENTE
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;
@@ -2242,6 +2241,7 @@ class _Lbl extends StatelessWidget {
       );
 }
 
+// WIDGET CORREGIDO - AHORA CON LOS PARÁMETROS REQUERIDOS CORRECTAMENTE
 class _IconBtn extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -2274,6 +2274,7 @@ class _IconBtn extends StatelessWidget {
       );
 }
 
+// WIDGET CORREGIDO - AHORA CON LOS PARÁMETROS REQUERIDOS CORRECTAMENTE
 class _DeleteDialog extends StatelessWidget {
   final String nombre;
   final VoidCallback onConfirm;

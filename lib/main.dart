@@ -62,7 +62,7 @@ extension ModoConexionX on ModoConexion {
       };
   String get hint => switch (this) {
         ModoConexion.lan   => '192.168.1.100',
-        ModoConexion.movil => '10.44.38.3',
+        ModoConexion.movil => '10.151.28.43',
         ModoConexion.url   => 'https://mi-tunel.ngrok.io',
       };
   String get descripcion => switch (this) {
@@ -295,7 +295,6 @@ class NetCtrl {
         
         print('📡 Respuesta: ${response.statusCode} - ${response.body}');
         
-        // Aceptamos cualquier respuesta exitosa
         if (response.statusCode >= 200 && response.statusCode < 500) {
           return true;
         }
@@ -335,14 +334,9 @@ class NetCtrl {
   }
 
   static Future<bool> _cmd(String url) async {
-    // Primero GET
     if (await _get(url)) return true;
-    
-    // Si GET falla, intentar POST
     await Future.delayed(const Duration(milliseconds: 300));
     if (await _post(url)) return true;
-    
-    // Último intento
     await Future.delayed(const Duration(milliseconds: 500));
     return _get(url);
   }
@@ -1092,7 +1086,6 @@ class _EmptyControl extends StatelessWidget {
           ),
         ),
       );
-}
 
 // ════════════════════════════════════════════════════════════════
 // PÁGINA: HABITACIONES
@@ -1548,7 +1541,7 @@ class _DispCardState extends State<_DispCard> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// FORMULARIO AGREGAR
+// FORMULARIO AGREGAR - CORREGIDO
 // ════════════════════════════════════════════════════════════════
 class _AddForm extends StatefulWidget {
   final DispositivosNotifier notifier;
@@ -1565,9 +1558,9 @@ class _AddFormState extends State<_AddForm> {
   final _cUrl = TextEditingController();
   final _cHab = TextEditingController(text: 'General');
 
-  TipoD _tipo = TipoD.celular; // Por defecto Celular
+  TipoD _tipo = TipoD.celular;
   CatArtefacto _cat = CatArtefacto.luz;
-  ModoConexion _modo = ModoConexion.movil; // Por defecto IP directa
+  ModoConexion _modo = ModoConexion.movil;
   bool _saving = false;
   bool _pinging = false;
   bool? _pingOk;
@@ -1828,7 +1821,6 @@ class _AddFormState extends State<_AddForm> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     hintText: _modo.hint,
-                    hintText: '10.151.28.43',
                   ),
                   onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {

@@ -14,26 +14,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 // TOKENS DE DISEÑO
 // ════════════════════════════════════════════════════════════════
 class C {
-  static const bg         = Color(0xFF070B14);
-  static const surface    = Color(0xFF0D1220);
-  static const card       = Color(0xFF131A2E);
-  static const cardHi     = Color(0xFF1A2340);
-  static const border     = Color(0xFF1E2845);
-  static const blue       = Color(0xFF4F8EF7);
-  static const blueGlow   = Color(0x264F8EF7);
-  static const green      = Color(0xFF2ECC8E);
-  static const greenGlow  = Color(0x262ECC8E);
-  static const orange     = Color(0xFFFF9142);
+  static const bg = Color(0xFF070B14);
+  static const surface = Color(0xFF0D1220);
+  static const card = Color(0xFF131A2E);
+  static const cardHi = Color(0xFF1A2340);
+  static const border = Color(0xFF1E2845);
+  static const blue = Color(0xFF4F8EF7);
+  static const blueGlow = Color(0x264F8EF7);
+  static const green = Color(0xFF2ECC8E);
+  static const greenGlow = Color(0x262ECC8E);
+  static const orange = Color(0xFFFF9142);
   static const orangeGlow = Color(0x26FF9142);
-  static const red        = Color(0xFFFF4D6A);
-  static const redGlow    = Color(0x26FF4D6A);
-  static const purple     = Color(0xFF9B6DFF);
+  static const red = Color(0xFFFF4D6A);
+  static const redGlow = Color(0x26FF4D6A);
+  static const purple = Color(0xFF9B6DFF);
   static const purpleGlow = Color(0x269B6DFF);
-  static const yellow     = Color(0xFFFFCC44);
+  static const yellow = Color(0xFFFFCC44);
   static const yellowGlow = Color(0x26FFCC44);
-  static const t1         = Color(0xFFF0F4FF);
-  static const t2         = Color(0xFF7B8DB8);
-  static const t3         = Color(0xFF3D4E78);
+  static const t1 = Color(0xFFF0F4FF);
+  static const t2 = Color(0xFF7B8DB8);
+  static const t3 = Color(0xFF3D4E78);
 }
 
 class R {
@@ -51,34 +51,34 @@ enum ModoConexion { lan, movil, url }
 
 extension ModoConexionX on ModoConexion {
   String get label => switch (this) {
-        ModoConexion.lan   => 'LAN / WiFi',
+        ModoConexion.lan => 'LAN / WiFi',
         ModoConexion.movil => 'IP directa',
-        ModoConexion.url   => 'URL completa',
+        ModoConexion.url => 'URL completa',
       };
   String get hint => switch (this) {
-        ModoConexion.lan   => '192.168.1.100',
+        ModoConexion.lan => '192.168.1.100',
         ModoConexion.movil => '10.151.28.43',
-        ModoConexion.url   => 'https://mi-tunel.ngrok.io',
+        ModoConexion.url => 'https://mi-tunel.ngrok.io',
       };
   String get descripcion => switch (this) {
-        ModoConexion.lan   => 'Misma red WiFi. IP privada (192.168.x.x).',
+        ModoConexion.lan => 'Misma red WiFi. IP privada (192.168.x.x).',
         ModoConexion.movil => 'Cualquier red. IP pública + puerto abierto.',
-        ModoConexion.url   => 'URL completa. Túneles ngrok, Cloudflare, DDNS.',
+        ModoConexion.url => 'URL completa. Túneles ngrok, Cloudflare, DDNS.',
       };
   IconData get icon => switch (this) {
-        ModoConexion.lan   => Icons.wifi_rounded,
+        ModoConexion.lan => Icons.wifi_rounded,
         ModoConexion.movil => Icons.signal_cellular_alt_rounded,
-        ModoConexion.url   => Icons.public_rounded,
+        ModoConexion.url => Icons.public_rounded,
       };
   Color get color => switch (this) {
-        ModoConexion.lan   => C.green,
+        ModoConexion.lan => C.green,
         ModoConexion.movil => C.orange,
-        ModoConexion.url   => C.purple,
+        ModoConexion.url => C.purple,
       };
   Color get glow => switch (this) {
-        ModoConexion.lan   => C.greenGlow,
+        ModoConexion.lan => C.greenGlow,
         ModoConexion.movil => C.orangeGlow,
-        ModoConexion.url   => C.purpleGlow,
+        ModoConexion.url => C.purpleGlow,
       };
   static ModoConexion fromStr(String s) => ModoConexion.values
       .firstWhere((e) => e.name == s, orElse: () => ModoConexion.lan);
@@ -92,38 +92,38 @@ enum TipoD { tasmota, sonoff, shelly, celular, otro }
 extension TipoDX on TipoD {
   String get label => switch (this) {
         TipoD.tasmota => 'Tasmota',
-        TipoD.sonoff  => 'Sonoff',
-        TipoD.shelly  => 'Shelly',
+        TipoD.sonoff => 'Sonoff',
+        TipoD.shelly => 'Shelly',
         TipoD.celular => 'Celular',
-        TipoD.otro    => 'Genérico',
+        TipoD.otro => 'Genérico',
       };
   IconData get icon => switch (this) {
         TipoD.tasmota => Icons.electrical_services_rounded,
-        TipoD.sonoff  => Icons.bolt_rounded,
-        TipoD.shelly  => Icons.router_rounded,
+        TipoD.sonoff => Icons.bolt_rounded,
+        TipoD.shelly => Icons.router_rounded,
         TipoD.celular => Icons.smartphone_rounded,
-        TipoD.otro    => Icons.settings_input_hdmi_rounded,
+        TipoD.otro => Icons.settings_input_hdmi_rounded,
       };
   Color get color => switch (this) {
         TipoD.tasmota => C.blue,
-        TipoD.sonoff  => C.orange,
-        TipoD.shelly  => C.green,
+        TipoD.sonoff => C.orange,
+        TipoD.shelly => C.green,
         TipoD.celular => C.yellow,
-        TipoD.otro    => C.t2,
+        TipoD.otro => C.t2,
       };
   String get pathOn => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+On',
-        TipoD.sonoff  => '/control?cmd=on',
-        TipoD.shelly  => '/relay/0?turn=on',
+        TipoD.sonoff => '/control?cmd=on',
+        TipoD.shelly => '/relay/0?turn=on',
         TipoD.celular => '/flash/on',
-        TipoD.otro    => '/on',
+        TipoD.otro => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
-        TipoD.sonoff  => '/control?cmd=off',
-        TipoD.shelly  => '/relay/0?turn=off',
+        TipoD.sonoff => '/control?cmd=off',
+        TipoD.shelly => '/relay/0?turn=off',
         TipoD.celular => '/flash/off',
-        TipoD.otro    => '/off',
+        TipoD.otro => '/off',
       };
   static TipoD fromStr(String s) => TipoD.values
       .firstWhere((e) => e.name == s.toLowerCase(), orElse: () => TipoD.otro);
@@ -133,31 +133,31 @@ enum CatArtefacto { luz, ventilador, televisor, aire, enchufe, calefactor, otro 
 
 extension CatX on CatArtefacto {
   String get label => switch (this) {
-        CatArtefacto.luz        => 'Luz',
+        CatArtefacto.luz => 'Luz',
         CatArtefacto.ventilador => 'Ventilador',
-        CatArtefacto.televisor  => 'Televisor',
-        CatArtefacto.aire       => 'A/C',
-        CatArtefacto.enchufe    => 'Enchufe',
+        CatArtefacto.televisor => 'Televisor',
+        CatArtefacto.aire => 'A/C',
+        CatArtefacto.enchufe => 'Enchufe',
         CatArtefacto.calefactor => 'Calefactor',
-        CatArtefacto.otro       => 'Otro',
+        CatArtefacto.otro => 'Otro',
       };
   IconData get icon => switch (this) {
-        CatArtefacto.luz        => Icons.light_rounded,
+        CatArtefacto.luz => Icons.light_rounded,
         CatArtefacto.ventilador => Icons.air_rounded,
-        CatArtefacto.televisor  => Icons.tv_rounded,
-        CatArtefacto.aire       => Icons.ac_unit_rounded,
-        CatArtefacto.enchufe    => Icons.power_rounded,
+        CatArtefacto.televisor => Icons.tv_rounded,
+        CatArtefacto.aire => Icons.ac_unit_rounded,
+        CatArtefacto.enchufe => Icons.power_rounded,
         CatArtefacto.calefactor => Icons.local_fire_department_rounded,
-        CatArtefacto.otro       => Icons.device_unknown_rounded,
+        CatArtefacto.otro => Icons.device_unknown_rounded,
       };
   Color get color => switch (this) {
-        CatArtefacto.luz        => C.yellow,
+        CatArtefacto.luz => C.yellow,
         CatArtefacto.ventilador => C.blue,
-        CatArtefacto.televisor  => C.purple,
-        CatArtefacto.aire       => C.blue,
-        CatArtefacto.enchufe    => C.green,
+        CatArtefacto.televisor => C.purple,
+        CatArtefacto.aire => C.blue,
+        CatArtefacto.enchufe => C.green,
         CatArtefacto.calefactor => C.orange,
-        CatArtefacto.otro       => C.t2,
+        CatArtefacto.otro => C.t2,
       };
   static CatArtefacto fromStr(String s) => CatArtefacto.values
       .firstWhere((e) => e.name == s, orElse: () => CatArtefacto.otro);
@@ -191,13 +191,13 @@ class Dispositivo {
     required this.id,
     required this.nombre,
     required this.tipo,
-    this.cat         = CatArtefacto.enchufe,
-    this.modo        = ModoConexion.lan,
-    this.ip          = '',
-    this.puerto      = 80,
-    this.urlBase     = '',
-    this.habitacion  = 'General',
-    this.encendido   = false,
+    this.cat = CatArtefacto.enchufe,
+    this.modo = ModoConexion.lan,
+    this.ip = '',
+    this.puerto = 80,
+    this.urlBase = '',
+    this.habitacion = 'General',
+    this.encendido = false,
     this.ultimaAccion,
     this.toggleCount = 0,
   });
@@ -235,25 +235,32 @@ class Dispositivo {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id, 'nombre': nombre, 'tipo': tipo.name, 'cat': cat.name,
-        'modo': modo.name, 'ip': ip, 'puerto': puerto, 'urlBase': urlBase,
-        'habitacion': habitacion, 'encendido': encendido,
+        'id': id,
+        'nombre': nombre,
+        'tipo': tipo.name,
+        'cat': cat.name,
+        'modo': modo.name,
+        'ip': ip,
+        'puerto': puerto,
+        'urlBase': urlBase,
+        'habitacion': habitacion,
+        'encendido': encendido,
         'toggleCount': toggleCount,
         'ultimaAccion': ultimaAccion?.toIso8601String(),
       };
 
   factory Dispositivo.fromJson(Map<String, dynamic> j) => Dispositivo(
-        id:           j['id'] as int,
-        nombre:       j['nombre'] as String,
-        tipo:         TipoDX.fromStr(j['tipo'] as String? ?? 'otro'),
-        cat:          CatX.fromStr(j['cat'] as String? ?? 'otro'),
-        modo:         ModoConexionX.fromStr(j['modo'] as String? ?? 'lan'),
-        ip:           j['ip'] as String? ?? '',
-        puerto:       j['puerto'] as int? ?? 80,
-        urlBase:      j['urlBase'] as String? ?? '',
-        habitacion:   j['habitacion'] as String? ?? 'General',
-        encendido:    j['encendido'] as bool? ?? false,
-        toggleCount:  j['toggleCount'] as int? ?? 0,
+        id: j['id'] as int,
+        nombre: j['nombre'] as String,
+        tipo: TipoDX.fromStr(j['tipo'] as String? ?? 'otro'),
+        cat: CatX.fromStr(j['cat'] as String? ?? 'otro'),
+        modo: ModoConexionX.fromStr(j['modo'] as String? ?? 'lan'),
+        ip: j['ip'] as String? ?? '',
+        puerto: j['puerto'] as int? ?? 80,
+        urlBase: j['urlBase'] as String? ?? '',
+        habitacion: j['habitacion'] as String? ?? 'General',
+        encendido: j['encendido'] as bool? ?? false,
+        toggleCount: j['toggleCount'] as int? ?? 0,
         ultimaAccion: j['ultimaAccion'] != null
             ? DateTime.tryParse(j['ultimaAccion'] as String)
             : null,
@@ -265,11 +272,18 @@ class Dispositivo {
     int? toggleCount,
   }) =>
       Dispositivo(
-        id: id, nombre: nombre, tipo: tipo, cat: cat, modo: modo,
-        ip: ip, puerto: puerto, urlBase: urlBase, habitacion: habitacion,
-        encendido:    encendido    ?? this.encendido,
+        id: id,
+        nombre: nombre,
+        tipo: tipo,
+        cat: cat,
+        modo: modo,
+        ip: ip,
+        puerto: puerto,
+        urlBase: urlBase,
+        habitacion: habitacion,
+        encendido: encendido ?? this.encendido,
         ultimaAccion: ultimaAccion ?? this.ultimaAccion,
-        toggleCount:  toggleCount  ?? this.toggleCount,
+        toggleCount: toggleCount ?? this.toggleCount,
       );
 }
 
@@ -283,19 +297,12 @@ class NetCtrl {
   static Future<bool> _get(String url) async {
     for (int i = 0; i < _maxRetries; i++) {
       try {
-        print('📡 GET (${i+1}/$_maxRetries): $url');
-        final response = await http
-            .get(Uri.parse(url))
-            .timeout(_timeout);
-        
-        print('📡 Respuesta: ${response.statusCode} - ${response.body}');
-        
+        final response = await http.get(Uri.parse(url)).timeout(_timeout);
         if (response.statusCode >= 200 && response.statusCode < 500) {
           return true;
         }
         return false;
       } catch (e) {
-        print('❌ Error GET: $e');
         if (i < _maxRetries - 1) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
@@ -307,19 +314,12 @@ class NetCtrl {
   static Future<bool> _post(String url) async {
     for (int i = 0; i < _maxRetries; i++) {
       try {
-        print('📡 POST (${i+1}/$_maxRetries): $url');
-        final response = await http
-            .post(Uri.parse(url))
-            .timeout(_timeout);
-        
-        print('📡 Respuesta POST: ${response.statusCode} - ${response.body}');
-        
+        final response = await http.post(Uri.parse(url)).timeout(_timeout);
         if (response.statusCode >= 200 && response.statusCode < 500) {
           return true;
         }
         return false;
       } catch (e) {
-        print('❌ Error POST: $e');
         if (i < _maxRetries - 1) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
@@ -336,15 +336,8 @@ class NetCtrl {
     return _get(url);
   }
 
-  static Future<bool> encender(Dispositivo d) async {
-    print('🔌 ENCENDER: ${d.urlOn}');
-    return _cmd(d.urlOn);
-  }
-
-  static Future<bool> apagar(Dispositivo d) async {
-    print('🔌 APAGAR: ${d.urlOff}');
-    return _cmd(d.urlOff);
-  }
+  static Future<bool> encender(Dispositivo d) => _cmd(d.urlOn);
+  static Future<bool> apagar(Dispositivo d) => _cmd(d.urlOff);
 
   static Future<bool> pingRaw({
     required ModoConexion modo,
@@ -390,7 +383,7 @@ class DispositivosNotifier extends ChangeNotifier {
   final SharedPreferences _prefs;
   List<Dispositivo> _items;
   int _nextId = 1;
-  bool _demo  = false;
+  bool _demo = false;
   final List<LogEntry> _log = [];
   final Set<int> _enProceso = {};
 
@@ -401,10 +394,10 @@ class DispositivosNotifier extends ChangeNotifier {
     }
   }
 
-  List<Dispositivo> get items      => List.unmodifiable(_items);
-  bool              get demo       => _demo;
-  List<LogEntry>    get log        => List.unmodifiable(_log.reversed.toList());
-  int               get encendidos => _items.where((d) => d.encendido).length;
+  List<Dispositivo> get items => List.unmodifiable(_items);
+  bool get demo => _demo;
+  List<LogEntry> get log => List.unmodifiable(_log.reversed.toList());
+  int get encendidos => _items.where((d) => d.encendido).length;
 
   List<String> get habitaciones {
     final set = _items.map((d) => d.habitacion).toSet().toList()..sort();
@@ -415,10 +408,7 @@ class DispositivosNotifier extends ChangeNotifier {
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
   Future<bool> toggle(int id) async {
-    if (_enProceso.contains(id)) {
-      debugPrint('[Toggle] IGNORADO — id=$id ya en proceso');
-      return false;
-    }
+    if (_enProceso.contains(id)) return false;
     _enProceso.add(id);
 
     try {
@@ -427,25 +417,20 @@ class DispositivosNotifier extends ChangeNotifier {
       final d = _items[idx];
 
       final estadoAntes = d.encendido;
-      debugPrint('[Toggle] id=$id  estadoAntes=$estadoAntes');
 
       bool ok;
       if (_demo) {
         await Future.delayed(const Duration(milliseconds: 300));
         ok = true;
       } else {
-        ok = estadoAntes
-            ? await NetCtrl.apagar(d)
-            : await NetCtrl.encender(d);
+        ok = estadoAntes ? await NetCtrl.apagar(d) : await NetCtrl.encender(d);
       }
-
-      debugPrint('[Toggle] resultado=$ok');
 
       if (ok) {
         _items[idx] = d.copyWith(
-          encendido:    !estadoAntes,
+          encendido: !estadoAntes,
           ultimaAccion: DateTime.now(),
-          toggleCount:  d.toggleCount + 1,
+          toggleCount: d.toggleCount + 1,
         );
         _addLog(
           '${d.nombre} → ${!estadoAntes ? "ENCENDIDO ✓" : "APAGADO ✓"}',
@@ -485,15 +470,15 @@ class DispositivosNotifier extends ChangeNotifier {
       if (!ok) return false;
     }
     _items.add(Dispositivo(
-      id:          _nextId++,
-      nombre:      nombre.trim(),
-      tipo:        tipo,
-      cat:         cat,
-      modo:        modo,
-      ip:          ip.trim(),
-      puerto:      puerto,
-      urlBase:     urlBase.trim(),
-      habitacion:  habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
+      id: _nextId++,
+      nombre: nombre.trim(),
+      tipo: tipo,
+      cat: cat,
+      modo: modo,
+      ip: ip.trim(),
+      puerto: puerto,
+      urlBase: urlBase.trim(),
+      habitacion: habitacion.trim().isEmpty ? 'General' : habitacion.trim(),
     ));
     _addLog('Dispositivo "$nombre" agregado', ok: true);
     notifyListeners();
@@ -509,7 +494,10 @@ class DispositivosNotifier extends ChangeNotifier {
     _save();
   }
 
-  void toggleDemo() { _demo = !_demo; notifyListeners(); }
+  void toggleDemo() {
+    _demo = !_demo;
+    notifyListeners();
+  }
 
   void _addLog(String msg, {required bool ok}) {
     _log.add(LogEntry(DateTime.now(), msg, ok));
@@ -617,7 +605,7 @@ class DomoticaApp extends StatelessWidget {
               ),
             ),
           ),
-          home: Shell(notifier: notifier),
+          home: const Shell(notifier: null),
         ),
       );
 }
@@ -626,29 +614,34 @@ class DomoticaApp extends StatelessWidget {
 // SHELL
 // ════════════════════════════════════════════════════════════════
 class Shell extends StatefulWidget {
-  final DispositivosNotifier notifier;
+  final DispositivosNotifier? notifier;
   const Shell({super.key, required this.notifier});
+
   @override
   State<Shell> createState() => _ShellState();
 }
 
 class _ShellState extends State<Shell> {
   int _tab = 0;
+
   @override
   Widget build(BuildContext context) {
+    final n = widget.notifier!;
     final pages = [
-      ControlPage(notifier: widget.notifier),
-      HabitacionesPage(notifier: widget.notifier),
-      DispositivosPage(notifier: widget.notifier),
-      HistorialPage(notifier: widget.notifier),
+      ControlPage(notifier: n),
+      HabitacionesPage(notifier: n),
+      DispositivosPage(notifier: n),
+      HistorialPage(notifier: n),
     ];
     return Scaffold(
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
         child: KeyedSubtree(key: ValueKey(_tab), child: pages[_tab]),
       ),
-      bottomNavigationBar:
-          _BottomNav(current: _tab, onTap: (i) => setState(() => _tab = i)),
+      bottomNavigationBar: _BottomNav(
+        current: _tab,
+        onTap: (i) => setState(() => _tab = i),
+      ),
     );
   }
 }
@@ -657,6 +650,7 @@ class _BottomNav extends StatelessWidget {
   final int current;
   final void Function(int) onTap;
   const _BottomNav({required this.current, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
     const items = [
@@ -681,15 +675,13 @@ class _BottomNav extends StatelessWidget {
                 onTap: () => onTap(i),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: sel ? C.blueGlow : Colors.transparent,
                     borderRadius: R.md,
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(items[i].$1,
-                        size: 22, color: sel ? C.blue : C.t3),
+                    Icon(items[i].$1, size: 22, color: sel ? C.blue : C.t3),
                     const SizedBox(height: 3),
                     Text(items[i].$2,
                         style: TextStyle(
@@ -713,6 +705,7 @@ class _BottomNav extends StatelessWidget {
 class ControlPage extends StatefulWidget {
   final DispositivosNotifier notifier;
   const ControlPage({super.key, required this.notifier});
+
   @override
   State<ControlPage> createState() => _ControlPageState();
 }
@@ -756,25 +749,19 @@ class _ControlPageState extends State<ControlPage> {
                 title: Row(children: [
                   const Text('Control',
                       style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                          color: C.t1)),
+                          fontWeight: FontWeight.w800, fontSize: 18, color: C.t1)),
                   const SizedBox(width: 8),
                   if (n.demo)
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: C.orangeGlow,
                         borderRadius: R.xl,
-                        border: Border.all(
-                            color: C.orange.withOpacity(0.4)),
+                        border: Border.all(color: C.orange.withOpacity(0.4)),
                       ),
                       child: const Text('DEMO',
                           style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: C.orange)),
+                              fontSize: 9, fontWeight: FontWeight.w800, color: C.orange)),
                     ),
                 ]),
                 actions: [
@@ -797,8 +784,7 @@ class _ControlPageState extends State<ControlPage> {
                   GestureDetector(
                     onTap: n.toggleDemo,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       child: Icon(Icons.science_rounded,
                           size: 20, color: n.demo ? C.orange : C.t3),
                     ),
@@ -839,6 +825,7 @@ class _ControlHeader extends StatelessWidget {
   final bool demo;
   const _ControlHeader(
       {required this.enc, required this.total, required this.demo});
+
   @override
   Widget build(BuildContext context) {
     final pct = total == 0 ? 0.0 : enc / total;
@@ -861,9 +848,7 @@ class _ControlHeader extends StatelessWidget {
               children: [
                 Text('$enc de $total encendidos',
                     style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: C.t1)),
+                        fontSize: 22, fontWeight: FontWeight.w800, color: C.t1)),
                 const SizedBox(height: 6),
                 ClipRRect(
                   borderRadius: R.xl,
@@ -894,6 +879,7 @@ class _PercentRing extends StatelessWidget {
   final int enc, total;
   const _PercentRing(
       {required this.pct, required this.enc, required this.total});
+
   @override
   Widget build(BuildContext context) => SizedBox(
         width: 56,
@@ -1052,11 +1038,11 @@ class _PowerButton extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// ESTADO VACÍO - CORREGIDO
+// ESTADO VACÍO
 // ════════════════════════════════════════════════════════════════
 class _EmptyControl extends StatelessWidget {
   const _EmptyControl();
-  
+
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
@@ -1066,25 +1052,14 @@ class _EmptyControl extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(
-                  color: C.blueGlow, 
-                  shape: BoxShape.circle
-                ),
-                child: const Icon(
-                  Icons.devices_other_rounded, 
-                  size: 48, 
-                  color: C.blue
-                ),
+                decoration:
+                    const BoxDecoration(color: C.blueGlow, shape: BoxShape.circle),
+                child: const Icon(Icons.devices_other_rounded, size: 48, color: C.blue),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Sin dispositivos',
-                style: TextStyle(
-                  fontSize: 18, 
-                  fontWeight: FontWeight.w700, 
-                  color: C.t1
-                ),
-              ),
+              const Text('Sin dispositivos',
+                  style: TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w700, color: C.t1)),
               const SizedBox(height: 8),
               const Text(
                 'Toca la pestaña "Dispositivos"\ny agrega el primero.',
@@ -1102,6 +1077,7 @@ class _EmptyControl extends StatelessWidget {
 class HabitacionesPage extends StatefulWidget {
   final DispositivosNotifier notifier;
   const HabitacionesPage({super.key, required this.notifier});
+
   @override
   State<HabitacionesPage> createState() => _HabPageState();
 }
@@ -1193,6 +1169,7 @@ class _HabTabs extends StatelessWidget {
   final void Function(String) onSel;
   const _HabTabs(
       {required this.habs, required this.sel, required this.onSel});
+
   @override
   Widget build(BuildContext context) => SizedBox(
         height: 46,
@@ -1311,6 +1288,7 @@ class _DevTile extends StatelessWidget {
 class DispositivosPage extends StatefulWidget {
   final DispositivosNotifier notifier;
   const DispositivosPage({super.key, required this.notifier});
+
   @override
   State<DispositivosPage> createState() => _DispPageState();
 }
@@ -1409,6 +1387,7 @@ class _DispCard extends StatefulWidget {
   final Dispositivo d;
   final DispositivosNotifier notifier;
   const _DispCard({required this.d, required this.notifier});
+
   @override
   State<_DispCard> createState() => _DispCardState();
 }
@@ -1519,8 +1498,7 @@ class _DispCardState extends State<_DispCard> {
               child: Container(
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(color: C.blueGlow, borderRadius: R.xs),
-                child:
-                    const Icon(Icons.wifi_find_rounded, size: 15, color: C.blue),
+                child: const Icon(Icons.wifi_find_rounded, size: 15, color: C.blue),
               ),
             ),
             const SizedBox(width: 6),
@@ -1538,8 +1516,7 @@ class _DispCardState extends State<_DispCard> {
               child: Container(
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(color: C.redGlow, borderRadius: R.xs),
-                child:
-                    const Icon(Icons.delete_outline_rounded, size: 15, color: C.red),
+                child: const Icon(Icons.delete_outline_rounded, size: 15, color: C.red),
               ),
             ),
           ]),
@@ -1555,6 +1532,7 @@ class _DispCardState extends State<_DispCard> {
 class _AddForm extends StatefulWidget {
   final DispositivosNotifier notifier;
   const _AddForm({required this.notifier});
+
   @override
   State<_AddForm> createState() => _AddFormState();
 }
@@ -1828,9 +1806,7 @@ class _AddFormState extends State<_AddForm> {
                   controller: _cIp,
                   style: const TextStyle(color: C.t1),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    hintText: _modo.hint,
-                  ),
+                  decoration: InputDecoration(hintText: _modo.hint),
                   onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'IP requerida';
@@ -1973,10 +1949,12 @@ class _AddFormState extends State<_AddForm> {
       urlBase: _cUrl.text.trim(),
       tipo: _tipo,
     );
-    if (mounted) setState(() {
-      _pinging = false;
-      _pingOk = ok;
-    });
+    if (mounted) {
+      setState(() {
+        _pinging = false;
+        _pingOk = ok;
+      });
+    }
   }
 
   Future<void> _doSave() async {
@@ -2011,6 +1989,7 @@ class _AddFormState extends State<_AddForm> {
 class HistorialPage extends StatelessWidget {
   final DispositivosNotifier notifier;
   const HistorialPage({super.key, required this.notifier});
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -2050,6 +2029,7 @@ class HistorialPage extends StatelessWidget {
 class _LogTile extends StatelessWidget {
   final LogEntry e;
   const _LogTile({required this.e});
+
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -2104,6 +2084,7 @@ class _LogTile extends StatelessWidget {
 class DiagnosticoPage extends StatefulWidget {
   final Dispositivo d;
   const DiagnosticoPage({super.key, required this.d});
+
   @override
   State<DiagnosticoPage> createState() => _DiagnosticoPageState();
 }
@@ -2233,12 +2214,13 @@ class _DiagLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WIDGETS REUTILIZABLES - CORREGIDOS FINAL
+// WIDGETS REUTILIZABLES - FINAL CORREGIDO
 // ════════════════════════════════════════════════════════════════
 class _MicroBadge extends StatelessWidget {
   final String text;
   final Color col;
   const _MicroBadge(this.text, {required this.col});
+
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2251,6 +2233,7 @@ class _MicroBadge extends StatelessWidget {
 class _Lbl extends StatelessWidget {
   final String text;
   const _Lbl(this.text);
+
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
@@ -2264,7 +2247,7 @@ class _IconBtn extends StatelessWidget {
   final Color color;
   final String tooltip;
   final VoidCallback onTap;
-  
+
   const _IconBtn({
     required this.icon,
     required this.color,

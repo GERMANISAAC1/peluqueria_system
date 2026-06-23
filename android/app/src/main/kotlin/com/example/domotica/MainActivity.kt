@@ -1,4 +1,4 @@
-package com.example.gym
+package com.example.domotica
 
 import android.os.Handler
 import android.os.Looper
@@ -22,8 +22,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "get") {
                     val url = call.argument<String>("url") ?: ""
-                    val timeoutSec = call.argument<Int>("timeout") ?: 8
-                    val timeoutMs = timeoutSec * 1000
+                    val timeoutMs = (call.argument<Int>("timeout") ?: 8) * 1000
 
                     executor.execute {
                         val ok = httpGet(url, timeoutMs)
@@ -46,27 +45,21 @@ class MainActivity : FlutterActivity() {
             conn.setRequestProperty("Connection", "close")
             conn.setRequestProperty("Cache-Control", "no-cache")
             conn.instanceFollowRedirects = true
-            conn.doInput = true
 
-            // Leer el código de respuesta
-            val code = try { conn.responseCode } catch (e: Exception) { -1 }
+            val code = try { conn.responseCode } catch (_: Exception) { -1 }
             android.util.Log.d("NetCtrl", "HTTP $code ← $urlStr")
 
-            // Consumir body para liberar conexión
-            try {
-                conn.inputStream.use { it.readBytes() }
-            } catch (_: Exception) {
+            try { conn.inputStream.use { it.readBytes() } } catch (_: Exception) {
                 try { conn.errorStream?.use { it.readBytes() } } catch (_: Exception) {}
             }
             conn.disconnect()
 
-            // CLAVE: cualquier respuesta del servidor = comando recibido = true
-            // Solo false si hubo excepción de red (timeout, sin conexión)
-            // Web Remote Droid puede responder 404/405 pero igual ejecuta el comando
+            // Cualquier respuesta = comando recibido = true
+            // Solo false si excepción de red (timeout, sin conexión)
             code != -1
 
         } catch (e: Exception) {
-            android.util.Log.e("NetCtrl", "ERROR $urlStr : ${e.message}")
+            android.util.Log.e("NetCtrl", "ERROR: ${e.message}")
             false
         }
     }

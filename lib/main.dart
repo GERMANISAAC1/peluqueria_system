@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  DOMÓTICA PRO  v5.1  —  Producción (bugs toggle corregidos)     ║
+// ║  DOMÓTICA PRO  v5.2  —  Producción                              ║
 // ╚══════════════════════════════════════════════════════════════════╝
 //
 // CORRECCIONES v5.1:
@@ -15,6 +15,14 @@
 //  [FIX-6] toggleTodos usa lock propio para evitar race conditions.
 //  [FIX-7] withOpacity reemplazado por withValues(alpha:) en todo el
 //          código (deprecado en Flutter 3.x).
+//
+// CORRECCIONES v5.2:
+//  [FIX-8] Celular (Web Remote Droid): paths corregidos.
+//          /flash/on y /flash/off NO existen en la app.
+//          API real: /?action=on  /  /?action=off  (parámetro GET).
+//          NetCtrl.encender/apagar ahora prueban múltiples paths
+//          en secuencia hasta encontrar el que responde 2xx,
+//          cubriendo todas las versiones conocidas de la app.
 
 import 'dart:async';
 import 'dart:convert';
@@ -134,19 +142,61 @@ extension TipoDX on TipoD {
         TipoD.celular => C.yellow,
         TipoD.otro    => C.t2,
       };
+  // Path principal (el más estándar de cada firmware)
   String get pathOn => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+On',
         TipoD.sonoff  => '/control?cmd=on',
         TipoD.shelly  => '/relay/0?turn=on',
-        TipoD.celular => '/flash/on',
+        // [FIX-8] Web Remote Droid: API real usa parámetro ?action=
+        // /flash/on NO existe — causaba 404 silencioso
+        TipoD.celular => '/?action=on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
         TipoD.sonoff  => '/control?cmd=off',
         TipoD.shelly  => '/relay/0?turn=off',
-        TipoD.celular => '/flash/off',
+        // [FIX-8] Web Remote Droid: API real
+        TipoD.celular => '/?action=off',
         TipoD.otro    => '/off',
+      };
+
+  // [FIX-8] Paths alternativos por firmware, en orden de prioridad.
+  // NetCtrl los prueba en secuencia si el path principal falla con 404.
+  List<String> get pathsOnFallback => switch (this) {
+        TipoD.celular => [
+            '/?action=on',      // Web Remote Droid (más común)
+            '/flash?on=1',      // algunas versiones antiguas
+            '/flash/on',        // versión legacy (incorrecta pero incluida)
+            '/?cmd=on',         // variante custom
+          ],
+        TipoD.tasmota => [
+            '/cm?cmnd=Power+On',
+            '/cm?cmnd=Power1+On',  // dispositivos con múltiples relays
+          ],
+        TipoD.shelly  => [
+            '/relay/0?turn=on',
+            '/rpc/Switch.Set?id=0&on=true',  // Shelly Gen2
+          ],
+        _ => [pathOn],
+      };
+
+  List<String> get pathsOffFallback => switch (this) {
+        TipoD.celular => [
+            '/?action=off',
+            '/flash?on=0',
+            '/flash/off',
+            '/?cmd=off',
+          ],
+        TipoD.tasmota => [
+            '/cm?cmnd=Power+Off',
+            '/cm?cmnd=Power1+Off',
+          ],
+        TipoD.shelly  => [
+            '/relay/0?turn=off',
+            '/rpc/Switch.Set?id=0&on=false',
+          ],
+        _ => [pathOff],
       };
   static TipoD fromStr(String s) => TipoD.values
       .firstWhere((e) => e.name == s.toLowerCase(), orElse: () => TipoD.otro);
@@ -240,27 +290,26 @@ class Dispositivo {
     this.online,
   });
 
-  String get urlOn {
+  // Base sin path — misma lógica que NetCtrl._baseUrl()
+  String get _base {
     switch (modo) {
       case ModoConexion.url:
-        final base = urlBase.trim().replaceAll(RegExp(r'/$'), '');
-        return '$base${tipo.pathOn}';
+        return urlBase.trim().replaceAll(RegExp(r'/$'), '');
       case ModoConexion.lan:
       case ModoConexion.movil:
-        return 'http://${ip.trim()}:$puerto${tipo.pathOn}';
+        return 'http://${ip.trim()}:$puerto';
     }
   }
 
-  String get urlOff {
-    switch (modo) {
-      case ModoConexion.url:
-        final base = urlBase.trim().replaceAll(RegExp(r'/$'), '');
-        return '$base${tipo.pathOff}';
-      case ModoConexion.lan:
-      case ModoConexion.movil:
-        return 'http://${ip.trim()}:$puerto${tipo.pathOff}';
-    }
-  }
+  // URL principal (para mostrar en UI y diagnóstico)
+  String get urlOn  => '$_base${tipo.pathOn}';
+  String get urlOff => '$_base${tipo.pathOff}';
+
+  // Todos los paths que se intentarán (para diagnóstico)
+  List<String> get urlsOnFallback  =>
+      tipo.pathsOnFallback.map((p) => '$_base$p').toList();
+  List<String> get urlsOffFallback =>
+      tipo.pathsOffFallback.map((p) => '$_base$p').toList();
 
   String get conexionDisplay {
     switch (modo) {
@@ -333,7 +382,7 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  — CORREGIDO
+// CONTROLADOR DE RED  — v5.2
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
   // ── GET con timeout ──────────────────────────────────────────
@@ -343,7 +392,7 @@ class NetCtrl {
       // [FIX-2] Solo 2xx es éxito real. 404 = ruta incorrecta = error.
       if (r.statusCode >= 200 && r.statusCode < 300) return CmdResult.success;
       return CmdResult(CmdStatus.error,
-          detail: 'HTTP ${r.statusCode} en $url');
+          detail: 'HTTP ${r.statusCode}');
     } on TimeoutException {
       return CmdResult(CmdStatus.timeout,
           detail: 'Timeout (${AppConfig.cmdTimeout.inSeconds}s)');
@@ -352,25 +401,64 @@ class NetCtrl {
     }
   }
 
-  // ── [FIX-1] Un solo intento + UN reintento.                  ──
-  // ── Sin POST de fallback: evita ciclar el relay físico.      ──
-  static Future<CmdResult> _cmd(String url) async {
-    // Primer intento
-    final r1 = await _tryGet(url);
-    if (r1.ok) return r1;
+  // ── [FIX-1] Un intento + UN reintento solo si hay error de red.
+  // ── [FIX-8] Si el path principal da 404, prueba los fallbacks
+  //    en secuencia hasta encontrar uno que responda 2xx.
+  // ── SIN POST de fallback: evita ciclar el relay físico.
+  static Future<CmdResult> _cmdConFallback(
+    String baseUrl,
+    List<String> paths,
+  ) async {
+    for (final path in paths) {
+      final url = '$baseUrl$path';
+      final r = await _tryGet(url);
 
-    // Si es error de red (no de lógica), esperamos y reintentamos UNA vez
-    if (r1.status == CmdStatus.timeout || r1.status == CmdStatus.offline) {
-      await Future.delayed(AppConfig.retryDelay);
-      return _tryGet(url);
+      if (r.ok) return r;
+
+      // Error de red (timeout/offline): reintentar UNA vez el mismo path
+      if (r.status == CmdStatus.timeout ||
+          r.status == CmdStatus.offline) {
+        await Future.delayed(AppConfig.retryDelay);
+        final retry = await _tryGet(url);
+        if (retry.ok) return retry;
+        // Si sigue sin red, no tiene sentido probar más paths
+        return retry;
+      }
+
+      // HTTP 404: este path no existe → probar el siguiente fallback
+      // Cualquier otro error HTTP (4xx/5xx): reportar inmediatamente
+      if (r.status == CmdStatus.error &&
+          r.detail != null &&
+          !r.detail!.contains('404')) {
+        return r;
+      }
+      // 404 → continuar al siguiente path
     }
-
-    // Error HTTP (4xx / 5xx) → no reintentar, la ruta está mal configurada
-    return r1;
+    // Todos los paths fallaron con 404
+    return const CmdResult(
+      CmdStatus.error,
+      detail: 'Ningún path del firmware respondió correctamente.\n'
+          'Usa el Diagnóstico para identificar la URL correcta.',
+    );
   }
 
-  static Future<CmdResult> encender(Dispositivo d) => _cmd(d.urlOn);
-  static Future<CmdResult> apagar(Dispositivo d)   => _cmd(d.urlOff);
+  // ── Construye la base de URL sin path ───────────────────────
+  static String _baseUrl(Dispositivo d) {
+    switch (d.modo) {
+      case ModoConexion.url:
+        return d.urlBase.trim().replaceAll(RegExp(r'/$'), '');
+      case ModoConexion.lan:
+      case ModoConexion.movil:
+        return 'http://${d.ip.trim()}:${d.puerto}';
+    }
+  }
+
+  // ── [FIX-8] encender/apagar usan paths con fallback automático
+  static Future<CmdResult> encender(Dispositivo d) =>
+      _cmdConFallback(_baseUrl(d), d.tipo.pathsOnFallback);
+
+  static Future<CmdResult> apagar(Dispositivo d) =>
+      _cmdConFallback(_baseUrl(d), d.tipo.pathsOffFallback);
 
   // ── Ping simple para verificar conectividad ──────────────────
   static Future<bool> ping({
@@ -2588,87 +2676,69 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
 
     _log('─────────────────────────────', null);
 
-    // 2. HEAD a ruta ON (sin ejecutar el relay)
-    _log('▶ Verificando ruta ON (solo HEAD, sin ejecutar)...',
-        null);
-    _log('  ${d.urlOn}', null);
+    // 2. Probar todos los paths ON en secuencia (sin ejecutar relay)
+    _log('▶ Buscando ruta ON válida (${d.urlsOnFallback.length} paths a probar)...', null);
     if (demo) {
       await Future.delayed(const Duration(milliseconds: 300));
-      _log('  [DEMO] URL bien formada ✓', true);
+      _log('  [DEMO] ${d.urlOn} → OK ✓', true);
     } else {
-      try {
-        final resp = await http
-            .head(Uri.parse(d.urlOn))
-            .timeout(AppConfig.pingTimeout);
-        // [FIX-2] Solo 2xx para rutas de control
-        final ok = resp.statusCode >= 200 &&
-            resp.statusCode < 300;
-        _log('  HEAD → HTTP ${resp.statusCode}', ok);
-        if (ok) {
-          _log('  Ruta ON accesible ✓', true);
-        } else if (resp.statusCode == 404) {
-          _log(
-            '  ⚠ 404 — la ruta ON no existe en este firmware',
-            false,
-          );
-          _log(
-            '  → Revisa el path: ${d.tipo.pathOn}',
-            false,
-          );
+      bool foundOn = false;
+      for (final url in d.urlsOnFallback) {
+        _log('  GET $url', null);
+        try {
+          final resp = await http
+              .get(Uri.parse(url))
+              .timeout(AppConfig.pingTimeout);
+          final ok = resp.statusCode >= 200 && resp.statusCode < 300;
+          _log('  → HTTP ${resp.statusCode} ${ok ? "✓ ESTA ES LA RUTA CORRECTA" : "(404 — siguiente...)"}', ok ? true : null);
+          if (ok) { foundOn = true; break; }
+        } on TimeoutException {
+          _log('  → TIMEOUT', false);
+          break; // Si hay timeout, la red falla — no seguir
+        } catch (_) {
+          // HEAD/GET no soportado, marcar como posible
+          _log('  → Sin respuesta HTTP (firmware puede usar solo POST)', null);
         }
-      } on TimeoutException {
-        _log('  TIMEOUT en ruta ON', false);
-      } catch (_) {
-        _log(
-            '  HEAD no soportado — el firmware usa solo GET ✓',
-            null);
+      }
+      if (!foundOn) {
+        _log('  ⚠ Ningún path ON respondió con 2xx', false);
+        _log('  → Abre Web Remote Droid y verifica qué URL muestra', false);
       }
     }
 
     _log('─────────────────────────────', null);
 
-    // 3. HEAD a ruta OFF (sin ejecutar el relay)
-    _log('▶ Verificando ruta OFF (solo HEAD, sin ejecutar)...',
-        null);
-    _log('  ${d.urlOff}', null);
+    // 3. Probar todos los paths OFF en secuencia (sin ejecutar relay)
+    _log('▶ Buscando ruta OFF válida (${d.urlsOffFallback.length} paths a probar)...', null);
     if (demo) {
       await Future.delayed(const Duration(milliseconds: 300));
-      _log('  [DEMO] URL bien formada ✓', true);
+      _log('  [DEMO] ${d.urlOff} → OK ✓', true);
     } else {
-      try {
-        final resp = await http
-            .head(Uri.parse(d.urlOff))
-            .timeout(AppConfig.pingTimeout);
-        // [FIX-2] Solo 2xx para rutas de control
-        final ok = resp.statusCode >= 200 &&
-            resp.statusCode < 300;
-        _log('  HEAD → HTTP ${resp.statusCode}', ok);
-        if (ok) {
-          _log('  Ruta OFF accesible ✓', true);
-        } else if (resp.statusCode == 404) {
-          _log(
-            '  ⚠ 404 — la ruta OFF no existe en este firmware',
-            false,
-          );
-          _log(
-            '  → Revisa el path: ${d.tipo.pathOff}',
-            false,
-          );
+      bool foundOff = false;
+      for (final url in d.urlsOffFallback) {
+        _log('  GET $url', null);
+        try {
+          final resp = await http
+              .get(Uri.parse(url))
+              .timeout(AppConfig.pingTimeout);
+          final ok = resp.statusCode >= 200 && resp.statusCode < 300;
+          _log('  → HTTP ${resp.statusCode} ${ok ? "✓ ESTA ES LA RUTA CORRECTA" : "(404 — siguiente...)"}', ok ? true : null);
+          if (ok) { foundOff = true; break; }
+        } on TimeoutException {
+          _log('  → TIMEOUT', false);
+          break;
+        } catch (_) {
+          _log('  → Sin respuesta HTTP (firmware puede usar solo POST)', null);
         }
-      } on TimeoutException {
-        _log('  TIMEOUT en ruta OFF', false);
-      } catch (_) {
-        _log(
-            '  HEAD no soportado — el firmware usa solo GET ✓',
-            null);
+      }
+      if (!foundOff) {
+        _log('  ⚠ Ningún path OFF respondió con 2xx', false);
+        _log('  → Revisa la configuración del dispositivo', false);
       }
     }
 
     _log('─────────────────────────────', null);
-    _log(
-      '✓ Diagnóstico completo — estado del dispositivo sin cambios',
-      true,
-    );
+    _log('✓ Diagnóstico completo — relay NO fue activado', true);
     setState(() => _running = false);
   }
 

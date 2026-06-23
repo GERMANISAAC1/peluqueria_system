@@ -17,12 +17,10 @@
 //          código (deprecado en Flutter 3.x).
 //
 // CORRECCIONES v5.2:
-//  [FIX-8] Celular (Web Remote Droid): paths corregidos.
-//          /flash/on y /flash/off NO existen en la app.
-//          API real: /?action=on  /  /?action=off  (parámetro GET).
-//          NetCtrl.encender/apagar ahora prueban múltiples paths
-//          en secuencia hasta encontrar el que responde 2xx,
-//          cubriendo todas las versiones conocidas de la app.
+//  [FIX-8] Celular (Web Remote Droid): paths confirmados en producción.
+//          URL real: http://IP:8888/flash/on  y  /flash/off
+//          NetCtrl prueba paths alternativos como fallback automático
+//          si el principal da 404, cubriendo distintas versiones.
 
 import 'dart:async';
 import 'dart:convert';
@@ -147,17 +145,16 @@ extension TipoDX on TipoD {
         TipoD.tasmota => '/cm?cmnd=Power+On',
         TipoD.sonoff  => '/control?cmd=on',
         TipoD.shelly  => '/relay/0?turn=on',
-        // [FIX-8] Web Remote Droid: API real usa parámetro ?action=
-        // /flash/on NO existe — causaba 404 silencioso
-        TipoD.celular => '/?action=on',
+        // Web Remote Droid — confirmado: http://IP:8888/flash/on
+        TipoD.celular => '/flash/on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
         TipoD.sonoff  => '/control?cmd=off',
         TipoD.shelly  => '/relay/0?turn=off',
-        // [FIX-8] Web Remote Droid: API real
-        TipoD.celular => '/?action=off',
+        // Web Remote Droid — confirmado: http://IP:8888/flash/off
+        TipoD.celular => '/flash/off',
         TipoD.otro    => '/off',
       };
 
@@ -165,10 +162,9 @@ extension TipoDX on TipoD {
   // NetCtrl los prueba en secuencia si el path principal falla con 404.
   List<String> get pathsOnFallback => switch (this) {
         TipoD.celular => [
-            '/?action=on',      // Web Remote Droid (más común)
-            '/flash?on=1',      // algunas versiones antiguas
-            '/flash/on',        // versión legacy (incorrecta pero incluida)
-            '/?cmd=on',         // variante custom
+            '/flash/on',        // Web Remote Droid — confirmado en producción
+            '/?action=on',      // variante alternativa
+            '/flash?on=1',      // versiones antiguas
           ],
         TipoD.tasmota => [
             '/cm?cmnd=Power+On',
@@ -183,10 +179,9 @@ extension TipoDX on TipoD {
 
   List<String> get pathsOffFallback => switch (this) {
         TipoD.celular => [
-            '/?action=off',
-            '/flash?on=0',
-            '/flash/off',
-            '/?cmd=off',
+            '/flash/off',       // Web Remote Droid — confirmado en producción
+            '/?action=off',     // variante alternativa
+            '/flash?on=0',      // versiones antiguas
           ],
         TipoD.tasmota => [
             '/cm?cmnd=Power+Off',

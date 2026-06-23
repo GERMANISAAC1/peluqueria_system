@@ -5,9 +5,8 @@ import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.Socket
 import java.net.URL
 import java.util.concurrent.Executors
 
@@ -27,18 +26,7 @@ class MainActivity : FlutterActivity() {
                     val timeoutMs = (call.argument<Int>("timeout") ?: 8) * 1000
 
                     executor.execute {
-                        // Intento 1
-                        var ok = httpGet(url, timeoutMs)
-                        // Intento 2 si falló
-                        if (!ok) {
-                            Thread.sleep(600)
-                            ok = httpGet(url, timeoutMs)
-                        }
-                        // Intento 3 si falló
-                        if (!ok) {
-                            Thread.sleep(800)
-                            ok = httpGet(url, timeoutMs)
-                        }
+                        val ok = enviarComando(url, timeoutMs)
                         handler.post { result.success(ok) }
                     }
                 } else {
@@ -47,51 +35,82 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    private fun httpGet(urlStr: String, timeoutMs: Int): Boolean {
-        var conn: HttpURLConnection? = null
+    // ─────────────────────────────────────────────────────────────
+    // Estrategia: TCP raw HTTP/1.0
+    //
+    // Por qué TCP raw en vez de HttpURLConnection:
+    // HttpURLConnection de Java usa HTTP/1.1 con keep-alive.
+    // Algunos servidores embebidos (Web Remote Droid) cierran la
+    // conexión TCP después de ejecutar el comando SIN enviar una
+    // respuesta HTTP completa. Esto hace que responseCode() lance
+    // IOException y el comando se considere fallido aunque funcionó.
+    //
+    // Con TCP raw mandamos HTTP/1.0 (sin keep-alive) y consideramos
+    // exitoso si el servidor recibe la request (pudo conectarse y
+    // mandar datos). La respuesta es opcional — si el servidor la
+    // manda bien, si no la manda también bien.
+    // ─────────────────────────────────────────────────────────────
+    private fun enviarComando(urlStr: String, timeoutMs: Int): Boolean {
         return try {
-            android.util.Log.d("NetCtrl", "GET $urlStr")
-
-            // Deshabilitar cache HTTP del sistema
-            System.setProperty("http.keepAlive", "false")
-
             val url = URL(urlStr)
-            conn = url.openConnection() as HttpURLConnection
+            val host = url.host
+            val port = if (url.port == -1) 80 else url.port
+            val path = if (url.file.isEmpty()) "/" else url.file
+
+            android.util.Log.d("NetCtrl", "TCP $host:$port$path")
+
+            val socket = Socket()
+            socket.soTimeout = timeoutMs
+            socket.connect(java.net.InetSocketAddress(host, port), timeoutMs)
+
+            // Mandamos la request HTTP/1.0
+            val request = "GET $path HTTP/1.0\r\nHost: $host\r\nConnection: close\r\n\r\n"
+            socket.getOutputStream().write(request.toByteArray())
+            socket.getOutputStream().flush()
+
+            // Intentar leer la respuesta (opcional - puede no llegar)
+            try {
+                val buf = ByteArray(256)
+                socket.getInputStream().read(buf)
+                val resp = String(buf).trim()
+                android.util.Log.d("NetCtrl", "Respuesta: ${resp.take(50)}")
+            } catch (_: Exception) {
+                // El servidor cerró sin responder — normal en algunos firmwares
+                android.util.Log.d("NetCtrl", "Sin respuesta HTTP — comando enviado igual")
+            }
+
+            socket.close()
+
+            // Si llegamos aquí = conectamos y mandamos la request = ÉXITO
+            true
+
+        } catch (e: Exception) {
+            android.util.Log.e("NetCtrl", "ERROR: ${e.message}")
+            // Reintento con HttpURLConnection como fallback
+            fallbackHttp(urlStr, timeoutMs)
+        }
+    }
+
+    // Fallback con HttpURLConnection por si el socket falla
+    private fun fallbackHttp(urlStr: String, timeoutMs: Int): Boolean {
+        return try {
+            android.util.Log.d("NetCtrl", "Fallback HTTP: $urlStr")
+            System.setProperty("http.keepAlive", "false")
+            val conn = URL(urlStr).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.useCaches = false
-            conn.defaultUseCaches = false
-            conn.instanceFollowRedirects = true
             conn.setRequestProperty("Connection", "close")
-            conn.setRequestProperty("Cache-Control", "no-cache, no-store")
-            conn.setRequestProperty("Pragma", "no-cache")
-
-            // Conectar explícitamente
             conn.connect()
-
-            // Leer código HTTP
-            val code = conn.responseCode
-            android.util.Log.d("NetCtrl", "HTTP $code ← $urlStr")
-
-            // Leer y descartar body completo
-            try {
-                val stream = if (code < 400) conn.inputStream else conn.errorStream
-                stream?.use { s ->
-                    BufferedReader(InputStreamReader(s)).use { br ->
-                        while (br.readLine() != null) { /* descartar */ }
-                    }
-                }
-            } catch (_: Exception) {}
-
-            // Cualquier código HTTP válido = servidor recibió el comando
-            code > 0
-
+            try { conn.responseCode } catch (_: Exception) { }
+            try { conn.inputStream?.use { it.readBytes() } } catch (_: Exception) { }
+            conn.disconnect()
+            // Si conectó = éxito
+            true
         } catch (e: Exception) {
-            android.util.Log.e("NetCtrl", "ERROR $urlStr: ${e.javaClass.simpleName} - ${e.message}")
+            android.util.Log.e("NetCtrl", "Fallback ERROR: ${e.message}")
             false
-        } finally {
-            try { conn?.disconnect() } catch (_: Exception) {}
         }
     }
 }

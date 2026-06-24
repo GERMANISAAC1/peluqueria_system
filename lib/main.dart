@@ -8,8 +8,7 @@
 //  [FIX-2] HTTP 404/3xx ya no cuenta como éxito. Solo 2xx = OK.
 //  [FIX-3] toggle(): índice re-buscado POST-await para evitar datos
 //          obsoletos si la lista cambió durante el await.
-//  [FIX-4] _enProceso limpiado con hasListeners guard. Ya no queda
-//          bloqueado permanentemente si el widget se desmonta.
+//  [FIX-4] UI actualiza inmediatamente — fire and forget.
 //  [FIX-5] estadoAntes leído del índice post-await, no de variable
 //          capturada antes del await.
 //  [FIX-6] toggleTodos usa lock propio para evitar race conditions.
@@ -516,10 +515,7 @@ class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> _items;
   int  _nextId = 1;
   bool _demo   = false;
-  final List<LogEntry> _log       = [];
-  final Set<int>       _enProceso = {};
-  // [FIX-6] Lock para toggleTodos — evita race condition
-  bool _toggleTodosRunning = false;
+  final List<LogEntry> _log = [];
 
   DispositivosNotifier(List<Dispositivo> items, this._prefs)
       : _items = List.of(items) {
@@ -534,8 +530,6 @@ class DispositivosNotifier extends ChangeNotifier {
   List<LogEntry>    get log        =>
       List.unmodifiable(_log.reversed.toList());
   int               get encendidos => _items.where((d) => d.encendido).length;
-  bool              get hayProceso => _enProceso.isNotEmpty;
-
   List<String> get habitaciones {
     final set = _items.map((d) => d.habitacion).toSet().toList()..sort();
     return ['Todas', ...set];
@@ -544,100 +538,65 @@ class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> porHabitacion(String h) =>
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
-  bool esBusy(int id) => _enProceso.contains(id);
+  // esBusy siempre false — UI no bloquea el botón con spinner
+  bool esBusy(int id) => false;
 
-  // ── [FIX-3][FIX-4][FIX-5] Toggle corregido ──────────────────
-  Future<CmdResult> toggle(int id) async {
-    // [FIX-4] Guardia: si ya está en proceso, ignorar tap duplicado
-    if (_enProceso.contains(id)) {
-      return const CmdResult(CmdStatus.error, detail: 'Ya en proceso');
-    }
+  // ── FIRE AND FORGET ──────────────────────────────────────────
+  // 1. Cambia el estado en UI de forma INSTANTÁNEA (sin await).
+  // 2. Envía el HTTP GET en background — UI no espera respuesta.
+  // 3. El botón queda activo al instante para el próximo tap.
+  // 4. Si falla la red, solo se registra en el log — la UI
+  //    mantiene el estado elegido por el usuario.
+  void toggle(int id) {
+    final idx = _items.indexWhere((d) => d.id == id);
+    if (idx == -1) return;
 
-    _enProceso.add(id);
-    // [FIX-4] Notificar solo si hay listeners activos
+    final d           = _items[idx];
+    final nuevoEstado = !d.encendido;
+
+    // ── 1. Actualizar UI inmediatamente ──────────────────────
+    _items[idx] = d.copyWith(
+      encendido:    nuevoEstado,
+      ultimaAccion: DateTime.now(),
+      toggleCount:  d.toggleCount + 1,
+    );
+    _addLog(
+      '${d.nombre} → ${nuevoEstado ? "ENCENDIDO" : "APAGADO"}',
+      ok: true,
+    );
     if (hasListeners) notifyListeners();
+    _save();
 
-    try {
-      // [FIX-3] Buscar el índice ANTES del await — guardamos el estado
-      final idxAntes = _items.indexWhere((d) => d.id == id);
-      if (idxAntes == -1) return const CmdResult(CmdStatus.error);
-
-      // [FIX-5] Leer estadoAntes del item actual, no de variable closure
-      final estadoAntes = _items[idxAntes].encendido;
-      final d           = _items[idxAntes];
-
-      CmdResult result;
-      if (_demo) {
-        await Future.delayed(const Duration(milliseconds: 400));
-        result = CmdResult.success;
-      } else {
-        // Un solo await — la URL ON/OFF depende del estado actual
-        result = estadoAntes
-            ? await NetCtrl.apagar(d)
-            : await NetCtrl.encender(d);
-      }
-
-      // [FIX-3] Re-buscar el índice POST-await: la lista pudo cambiar
-      // (ej: otro toggle concurrente desde toggleTodos)
-      final idxPost = _items.indexWhere((x) => x.id == id);
-
-      if (result.ok) {
-        if (idxPost != -1) {
-          _items[idxPost] = _items[idxPost].copyWith(
-            encendido:    !estadoAntes,
-            ultimaAccion: DateTime.now(),
-            toggleCount:  _items[idxPost].toggleCount + 1,
-            online:       true,
-          );
-        }
-        _addLog(
-          '${d.nombre} → ${!estadoAntes ? "ENCENDIDO ✓" : "APAGADO ✓"}',
-          ok: true,
-        );
-      } else {
-        // Solo actualizar online=false — NO cambiar encendido
-        if (idxPost != -1) {
-          _items[idxPost] = _items[idxPost].copyWith(online: false);
-        }
-        final motivo = switch (result.status) {
-          CmdStatus.timeout => 'Tiempo de espera agotado',
-          CmdStatus.offline => 'Sin conexión al dispositivo',
-          CmdStatus.error   => result.detail ?? 'Error en la ruta HTTP',
-          _                 => 'Error desconocido',
-        };
-        _addLog('${d.nombre} — $motivo', ok: false);
-      }
-
-      if (hasListeners) notifyListeners();
-      _save();
-      return result;
-    } finally {
-      // [FIX-4] Siempre limpiar, con guard de hasListeners
-      _enProceso.remove(id);
-      if (hasListeners) notifyListeners();
+    // ── 2. Enviar HTTP en background — fire and forget ────────
+    if (!_demo) {
+      _fireAndForget(d, nuevoEstado);
     }
   }
 
-  // ── [FIX-6] toggleTodos con lock ────────────────────────────
-  Future<void> toggleTodos(bool enc) async {
-    if (_toggleTodosRunning) return;
-    _toggleTodosRunning = true;
-    try {
-      // Snapshot de IDs para no iterar sobre lista mutable
-      final ids = _items
-          .where((d) => d.encendido != enc)
-          .map((d) => d.id)
-          .toList();
-      for (final id in ids) {
-        // Verificar que el dispositivo sigue existiendo
-        if (_items.any((d) => d.id == id)) {
-          await toggle(id);
-          // Pequeña pausa entre comandos para no saturar la red
-          await Future.delayed(const Duration(milliseconds: 200));
-        }
-      }
-    } finally {
-      _toggleTodosRunning = false;
+  // GET sin await — no bloquea nada, no devuelve nada
+  void _fireAndForget(Dispositivo d, bool encender) {
+    final url = encender ? d.urlOn : d.urlOff;
+    http
+        .get(Uri.parse(url))
+        .timeout(AppConfig.cmdTimeout)
+        .then((_) {
+          // Peticion enviada — ignoramos la respuesta
+        })
+        .catchError((_) {
+          // Error de red — solo log, sin revertir la UI
+          _addLog('${d.nombre} — sin respuesta de red', ok: false);
+          if (hasListeners) notifyListeners();
+        });
+  }
+
+  // toggleTodos: fire and forget en masa — UI actualiza al instante
+  void toggleTodos(bool enc) {
+    final ids = _items
+        .where((d) => d.encendido != enc)
+        .map((d) => d.id)
+        .toList();
+    for (final id in ids) {
+      toggle(id);
     }
   }
 
@@ -709,7 +668,6 @@ class DispositivosNotifier extends ChangeNotifier {
     if (idx == -1) return;
     final nombre = _items[idx].nombre;
     // Si está en proceso, cancelar el lock antes de eliminar
-    _enProceso.remove(id);
     _items.removeAt(idx);
     _addLog('"$nombre" eliminado', ok: true);
     if (hasListeners) notifyListeners();
@@ -735,8 +693,6 @@ class DispositivosNotifier extends ChangeNotifier {
 
   @override
   void dispose() {
-    // [FIX-4] Limpiar estado al destruir el notifier
-    _enProceso.clear();
     super.dispose();
   }
 }
@@ -965,22 +921,8 @@ class ControlPage extends StatefulWidget {
 }
 
 class _ControlPageState extends State<ControlPage> {
-  Future<void> _toggle(int id) async {
-    final result = await widget.notifier.toggle(id);
-    if (!mounted) return;
-    if (!result.ok) {
-      final items = widget.notifier.items;
-      final idx   = items.indexWhere((x) => x.id == id);
-      final name  = idx != -1 ? items[idx].nombre : 'Dispositivo';
-      final msg   = switch (result.status) {
-        CmdStatus.timeout => '"$name" no respondió (timeout)',
-        CmdStatus.offline => '"$name" sin conexión',
-        CmdStatus.error   =>
-          '"$name": ${result.detail ?? "ruta HTTP incorrecta"}',
-        _ => 'Error en "$name"',
-      };
-      snack(context, msg, error: true);
-    }
+  void _toggle(int id) {
+    widget.notifier.toggle(id);
   }
 
   @override
@@ -1378,15 +1320,8 @@ class HabitacionesPage extends StatefulWidget {
 class _HabPageState extends State<HabitacionesPage> {
   String _sel = 'Todas';
 
-  Future<void> _toggle(int id) async {
-    final result = await widget.notifier.toggle(id);
-    if (!mounted) return;
-    if (!result.ok) {
-      final items = widget.notifier.items;
-      final idx   = items.indexWhere((x) => x.id == id);
-      final name  = idx != -1 ? items[idx].nombre : 'Dispositivo';
-      snack(context, 'Sin respuesta de "$name"', error: true);
-    }
+  void _toggle(int id) {
+    widget.notifier.toggle(id);
   }
 
   @override
@@ -1722,13 +1657,8 @@ class _DispCard extends StatefulWidget {
 }
 
 class _DispCardState extends State<_DispCard> {
-  Future<void> _toggle() async {
-    final result = await widget.notifier.toggle(widget.d.id);
-    if (!mounted) return;
-    if (!result.ok) {
-      final msg = result.detail ?? 'Sin respuesta de "${widget.d.nombre}"';
-      snack(context, msg, error: true);
-    }
+  void _toggle() {
+    widget.notifier.toggle(widget.d.id);
   }
 
   @override

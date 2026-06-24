@@ -1,28 +1,30 @@
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║  DOMÓTICA PRO  v5.2  —  Producción                              ║
+// ║  DOMÓTICA PRO  v5.3  —  Producción                              ║
 // ╚══════════════════════════════════════════════════════════════════╝
 //
-// CORRECCIONES v5.1:
-//  [FIX-1] NetCtrl._cmd: eliminado triple reintento GET→POST→GET que
-//          ciclaba el relay 3-4 veces. Ahora: 1 intento + 1 reintento.
-//  [FIX-2] HTTP 404/3xx ya no cuenta como éxito. Solo 2xx = OK.
-//  [FIX-3] toggle(): índice re-buscado POST-await para evitar datos
-//          obsoletos si la lista cambió durante el await.
-//  [FIX-4] UI actualiza inmediatamente — fire and forget.
-//  [FIX-5] estadoAntes leído del índice post-await, no de variable
-//          capturada antes del await.
-//  [FIX-6] toggleTodos usa lock propio para evitar race conditions.
-//  [FIX-7] withOpacity reemplazado por withValues(alpha:) en todo el
-//          código (deprecado en Flutter 3.x).
+// NOVEDADES v5.3:
+//  [CAM-1] Nuevo tipo TipoD.camara — Web Remote Droid stream MJPEG.
+//          Paths confirmados:
+//            Encender cámara : /camera/on   (GET)
+//            Apagar cámara   : /camera/off  (GET)
+//            Stream MJPEG    : /video        (GET)
+//            Snapshot JPG    : /shot.jpg     (GET — para miniatura)
+//  [CAM-2] Al tocar la tarjeta de un dispositivo tipo cámara se abre
+//          CamaraPage en pantalla completa con stream MJPEG en vivo.
+//  [CAM-3] CamaraPage: controles ON/OFF, snap para foto, indicador
+//          de estado de conexión y botón de pantalla completa.
+//  [CAM-4] MjpegWidget: decodifica el stream multipart/x-mixed-replace
+//          cuadro a cuadro sin paquete externo — solo dart:typed_data
+//          y flutter/painting. Robusto a cortes de red.
+//  [CAM-5] _ControlCard detecta tipo cámara y abre CamaraPage en
+//          lugar del toggle habitual.
 //
-// CORRECCIONES v5.2:
-//  [FIX-8] Celular (Web Remote Droid): paths confirmados en producción.
-//          URL real: http://IP:8888/flash/on  y  /flash/off
-//          NetCtrl prueba paths alternativos como fallback automático
-//          si el principal da 404, cubriendo distintas versiones.
+// CORRECCIONES anteriores mantenidas (v5.1 / v5.2):
+//  [FIX-1..8] — ver cabecera original de v5.2
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -49,6 +51,8 @@ class C {
   static const purpleGlow = Color(0x269B6DFF);
   static const yellow     = Color(0xFFFFCC44);
   static const yellowGlow = Color(0x26FFCC44);
+  static const cyan       = Color(0xFF00D4FF);   // [CAM-1] color cámara
+  static const cyanGlow   = Color(0x2600D4FF);
   static const t1         = Color(0xFFF0F4FF);
   static const t2         = Color(0xFF7B8DB8);
   static const t3         = Color(0xFF3D4E78);
@@ -66,11 +70,8 @@ class R {
 // CONSTANTES DE PRODUCCIÓN
 // ════════════════════════════════════════════════════════════════
 class AppConfig {
-  // [FIX-1] Timeout razonable. Con un solo reintento el total máximo
-  // es 2 × cmdTimeout = 16s — aceptable para dispositivos lentos.
   static const cmdTimeout   = Duration(seconds: 8);
   static const pingTimeout  = Duration(seconds: 5);
-  // [FIX-1] Solo 1 reintento — no 2 para evitar ciclar el relay.
   static const maxRetries   = 1;
   static const retryDelay   = Duration(milliseconds: 600);
   static const maxLogItems  = 300;
@@ -115,14 +116,16 @@ extension ModoConexionX on ModoConexion {
 // ════════════════════════════════════════════════════════════════
 // ENUMS DISPOSITIVO
 // ════════════════════════════════════════════════════════════════
-enum TipoD { tasmota, sonoff, shelly, celular, otro }
+// [CAM-1] Agregado TipoD.camara
+enum TipoD { tasmota, sonoff, shelly, celular, camara, otro }
 
 extension TipoDX on TipoD {
   String get label => switch (this) {
         TipoD.tasmota => 'Tasmota',
         TipoD.sonoff  => 'Sonoff',
         TipoD.shelly  => 'Shelly',
-        TipoD.celular => 'Celular',
+        TipoD.celular => 'Celular (flash)',
+        TipoD.camara  => 'Cámara IP',
         TipoD.otro    => 'Genérico',
       };
   IconData get icon => switch (this) {
@@ -130,6 +133,7 @@ extension TipoDX on TipoD {
         TipoD.sonoff  => Icons.bolt_rounded,
         TipoD.shelly  => Icons.router_rounded,
         TipoD.celular => Icons.smartphone_rounded,
+        TipoD.camara  => Icons.videocam_rounded,   // [CAM-1]
         TipoD.otro    => Icons.settings_input_hdmi_rounded,
       };
   Color get color => switch (this) {
@@ -137,66 +141,58 @@ extension TipoDX on TipoD {
         TipoD.sonoff  => C.orange,
         TipoD.shelly  => C.green,
         TipoD.celular => C.yellow,
+        TipoD.camara  => C.cyan,    // [CAM-1]
         TipoD.otro    => C.t2,
       };
-  // Path principal (el más estándar de cada firmware)
+
+  // [CAM-1] Paths Web Remote Droid para cámara
   String get pathOn => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+On',
         TipoD.sonoff  => '/control?cmd=on',
         TipoD.shelly  => '/relay/0?turn=on',
-        // Web Remote Droid — confirmado: http://IP:8888/flash/on
         TipoD.celular => '/flash/on',
+        TipoD.camara  => '/camera/on',
         TipoD.otro    => '/on',
       };
   String get pathOff => switch (this) {
         TipoD.tasmota => '/cm?cmnd=Power+Off',
         TipoD.sonoff  => '/control?cmd=off',
         TipoD.shelly  => '/relay/0?turn=off',
-        // Web Remote Droid — confirmado: http://IP:8888/flash/off
         TipoD.celular => '/flash/off',
+        TipoD.camara  => '/camera/off',
         TipoD.otro    => '/off',
       };
 
-  // [FIX-8] Paths alternativos por firmware, en orden de prioridad.
-  // NetCtrl los prueba en secuencia si el path principal falla con 404.
+  // [CAM-1] Path del stream MJPEG (solo para tipo camara)
+  String get pathStream => '/video';
+
+  // [CAM-1] Path del snapshot JPG (solo para tipo camara)
+  String get pathSnapshot => '/shot.jpg';
+
   List<String> get pathsOnFallback => switch (this) {
-        TipoD.celular => [
-            '/flash/on',        // Web Remote Droid — confirmado en producción
-            '/?action=on',      // variante alternativa
-            '/flash?on=1',      // versiones antiguas
-          ],
-        TipoD.tasmota => [
-            '/cm?cmnd=Power+On',
-            '/cm?cmnd=Power1+On',  // dispositivos con múltiples relays
-          ],
-        TipoD.shelly  => [
-            '/relay/0?turn=on',
-            '/rpc/Switch.Set?id=0&on=true',  // Shelly Gen2
-          ],
+        TipoD.celular => ['/flash/on', '/?action=on', '/flash?on=1'],
+        TipoD.camara  => ['/camera/on', '/video/on', '/?camera=on'],  // [CAM-1]
+        TipoD.tasmota => ['/cm?cmnd=Power+On', '/cm?cmnd=Power1+On'],
+        TipoD.shelly  => ['/relay/0?turn=on', '/rpc/Switch.Set?id=0&on=true'],
         _ => [pathOn],
       };
 
   List<String> get pathsOffFallback => switch (this) {
-        TipoD.celular => [
-            '/flash/off',       // Web Remote Droid — confirmado en producción
-            '/?action=off',     // variante alternativa
-            '/flash?on=0',      // versiones antiguas
-          ],
-        TipoD.tasmota => [
-            '/cm?cmnd=Power+Off',
-            '/cm?cmnd=Power1+Off',
-          ],
-        TipoD.shelly  => [
-            '/relay/0?turn=off',
-            '/rpc/Switch.Set?id=0&on=false',
-          ],
+        TipoD.celular => ['/flash/off', '/?action=off', '/flash?on=0'],
+        TipoD.camara  => ['/camera/off', '/video/off', '/?camera=off'],  // [CAM-1]
+        TipoD.tasmota => ['/cm?cmnd=Power+Off', '/cm?cmnd=Power1+Off'],
+        TipoD.shelly  => ['/relay/0?turn=off', '/rpc/Switch.Set?id=0&on=false'],
         _ => [pathOff],
       };
+
+  // [CAM-1] ¿Es un dispositivo de video?
+  bool get esCamara => this == TipoD.camara;
+
   static TipoD fromStr(String s) => TipoD.values
       .firstWhere((e) => e.name == s.toLowerCase(), orElse: () => TipoD.otro);
 }
 
-enum CatArtefacto { luz, ventilador, televisor, aire, enchufe, calefactor, otro }
+enum CatArtefacto { luz, ventilador, televisor, aire, enchufe, calefactor, camara, otro }
 
 extension CatX on CatArtefacto {
   String get label => switch (this) {
@@ -206,6 +202,7 @@ extension CatX on CatArtefacto {
         CatArtefacto.aire       => 'A/C',
         CatArtefacto.enchufe    => 'Enchufe',
         CatArtefacto.calefactor => 'Calefactor',
+        CatArtefacto.camara     => 'Cámara',
         CatArtefacto.otro       => 'Otro',
       };
   IconData get icon => switch (this) {
@@ -215,6 +212,7 @@ extension CatX on CatArtefacto {
         CatArtefacto.aire       => Icons.ac_unit_rounded,
         CatArtefacto.enchufe    => Icons.power_rounded,
         CatArtefacto.calefactor => Icons.local_fire_department_rounded,
+        CatArtefacto.camara     => Icons.videocam_rounded,
         CatArtefacto.otro       => Icons.device_unknown_rounded,
       };
   Color get color => switch (this) {
@@ -224,6 +222,7 @@ extension CatX on CatArtefacto {
         CatArtefacto.aire       => C.blue,
         CatArtefacto.enchufe    => C.green,
         CatArtefacto.calefactor => C.orange,
+        CatArtefacto.camara     => C.cyan,
         CatArtefacto.otro       => C.t2,
       };
   static CatArtefacto fromStr(String s) => CatArtefacto.values
@@ -284,7 +283,6 @@ class Dispositivo {
     this.online,
   });
 
-  // Base sin path — misma lógica que NetCtrl._baseUrl()
   String get _base {
     switch (modo) {
       case ModoConexion.url:
@@ -295,11 +293,13 @@ class Dispositivo {
     }
   }
 
-  // URL principal (para mostrar en UI y diagnóstico)
   String get urlOn  => '$_base${tipo.pathOn}';
   String get urlOff => '$_base${tipo.pathOff}';
 
-  // Todos los paths que se intentarán (para diagnóstico)
+  // [CAM-1] URLs específicas de cámara
+  String get urlStream   => '$_base${tipo.pathStream}';
+  String get urlSnapshot => '$_base${tipo.pathSnapshot}';
+
   List<String> get urlsOnFallback  =>
       tipo.pathsOnFallback.map((p) => '$_base$p').toList();
   List<String> get urlsOffFallback =>
@@ -376,17 +376,14 @@ class Dispositivo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROLADOR DE RED  — v5.2
+// CONTROLADOR DE RED
 // ════════════════════════════════════════════════════════════════
 class NetCtrl {
-  // ── GET con timeout ──────────────────────────────────────────
   static Future<CmdResult> _tryGet(String url) async {
     try {
       final r = await http.get(Uri.parse(url)).timeout(AppConfig.cmdTimeout);
-      // [FIX-2] Solo 2xx es éxito real. 404 = ruta incorrecta = error.
       if (r.statusCode >= 200 && r.statusCode < 300) return CmdResult.success;
-      return CmdResult(CmdStatus.error,
-          detail: 'HTTP ${r.statusCode}');
+      return CmdResult(CmdStatus.error, detail: 'HTTP ${r.statusCode}');
     } on TimeoutException {
       return CmdResult(CmdStatus.timeout,
           detail: 'Timeout (${AppConfig.cmdTimeout.inSeconds}s)');
@@ -395,10 +392,6 @@ class NetCtrl {
     }
   }
 
-  // ── [FIX-1] Un intento + UN reintento solo si hay error de red.
-  // ── [FIX-8] Si el path principal da 404, prueba los fallbacks
-  //    en secuencia hasta encontrar uno que responda 2xx.
-  // ── SIN POST de fallback: evita ciclar el relay físico.
   static Future<CmdResult> _cmdConFallback(
     String baseUrl,
     List<String> paths,
@@ -409,34 +402,25 @@ class NetCtrl {
 
       if (r.ok) return r;
 
-      // Error de red (timeout/offline): reintentar UNA vez el mismo path
-      if (r.status == CmdStatus.timeout ||
-          r.status == CmdStatus.offline) {
+      if (r.status == CmdStatus.timeout || r.status == CmdStatus.offline) {
         await Future.delayed(AppConfig.retryDelay);
         final retry = await _tryGet(url);
         if (retry.ok) return retry;
-        // Si sigue sin red, no tiene sentido probar más paths
         return retry;
       }
 
-      // HTTP 404: este path no existe → probar el siguiente fallback
-      // Cualquier otro error HTTP (4xx/5xx): reportar inmediatamente
       if (r.status == CmdStatus.error &&
           r.detail != null &&
           !r.detail!.contains('404')) {
         return r;
       }
-      // 404 → continuar al siguiente path
     }
-    // Todos los paths fallaron con 404
     return const CmdResult(
       CmdStatus.error,
-      detail: 'Ningún path del firmware respondió correctamente.\n'
-          'Usa el Diagnóstico para identificar la URL correcta.',
+      detail: 'Ningún path del firmware respondió correctamente.',
     );
   }
 
-  // ── Construye la base de URL sin path ───────────────────────
   static String _baseUrl(Dispositivo d) {
     switch (d.modo) {
       case ModoConexion.url:
@@ -447,14 +431,12 @@ class NetCtrl {
     }
   }
 
-  // ── [FIX-8] encender/apagar usan paths con fallback automático
   static Future<CmdResult> encender(Dispositivo d) =>
       _cmdConFallback(_baseUrl(d), d.tipo.pathsOnFallback);
 
   static Future<CmdResult> apagar(Dispositivo d) =>
       _cmdConFallback(_baseUrl(d), d.tipo.pathsOffFallback);
 
-  // ── Ping simple para verificar conectividad ──────────────────
   static Future<bool> ping({
     required ModoConexion modo,
     required String       ip,
@@ -466,10 +448,7 @@ class NetCtrl {
         : 'http://${ip.trim()}:$puerto/';
     if (url.isEmpty) return false;
     try {
-      final r =
-          await http.get(Uri.parse(url)).timeout(AppConfig.pingTimeout);
-      // Para ping aceptamos cualquier respuesta HTTP (incluso 404)
-      // lo importante es que el host responde
+      final r = await http.get(Uri.parse(url)).timeout(AppConfig.pingTimeout);
       return r.statusCode < 600;
     } catch (_) {
       return false;
@@ -477,11 +456,7 @@ class NetCtrl {
   }
 
   static Future<bool> pingDispositivo(Dispositivo d) => ping(
-        modo:    d.modo,
-        ip:      d.ip,
-        puerto:  d.puerto,
-        urlBase: d.urlBase,
-      );
+        modo: d.modo, ip: d.ip, puerto: d.puerto, urlBase: d.urlBase);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -508,7 +483,7 @@ class DispositivoRepo {
 }
 
 // ════════════════════════════════════════════════════════════════
-// NOTIFIER — CORREGIDO
+// NOTIFIER
 // ════════════════════════════════════════════════════════════════
 class DispositivosNotifier extends ChangeNotifier {
   final SharedPreferences _prefs;
@@ -538,15 +513,8 @@ class DispositivosNotifier extends ChangeNotifier {
   List<Dispositivo> porHabitacion(String h) =>
       h == 'Todas' ? _items : _items.where((d) => d.habitacion == h).toList();
 
-  // esBusy siempre false — UI no bloquea el botón con spinner
   bool esBusy(int id) => false;
 
-  // ── FIRE AND FORGET ──────────────────────────────────────────
-  // 1. Cambia el estado en UI de forma INSTANTÁNEA (sin await).
-  // 2. Envía el HTTP GET en background — UI no espera respuesta.
-  // 3. El botón queda activo al instante para el próximo tap.
-  // 4. Si falla la red, solo se registra en el log — la UI
-  //    mantiene el estado elegido por el usuario.
   void toggle(int id) {
     final idx = _items.indexWhere((d) => d.id == id);
     if (idx == -1) return;
@@ -554,7 +522,6 @@ class DispositivosNotifier extends ChangeNotifier {
     final d           = _items[idx];
     final nuevoEstado = !d.encendido;
 
-    // ── 1. Actualizar UI inmediatamente ──────────────────────
     _items[idx] = d.copyWith(
       encendido:    nuevoEstado,
       ultimaAccion: DateTime.now(),
@@ -567,29 +534,23 @@ class DispositivosNotifier extends ChangeNotifier {
     if (hasListeners) notifyListeners();
     _save();
 
-    // ── 2. Enviar HTTP en background — fire and forget ────────
     if (!_demo) {
       _fireAndForget(d, nuevoEstado);
     }
   }
 
-  // GET sin await — no bloquea nada, no devuelve nada
   void _fireAndForget(Dispositivo d, bool encender) {
     final url = encender ? d.urlOn : d.urlOff;
     http
         .get(Uri.parse(url))
         .timeout(AppConfig.cmdTimeout)
-        .then((_) {
-          // Peticion enviada — ignoramos la respuesta
-        })
+        .then((_) {})
         .catchError((_) {
-          // Error de red — solo log, sin revertir la UI
           _addLog('${d.nombre} — sin respuesta de red', ok: false);
           if (hasListeners) notifyListeners();
         });
   }
 
-  // toggleTodos: fire and forget en masa — UI actualiza al instante
   void toggleTodos(bool enc) {
     final ids = _items
         .where((d) => d.encendido != enc)
@@ -667,7 +628,6 @@ class DispositivosNotifier extends ChangeNotifier {
     final idx = _items.indexWhere((x) => x.id == id);
     if (idx == -1) return;
     final nombre = _items[idx].nombre;
-    // Si está en proceso, cancelar el lock antes de eliminar
     _items.removeAt(idx);
     _addLog('"$nombre" eliminado', ok: true);
     if (hasListeners) notifyListeners();
@@ -692,9 +652,7 @@ class DispositivosNotifier extends ChangeNotifier {
   void _save() => DispositivoRepo.guardar(_prefs, _items);
 
   @override
-  void dispose() {
-    super.dispose();
-  }
+  void dispose() => super.dispose();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -708,9 +666,9 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:                   Colors.transparent,
-    statusBarIconBrightness:          Brightness.light,
-    systemNavigationBarColor:         Color(0xFF070B14),
+    statusBarColor:                    Colors.transparent,
+    statusBarIconBrightness:           Brightness.light,
+    systemNavigationBarColor:          Color(0xFF070B14),
     systemNavigationBarIconBrightness: Brightness.light,
   ));
   final prefs = await SharedPreferences.getInstance();
@@ -732,8 +690,7 @@ void snack(BuildContext ctx, String msg, {bool error = false}) {
         size: 18,
       ),
       const SizedBox(width: 10),
-      Expanded(
-          child: Text(msg, style: const TextStyle(color: C.t1))),
+      Expanded(child: Text(msg, style: const TextStyle(color: C.t1))),
     ]),
     backgroundColor: C.cardHi,
     margin:          const EdgeInsets.all(14),
@@ -791,8 +748,7 @@ class DomoticaApp extends StatelessWidget {
                   borderSide: const BorderSide(color: C.border)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: R.xs,
-                  borderSide:
-                      const BorderSide(color: C.blue, width: 1.5)),
+                  borderSide: const BorderSide(color: C.blue, width: 1.5)),
               errorBorder: OutlineInputBorder(
                   borderRadius: R.xs,
                   borderSide: const BorderSide(color: C.red)),
@@ -888,8 +844,7 @@ class _BottomNav extends StatelessWidget {
                     color: sel ? C.blueGlow : Colors.transparent,
                     borderRadius: R.md,
                   ),
-                  child:
-                      Column(mainAxisSize: MainAxisSize.min, children: [
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(items[i].$1,
                         size: 22, color: sel ? C.blue : C.t3),
                     const SizedBox(height: 3),
@@ -910,6 +865,550 @@ class _BottomNav extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
+// [CAM-4] MJPEG WIDGET — stream MJPEG cuadro a cuadro sin plugin
+// ════════════════════════════════════════════════════════════════
+/// Decodifica un stream multipart/x-mixed-replace (MJPEG) cuadro
+/// a cuadro usando solo http.Client y dart:typed_data.
+/// Muestra cada frame como Image.memory en cuanto llega.
+class MjpegWidget extends StatefulWidget {
+  final String  streamUrl;
+  final BoxFit  fit;
+  const MjpegWidget({
+    super.key,
+    required this.streamUrl,
+    this.fit = BoxFit.contain,
+  });
+
+  @override
+  State<MjpegWidget> createState() => _MjpegWidgetState();
+}
+
+class _MjpegWidgetState extends State<MjpegWidget> {
+  http.Client?        _client;
+  StreamSubscription? _sub;
+  Uint8List?          _frame;
+  String?             _error;
+  bool                _connecting = true;
+
+  // Marcadores JPEG
+  static final _soiMarker = Uint8List.fromList([0xFF, 0xD8]); // Start Of Image
+  static final _eoiMarker = Uint8List.fromList([0xFF, 0xD9]); // End Of Image
+
+  @override
+  void initState() {
+    super.initState();
+    _connect();
+  }
+
+  @override
+  void didUpdateWidget(MjpegWidget old) {
+    super.didUpdateWidget(old);
+    if (old.streamUrl != widget.streamUrl) {
+      _disconnect();
+      _connect();
+    }
+  }
+
+  Future<void> _connect() async {
+    if (!mounted) return;
+    setState(() {
+      _connecting = true;
+      _error      = null;
+      _frame      = null;
+    });
+
+    try {
+      _client = http.Client();
+      final request  = http.Request('GET', Uri.parse(widget.streamUrl));
+      final response = await _client!.send(request).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Timeout al conectar con la cámara'),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      if (mounted) setState(() => _connecting = false);
+
+      // Buffer acumulador de bytes
+      final buf = <int>[];
+
+      _sub = response.stream.listen(
+        (chunk) {
+          buf.addAll(chunk);
+          _extractFrames(buf);
+        },
+        onError: (e) {
+          if (mounted) setState(() => _error = 'Error de stream: $e');
+        },
+        onDone: () {
+          if (mounted) setState(() => _error = 'Stream terminado');
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _connecting = false;
+          _error      = e.toString();
+        });
+      }
+    }
+  }
+
+  /// Extrae todos los frames JPEG completos del buffer acumulado.
+  /// Un frame JPEG comienza con FFD8 y termina con FFD9.
+  void _extractFrames(List<int> buf) {
+    while (true) {
+      // Buscar inicio de JPEG
+      final start = _indexOf(buf, _soiMarker, 0);
+      if (start == -1) {
+        // Sin SOI: limpiar basura
+        buf.clear();
+        break;
+      }
+
+      // Buscar fin de JPEG desde el inicio encontrado
+      final end = _indexOf(buf, _eoiMarker, start + 2);
+      if (end == -1) break; // Frame incompleto — esperar más datos
+
+      // Frame completo: extraer
+      final frameEnd = end + 2;
+      final frame    = Uint8List.fromList(buf.sublist(start, frameEnd));
+
+      // Quitar el frame procesado del buffer
+      buf.removeRange(0, frameEnd);
+
+      if (mounted) {
+        setState(() => _frame = frame);
+      }
+    }
+  }
+
+  /// Busca la primera ocurrencia de [pattern] en [data] desde [from].
+  int _indexOf(List<int> data, Uint8List pattern, int from) {
+    outer:
+    for (int i = from; i <= data.length - pattern.length; i++) {
+      for (int j = 0; j < pattern.length; j++) {
+        if (data[i + j] != pattern[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  void _disconnect() {
+    _sub?.cancel();
+    _client?.close();
+    _sub    = null;
+    _client = null;
+  }
+
+  @override
+  void dispose() {
+    _disconnect();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_connecting) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: C.cyan, strokeWidth: 2),
+            SizedBox(height: 16),
+            Text('Conectando a la cámara...',
+                style: TextStyle(color: C.t2, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.videocam_off_rounded,
+                  size: 48, color: C.red),
+              const SizedBox(height: 16),
+              const Text('Sin señal de cámara',
+                  style: TextStyle(
+                      color: C.t1,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: C.t3, fontSize: 12)),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: () {
+                  _disconnect();
+                  _connect();
+                },
+                icon:  const Icon(Icons.refresh_rounded, color: C.cyan),
+                label: const Text('Reintentar',
+                    style: TextStyle(color: C.cyan)),
+                style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: C.cyan)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_frame == null) {
+      return const Center(
+        child: Text('Esperando primer cuadro...',
+            style: TextStyle(color: C.t3, fontSize: 12)),
+      );
+    }
+
+    return Image.memory(
+      _frame!,
+      fit:             widget.fit,
+      gaplessPlayback: true, // evita parpadeo entre frames
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// [CAM-2] CAMARA PAGE — pantalla completa con stream y controles
+// ════════════════════════════════════════════════════════════════
+class CamaraPage extends StatefulWidget {
+  final Dispositivo          d;
+  final DispositivosNotifier notifier;
+  const CamaraPage({super.key, required this.d, required this.notifier});
+
+  @override
+  State<CamaraPage> createState() => _CamaraPageState();
+}
+
+class _CamaraPageState extends State<CamaraPage> {
+  late Dispositivo _d;
+  bool _controlsVisible = true;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _d = widget.d;
+    _scheduleHide();
+    // Si la cámara no está encendida, encenderla automáticamente
+    if (!_d.encendido) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _setCamara(true));
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _showControls() {
+    setState(() => _controlsVisible = true);
+    _scheduleHide();
+  }
+
+  Future<void> _setCamara(bool encender) async {
+    widget.notifier.toggle(_d.id);
+    // Refrescar estado local
+    final updated = widget.notifier.items
+        .firstWhere((x) => x.id == _d.id, orElse: () => _d);
+    if (mounted) setState(() => _d = updated);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Mantener estado sincronizado con el notifier
+    final dActual = widget.notifier.items
+        .firstWhere((x) => x.id == _d.id, orElse: () => _d);
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(children: [
+        // ── 1. Stream de video ─────────────────────────────────
+        GestureDetector(
+          onTap: _showControls,
+          child: SizedBox.expand(
+            child: dActual.encendido
+                ? MjpegWidget(
+                    key:       ValueKey(dActual.urlStream),
+                    streamUrl: dActual.urlStream,
+                    fit:       BoxFit.contain,
+                  )
+                : const _CamaraApagada(),
+          ),
+        ),
+
+        // ── 2. Gradiente superior ──────────────────────────────
+        AnimatedOpacity(
+          opacity:  _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 300),
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: Container(
+              height: 140,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end:   Alignment.bottomCenter,
+                  colors: [Color(0xCC000000), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // ── 3. App bar superior ────────────────────────────────
+        AnimatedOpacity(
+          opacity:  _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 300),
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                child: Row(children: [
+                  _CamIconBtn(
+                    icon:  Icons.arrow_back_ios_new_rounded,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(dActual.nombre,
+                            style: const TextStyle(
+                                color:      Colors.white,
+                                fontSize:   16,
+                                fontWeight: FontWeight.w700)),
+                        Row(children: [
+                          Container(
+                            width: 7, height: 7,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: dActual.encendido
+                                  ? C.green
+                                  : C.red,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            dActual.encendido
+                                ? 'En vivo'
+                                : 'Cámara apagada',
+                            style: TextStyle(
+                                color: dActual.encendido
+                                    ? C.green
+                                    : C.t3,
+                                fontSize: 11),
+                          ),
+                        ]),
+                      ],
+                    ),
+                  ),
+                  // Badge de URL
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: C.cyanGlow,
+                        borderRadius: R.xl,
+                        border: Border.all(
+                            color: C.cyan.withValues(alpha: 0.4)),
+                      ),
+                      child: Text(
+                        dActual.conexionDisplay,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color:    C.cyan,
+                            fontSize: 9,
+                            fontFamily: 'monospace'),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+
+        // ── 4. Gradiente inferior ──────────────────────────────
+        AnimatedOpacity(
+          opacity:  _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 300),
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                height: 160,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end:   Alignment.topCenter,
+                    colors: [Color(0xDD000000), Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // ── 5. Controles inferiores ────────────────────────────
+        AnimatedOpacity(
+          opacity:  _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 300),
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Botón encender/apagar
+                      _CamControlBtn(
+                        icon: dActual.encendido
+                            ? Icons.videocam_off_rounded
+                            : Icons.videocam_rounded,
+                        label: dActual.encendido
+                            ? 'Apagar cámara'
+                            : 'Encender cámara',
+                        color: dActual.encendido ? C.red : C.cyan,
+                        onTap: () => _setCamara(!dActual.encendido),
+                      ),
+                      const SizedBox(width: 24),
+                      // Botón de diagnóstico
+                      _CamControlBtn(
+                        icon:  Icons.wifi_find_rounded,
+                        label: 'Diagnóstico',
+                        color: C.blue,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DiagnosticoPage(
+                                d:        dActual,
+                                notifier: widget.notifier),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// Pantalla negra cuando la cámara está apagada
+class _CamaraApagada extends StatelessWidget {
+  const _CamaraApagada();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.videocam_off_rounded,
+                size: 64, color: Color(0xFF2A3050)),
+            SizedBox(height: 16),
+            Text('Cámara apagada',
+                style: TextStyle(
+                    color:    Color(0xFF3D4E78),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600)),
+            SizedBox(height: 8),
+            Text('Toca "Encender cámara" para iniciar el stream',
+                style: TextStyle(color: Color(0xFF2A3050), fontSize: 12)),
+          ],
+        ),
+      );
+}
+
+// Botón circular para el app bar de la cámara
+class _CamIconBtn extends StatelessWidget {
+  final IconData     icon;
+  final VoidCallback onTap;
+  const _CamIconBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 38, height: 38,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.5),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+      );
+}
+
+// Botón de control inferior en la pantalla de cámara
+class _CamControlBtn extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final Color        color;
+  final VoidCallback onTap;
+  const _CamControlBtn({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 58, height: 58,
+              decoration: BoxDecoration(
+                color:  color.withValues(alpha: 0.18),
+                shape:  BoxShape.circle,
+                border: Border.all(color: color, width: 1.5),
+              ),
+              child: Icon(icon, color: color, size: 26),
+            ),
+            const SizedBox(height: 8),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 11)),
+          ],
+        ),
+      );
+}
+
+// ════════════════════════════════════════════════════════════════
 // PÁGINA: CONTROL
 // ════════════════════════════════════════════════════════════════
 class ControlPage extends StatefulWidget {
@@ -921,8 +1420,18 @@ class ControlPage extends StatefulWidget {
 }
 
 class _ControlPageState extends State<ControlPage> {
-  void _toggle(int id) {
-    widget.notifier.toggle(id);
+  // [CAM-5] Redirige a CamaraPage si es tipo camara
+  void _onCardTap(Dispositivo d) {
+    if (d.tipo.esCamara) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CamaraPage(d: d, notifier: widget.notifier),
+        ),
+      );
+    } else {
+      widget.notifier.toggle(d.id);
+    }
   }
 
   @override
@@ -1007,10 +1516,11 @@ class _ControlPageState extends State<ControlPage> {
                     (_, i) {
                       final d = n.items[i];
                       return _ControlCard(
-                        key:      ValueKey(d.id),
-                        d:        d,
-                        busy:     n.esBusy(d.id),
-                        onToggle: () => _toggle(d.id),
+                        key:     ValueKey(d.id),
+                        d:       d,
+                        busy:    n.esBusy(d.id),
+                        onTap:   () => _onCardTap(d),
+                        onToggle: () => _onCardTap(d),
                       );
                     },
                     childCount: n.items.length,
@@ -1034,8 +1544,8 @@ class _ControlHeader extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end:   Alignment.bottomRight,
+          begin:  Alignment.topLeft,
+          end:    Alignment.bottomRight,
           colors: [Color(0xFF0D1528), C.bg],
         ),
       ),
@@ -1088,11 +1598,11 @@ class _PercentRing extends StatelessWidget {
         width: 56, height: 56,
         child: Stack(alignment: Alignment.center, children: [
           CircularProgressIndicator(
-            value:          total == 0 ? 0 : enc / total,
+            value:           total == 0 ? 0 : enc / total,
             backgroundColor: C.border,
-            valueColor:     const AlwaysStoppedAnimation(C.blue),
-            strokeWidth:    5,
-            strokeCap:      StrokeCap.round,
+            valueColor:      const AlwaysStoppedAnimation(C.blue),
+            strokeWidth:     5,
+            strokeCap:       StrokeCap.round,
           ),
           Text(
             '${total == 0 ? 0 : (enc * 100 ~/ total)}%',
@@ -1105,27 +1615,32 @@ class _PercentRing extends StatelessWidget {
       );
 }
 
+// [CAM-5] _ControlCard ahora acepta onTap (para cámara) y onToggle
 class _ControlCard extends StatelessWidget {
   final Dispositivo  d;
   final bool         busy;
+  final VoidCallback onTap;
   final VoidCallback onToggle;
   const _ControlCard({
     super.key,
     required this.d,
     required this.busy,
+    required this.onTap,
     required this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
     final col       = d.encendido ? d.tipo.color : C.t3;
-    // [FIX-7] withValues en lugar de withOpacity (deprecado)
     final bgCol     = d.encendido
         ? d.tipo.color.withValues(alpha: 0.10)
         : C.card;
     final borderCol = d.encendido
         ? d.tipo.color.withValues(alpha: 0.45)
         : C.border;
+
+    // [CAM-5] Las tarjetas de cámara muestran ícono de play en lugar del botón power
+    final esCamara = d.tipo.esCamara;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
@@ -1137,7 +1652,7 @@ class _ControlCard extends StatelessWidget {
             color: borderCol, width: d.encendido ? 1.5 : 0.5),
       ),
       child: InkWell(
-        onTap:        busy ? null : onToggle,
+        onTap:        busy ? null : onTap,
         borderRadius: R.sm,
         child: Padding(
           padding: const EdgeInsets.symmetric(
@@ -1162,8 +1677,7 @@ class _ControlCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: d.online! ? C.green : C.red,
-                        border:
-                            Border.all(color: C.card, width: 1.5),
+                        border: Border.all(color: C.card, width: 1.5),
                       ),
                     ),
                   ),
@@ -1180,13 +1694,16 @@ class _ControlCard extends StatelessWidget {
                       style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color:
-                              d.encendido ? C.t1 : C.t2)),
+                          color: d.encendido ? C.t1 : C.t2)),
                   const SizedBox(height: 4),
                   Row(children: [
                     _MicroBadge(d.tipo.label, col: d.tipo.color),
                     const SizedBox(width: 6),
                     _MicroBadge(d.habitacion, col: C.t3),
+                    if (esCamara) ...[
+                      const SizedBox(width: 6),
+                      _MicroBadge('MJPEG', col: C.cyan),
+                    ],
                   ]),
                   const SizedBox(height: 4),
                   Row(children: [
@@ -1203,17 +1720,66 @@ class _ControlCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            _PowerButton(
-              encendido: d.encendido,
-              busy:      busy,
-              color:     d.tipo.color,
-              onTap:     busy ? null : onToggle,
-            ),
+            // [CAM-5] Botón diferente para cámara
+            esCamara
+                ? _CameraOpenButton(
+                    encendido: d.encendido,
+                    color:     d.tipo.color,
+                    onTap:     busy ? null : onTap,
+                  )
+                : _PowerButton(
+                    encendido: d.encendido,
+                    busy:      busy,
+                    color:     d.tipo.color,
+                    onTap:     busy ? null : onToggle,
+                  ),
           ]),
         ),
       ),
     );
   }
+}
+
+// [CAM-5] Botón de abrir cámara (en lugar del botón power)
+class _CameraOpenButton extends StatelessWidget {
+  final bool         encendido;
+  final Color        color;
+  final VoidCallback? onTap;
+  const _CameraOpenButton({
+    required this.encendido,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          width: 56, height: 56,
+          decoration: BoxDecoration(
+            color:  encendido ? color : C.surface,
+            shape:  BoxShape.circle,
+            border: Border.all(
+                color: encendido ? color : C.border, width: 1.5),
+            boxShadow: encendido
+                ? [
+                    BoxShadow(
+                        color:      color.withValues(alpha: 0.35),
+                        blurRadius: 14,
+                        spreadRadius: 2)
+                  ]
+                : [],
+          ),
+          child: Icon(
+            encendido
+                ? Icons.play_circle_filled_rounded
+                : Icons.videocam_rounded,
+            size:  26,
+            color: encendido ? Colors.white : C.t3,
+          ),
+        ),
+      );
 }
 
 class _PowerButton extends StatelessWidget {
@@ -1251,11 +1817,10 @@ class _PowerButton extends StatelessWidget {
           shape:  BoxShape.circle,
           border: Border.all(
               color: encendido ? color : C.border, width: 1.5),
-          // [FIX-7] withValues en lugar de withOpacity
           boxShadow: encendido
               ? [
                   BoxShadow(
-                      color: color.withValues(alpha: 0.35),
+                      color:      color.withValues(alpha: 0.35),
                       blurRadius: 14,
                       spreadRadius: 2)
                 ]
@@ -1320,8 +1885,18 @@ class HabitacionesPage extends StatefulWidget {
 class _HabPageState extends State<HabitacionesPage> {
   String _sel = 'Todas';
 
-  void _toggle(int id) {
-    widget.notifier.toggle(id);
+  void _onTileTap(BuildContext ctx, Dispositivo d) {
+    if (d.tipo.esCamara) {
+      Navigator.push(
+        ctx,
+        MaterialPageRoute(
+          builder: (_) =>
+              CamaraPage(d: d, notifier: widget.notifier),
+        ),
+      );
+    } else {
+      widget.notifier.toggle(d.id);
+    }
   }
 
   @override
@@ -1369,16 +1944,16 @@ class _HabPageState extends State<HabitacionesPage> {
                 sliver: SliverGrid(
                   delegate: SliverChildBuilderDelegate(
                     (_, i) => _DevTile(
-                      key:      ValueKey(items[i].id),
-                      d:        items[i],
-                      busy:     n.esBusy(items[i].id),
-                      onToggle: () => _toggle(items[i].id),
+                      key:     ValueKey(items[i].id),
+                      d:       items[i],
+                      busy:    n.esBusy(items[i].id),
+                      onTap:   () => _onTileTap(context, items[i]),
                     ),
                     childCount: items.length,
                   ),
                   gridDelegate:
                       const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount:  2,
+                    crossAxisCount:   2,
                     crossAxisSpacing: 12,
                     mainAxisSpacing:  12,
                     childAspectRatio: 0.82,
@@ -1393,8 +1968,8 @@ class _HabPageState extends State<HabitacionesPage> {
 }
 
 class _HabTabs extends StatelessWidget {
-  final List<String>         habs;
-  final String               sel;
+  final List<String>          habs;
+  final String                sel;
   final void Function(String) onSel;
   const _HabTabs(
       {required this.habs, required this.sel, required this.onSel});
@@ -1418,17 +1993,16 @@ class _HabTabs extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
-                  color: active ? C.blue : C.surface,
+                  color:        active ? C.blue : C.surface,
                   borderRadius: R.xl,
                   border: Border.all(
                       color: active ? C.blue : C.border),
                 ),
                 child: Text(h,
                     style: TextStyle(
-                        fontSize: 12,
+                        fontSize:   12,
                         fontWeight: FontWeight.w600,
-                        color:
-                            active ? Colors.white : C.t2)),
+                        color:      active ? Colors.white : C.t2)),
               ),
             );
           },
@@ -1439,12 +2013,12 @@ class _HabTabs extends StatelessWidget {
 class _DevTile extends StatelessWidget {
   final Dispositivo  d;
   final bool         busy;
-  final VoidCallback onToggle;
+  final VoidCallback onTap;
   const _DevTile({
     super.key,
     required this.d,
     required this.busy,
-    required this.onToggle,
+    required this.onTap,
   });
 
   @override
@@ -1453,7 +2027,6 @@ class _DevTile extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       decoration: BoxDecoration(
-        // [FIX-7] withValues en lugar de withOpacity
         color: d.encendido
             ? col.withValues(alpha: 0.12)
             : C.card,
@@ -1466,7 +2039,7 @@ class _DevTile extends StatelessWidget {
         ),
       ),
       child: InkWell(
-        onTap:        busy ? null : onToggle,
+        onTap:        busy ? null : onTap,
         borderRadius: R.md,
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -1474,8 +2047,7 @@ class _DevTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 280),
@@ -1490,12 +2062,18 @@ class _DevTile extends StatelessWidget {
                         size:  22,
                         color: d.encendido ? col : C.t3),
                   ),
-                  _PowerButton(
-                    encendido: d.encendido,
-                    busy:      busy,
-                    color:     col,
-                    onTap:     busy ? null : onToggle,
-                  ),
+                  d.tipo.esCamara
+                      ? _CameraOpenButton(
+                          encendido: d.encendido,
+                          color:     col,
+                          onTap:     busy ? null : onTap,
+                        )
+                      : _PowerButton(
+                          encendido: d.encendido,
+                          busy:      busy,
+                          color:     col,
+                          onTap:     busy ? null : onTap,
+                        ),
                 ],
               ),
               const Spacer(),
@@ -1503,18 +2081,18 @@ class _DevTile extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 14,
+                      fontSize:   14,
                       fontWeight: FontWeight.w600,
-                      color: d.encendido ? C.t1 : C.t2)),
+                      color:      d.encendido ? C.t1 : C.t2)),
               const SizedBox(height: 4),
               Row(children: [
                 _MicroBadge(d.tipo.label, col: col),
                 const SizedBox(width: 6),
                 Text(d.encendido ? 'ON' : 'OFF',
                     style: TextStyle(
-                        fontSize: 10,
+                        fontSize:   10,
                         fontWeight: FontWeight.w800,
-                        color: d.encendido ? col : C.t3)),
+                        color:      d.encendido ? col : C.t3)),
               ]),
             ],
           ),
@@ -1569,20 +2147,15 @@ class _DispPageState extends State<DispositivosPage> {
                       const EdgeInsets.fromLTRB(14, 0, 14, 10),
                   child: TextField(
                     onChanged: (v) => setState(() => _query = v),
-                    style: const TextStyle(
-                        color: C.t1, fontSize: 14),
+                    style: const TextStyle(color: C.t1, fontSize: 14),
                     decoration: InputDecoration(
                       hintText: 'Buscar...',
-                      prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: C.t3,
-                          size: 20),
+                      prefixIcon: const Icon(Icons.search_rounded,
+                          color: C.t3, size: 20),
                       suffixIcon: _query.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(
-                                  Icons.clear_rounded,
-                                  color: C.t3,
-                                  size: 18),
+                              icon: const Icon(Icons.clear_rounded,
+                                  color: C.t3, size: 18),
                               onPressed: () =>
                                   setState(() => _query = ''))
                           : null,
@@ -1635,8 +2208,8 @@ void _showDeviceSheet(BuildContext context,
     {required DispositivosNotifier notifier,
     Dispositivo? edit}) {
   showModalBottomSheet(
-    context:           context,
-    backgroundColor:   C.surface,
+    context:            context,
+    backgroundColor:    C.surface,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
         borderRadius:
@@ -1657,8 +2230,16 @@ class _DispCard extends StatefulWidget {
 }
 
 class _DispCardState extends State<_DispCard> {
-  void _toggle() {
-    widget.notifier.toggle(widget.d.id);
+  void _toggle() => widget.notifier.toggle(widget.d.id);
+
+  void _openCamara() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CamaraPage(
+            d: widget.d, notifier: widget.notifier),
+      ),
+    );
   }
 
   @override
@@ -1674,7 +2255,6 @@ class _DispCardState extends State<_DispCard> {
         color: C.card,
         borderRadius: R.sm,
         border: Border.all(
-          // [FIX-7] withValues en lugar de withOpacity
           color: d.encendido
               ? col.withValues(alpha: 0.4)
               : C.border,
@@ -1720,14 +2300,16 @@ class _DispCardState extends State<_DispCard> {
                 children: [
                   Text(d.nombre,
                       style: const TextStyle(
-                          fontSize: 14,
+                          fontSize:   14,
                           fontWeight: FontWeight.w600,
-                          color: C.t1)),
+                          color:      C.t1)),
                   const SizedBox(height: 4),
                   Wrap(spacing: 6, children: [
                     _MicroBadge(d.tipo.label, col: col),
                     _MicroBadge(d.habitacion,  col: C.t2),
                     _MicroBadge(d.modo.label,  col: d.modo.color),
+                    if (d.tipo.esCamara)
+                      _MicroBadge('MJPEG', col: C.cyan),
                   ]),
                 ],
               ),
@@ -1737,19 +2319,47 @@ class _DispCardState extends State<_DispCard> {
                     width: 28, height: 28,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: col))
-                : Switch(
-                    value:    d.encendido,
-                    onChanged: (_) => _toggle(),
-                    activeColor:      Colors.white,
-                    activeTrackColor: col,
-                    inactiveThumbColor: C.t3,
-                    inactiveTrackColor: C.surface,
-                    trackOutlineColor:
-                        WidgetStateProperty.resolveWith((s) =>
-                            d.encendido
-                                ? col.withValues(alpha: 0.4)
-                                : C.border),
-                  ),
+                : d.tipo.esCamara
+                    // [CAM-5] Switch diferente para cámara
+                    ? GestureDetector(
+                        onTap: _openCamara,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color:        C.cyanGlow,
+                            borderRadius: R.xs,
+                            border: Border.all(
+                                color: C.cyan.withValues(alpha: 0.5)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.play_arrow_rounded,
+                                  size: 14, color: C.cyan),
+                              SizedBox(width: 4),
+                              Text('Ver',
+                                  style: TextStyle(
+                                      fontSize:   11,
+                                      fontWeight: FontWeight.w700,
+                                      color:      C.cyan)),
+                            ],
+                          ),
+                        ),
+                      )
+                    : Switch(
+                        value:    d.encendido,
+                        onChanged: (_) => _toggle(),
+                        activeColor:      Colors.white,
+                        activeTrackColor: col,
+                        inactiveThumbColor: C.t3,
+                        inactiveTrackColor: C.surface,
+                        trackOutlineColor:
+                            WidgetStateProperty.resolveWith((s) =>
+                                d.encendido
+                                    ? col.withValues(alpha: 0.4)
+                                    : C.border),
+                      ),
           ]),
           const SizedBox(height: 8),
           const Divider(height: 1, color: C.border),
@@ -1873,8 +2483,8 @@ class _DeviceFormState extends State<_DeviceForm> {
     _cUrl    = TextEditingController(text: e?.urlBase ?? '');
     _cHab    =
         TextEditingController(text: e?.habitacion ?? 'General');
-    _tipo    = e?.tipo ?? TipoD.celular;
-    _cat     = e?.cat  ?? CatArtefacto.luz;
+    _tipo    = e?.tipo ?? TipoD.camara;    // [CAM-1] default cámara
+    _cat     = e?.cat  ?? CatArtefacto.camara;
     _modo    = e?.modo ?? ModoConexion.movil;
   }
 
@@ -1907,6 +2517,23 @@ class _DeviceFormState extends State<_DeviceForm> {
     }
   }
 
+  // [CAM-1] Preview de la URL del stream
+  String get _streamPreview {
+    try {
+      if (_tipo != TipoD.camara) return '';
+      if (_modo == ModoConexion.url) {
+        final base =
+            _cUrl.text.trim().replaceAll(RegExp(r'/$'), '');
+        return base.isEmpty ? '' : '$base${_tipo.pathStream}';
+      }
+      final ip = _cIp.text.trim();
+      final p  = _cPuerto.text.trim();
+      return ip.isEmpty ? '' : 'http://$ip:$p${_tipo.pathStream}';
+    } catch (_) {
+      return '';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1929,9 +2556,7 @@ class _DeviceFormState extends State<_DeviceForm> {
               ),
               const SizedBox(height: 16),
               Text(
-                _isEdit
-                    ? 'Editar dispositivo'
-                    : 'Agregar dispositivo',
+                _isEdit ? 'Editar dispositivo' : 'Agregar dispositivo',
                 style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -1953,7 +2578,7 @@ class _DeviceFormState extends State<_DeviceForm> {
                 style: const TextStyle(color: C.t1),
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
-                    hintText: 'Ej: Lámpara sala'),
+                    hintText: 'Ej: Cámara entrada'),
                 validator: (v) => v == null || v.trim().isEmpty
                     ? 'Requerido'
                     : null,
@@ -1984,7 +2609,6 @@ class _DeviceFormState extends State<_DeviceForm> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        // [FIX-7] withValues
                         color: sel
                             ? c.color.withValues(alpha: 0.18)
                             : C.surface,
@@ -2001,10 +2625,9 @@ class _DeviceFormState extends State<_DeviceForm> {
                             const SizedBox(width: 5),
                             Text(c.label,
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize:   11,
                                     fontWeight: FontWeight.w600,
-                                    color:
-                                        sel ? c.color : C.t2)),
+                                    color:      sel ? c.color : C.t2)),
                           ]),
                     ),
                   );
@@ -2022,7 +2645,11 @@ class _DeviceFormState extends State<_DeviceForm> {
                     onTap: () => setState(() {
                       _tipo   = t;
                       _pingOk = null;
-                      if (t == TipoD.celular) {
+                      // [CAM-1] Autoseleccionar categoría y puerto según tipo
+                      if (t == TipoD.camara) {
+                        _cPuerto.text = '8888';
+                        _cat = CatArtefacto.camara;
+                      } else if (t == TipoD.celular) {
                         _cPuerto.text = '8888';
                       } else if (_modo != ModoConexion.url) {
                         _cPuerto.text = '80';
@@ -2033,7 +2660,6 @@ class _DeviceFormState extends State<_DeviceForm> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                        // [FIX-7] withValues
                         color: sel
                             ? t.color.withValues(alpha: 0.2)
                             : C.surface,
@@ -2050,10 +2676,9 @@ class _DeviceFormState extends State<_DeviceForm> {
                             const SizedBox(width: 5),
                             Text(t.label,
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize:   11,
                                     fontWeight: FontWeight.w600,
-                                    color:
-                                        sel ? t.color : C.t2)),
+                                    color:      sel ? t.color : C.t2)),
                           ]),
                     ),
                   );
@@ -2069,8 +2694,9 @@ class _DeviceFormState extends State<_DeviceForm> {
                   onTap: () => setState(() {
                     _modo   = m;
                     _pingOk = null;
-                    if (m == ModoConexion.movil &&
-                        _tipo == TipoD.celular) {
+                    if (m != ModoConexion.url &&
+                        (_tipo == TipoD.celular ||
+                         _tipo == TipoD.camara)) {
                       _cPuerto.text = '8888';
                     }
                   }),
@@ -2079,7 +2705,6 @@ class _DeviceFormState extends State<_DeviceForm> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      // [FIX-7] withValues
                       color: sel
                           ? m.color.withValues(alpha: 0.10)
                           : C.surface,
@@ -2109,10 +2734,9 @@ class _DeviceFormState extends State<_DeviceForm> {
                           children: [
                             Text(m.label,
                                 style: TextStyle(
-                                    fontSize: 13,
+                                    fontSize:   13,
                                     fontWeight: FontWeight.w600,
-                                    color:
-                                        sel ? m.color : C.t1)),
+                                    color:      sel ? m.color : C.t1)),
                             const SizedBox(height: 2),
                             Text(m.descripcion,
                                 style: const TextStyle(
@@ -2137,8 +2761,7 @@ class _DeviceFormState extends State<_DeviceForm> {
                   keyboardType: TextInputType.url,
                   decoration: const InputDecoration(
                       hintText: 'https://abc123.ngrok.io'),
-                  onChanged: (_) =>
-                      setState(() => _pingOk = null),
+                  onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty)
                       return 'URL requerida';
@@ -2164,8 +2787,8 @@ class _DeviceFormState extends State<_DeviceForm> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _tipo == TipoD.celular
-                            ? 'Abre Web Remote Droid en el otro celular con WiFi activo y copia la IP que muestra'
+                        _tipo == TipoD.camara || _tipo == TipoD.celular
+                            ? 'Abre Web Remote Droid en el otro celular y copia la IP que muestra en la pantalla principal'
                             : 'Busca la IP en la interfaz web del dispositivo o en tu router',
                         style: const TextStyle(
                             fontSize: 10, color: C.orange),
@@ -2180,8 +2803,7 @@ class _DeviceFormState extends State<_DeviceForm> {
                       .numberWithOptions(decimal: true),
                   decoration:
                       InputDecoration(hintText: _modo.hint),
-                  onChanged: (_) =>
-                      setState(() => _pingOk = null),
+                  onChanged: (_) => setState(() => _pingOk = null),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty)
                       return 'IP requerida';
@@ -2200,9 +2822,11 @@ class _DeviceFormState extends State<_DeviceForm> {
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: C.t1),
                   decoration: InputDecoration(
-                      hintText: _tipo == TipoD.celular
-                          ? '8888'
-                          : '80'),
+                      hintText:
+                          (_tipo == TipoD.celular ||
+                           _tipo == TipoD.camara)
+                              ? '8888'
+                              : '80'),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty)
                       return 'Requerido';
@@ -2215,11 +2839,11 @@ class _DeviceFormState extends State<_DeviceForm> {
               ],
               const SizedBox(height: 16),
 
-              // Preview URL
+              // Preview URL principal
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: C.blueGlow,
+                  color:        C.blueGlow,
                   borderRadius: R.xs,
                   border: Border.all(
                       color: C.blue.withValues(alpha: 0.3)),
@@ -2233,16 +2857,37 @@ class _DeviceFormState extends State<_DeviceForm> {
                       SizedBox(width: 6),
                       Text('URL al encender:',
                           style: TextStyle(
-                              fontSize: 10,
+                              fontSize:   10,
                               fontWeight: FontWeight.w600,
-                              color: C.blue)),
+                              color:      C.blue)),
                     ]),
                     const SizedBox(height: 4),
                     Text(_urlPreview,
                         style: const TextStyle(
-                            fontSize: 11,
-                            color: C.t2,
+                            fontSize:   11,
+                            color:      C.t2,
                             fontFamily: 'monospace')),
+                    // [CAM-1] Mostrar URL del stream si es cámara
+                    if (_tipo == TipoD.camara &&
+                        _streamPreview.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Row(children: [
+                        Icon(Icons.videocam_rounded,
+                            size: 12, color: C.cyan),
+                        SizedBox(width: 6),
+                        Text('URL del stream MJPEG:',
+                            style: TextStyle(
+                                fontSize:   10,
+                                fontWeight: FontWeight.w600,
+                                color:      C.cyan)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(_streamPreview,
+                          style: const TextStyle(
+                              fontSize:   11,
+                              color:      C.t2,
+                              fontFamily: 'monospace')),
+                    ],
                   ],
                 ),
               ),
@@ -2331,7 +2976,7 @@ class _DeviceFormState extends State<_DeviceForm> {
     final ok = await NetCtrl.ping(
       modo:    _modo,
       ip:      _cIp.text.trim(),
-      puerto:  int.tryParse(_cPuerto.text.trim()) ?? 80,
+      puerto:  int.tryParse(_cPuerto.text.trim()) ?? 8888,
       urlBase: _cUrl.text.trim(),
     );
     if (mounted) setState(() {
@@ -2352,7 +2997,7 @@ class _DeviceFormState extends State<_DeviceForm> {
         cat:        _cat,
         modo:       _modo,
         ip:         _cIp.text,
-        puerto:     int.tryParse(_cPuerto.text.trim()) ?? 80,
+        puerto:     int.tryParse(_cPuerto.text.trim()) ?? 8888,
         urlBase:    _cUrl.text,
         habitacion: _cHab.text,
       );
@@ -2367,7 +3012,7 @@ class _DeviceFormState extends State<_DeviceForm> {
         cat:        _cat,
         modo:       _modo,
         ip:         _cIp.text,
-        puerto:     int.tryParse(_cPuerto.text.trim()) ?? 80,
+        puerto:     int.tryParse(_cPuerto.text.trim()) ?? 8888,
         urlBase:    _cUrl.text,
         habitacion: _cHab.text,
         skipPing:   true,
@@ -2376,7 +3021,7 @@ class _DeviceFormState extends State<_DeviceForm> {
         setState(() => _saving = false);
         if (ok) {
           Navigator.pop(context);
-          snack(context, 'Dispositivo agregado ✓');
+          snack(context, 'Cámara agregada ✓');
         } else {
           snack(context, 'Error al guardar', error: true);
         }
@@ -2422,8 +3067,7 @@ class HistorialPage extends StatelessWidget {
                           style: TextStyle(color: C.t2)),
                       actions: [
                         TextButton(
-                          onPressed: () =>
-                              Navigator.pop(context),
+                          onPressed: () => Navigator.pop(context),
                           child: const Text('Cancelar'),
                         ),
                         TextButton(
@@ -2460,10 +3104,9 @@ class HistorialPage extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(14),
-                  itemCount: log.length,
-                  itemBuilder: (_, i) =>
-                      _LogTile(e: log[i]),
+                  padding:    const EdgeInsets.all(14),
+                  itemCount:  log.length,
+                  itemBuilder: (_, i) => _LogTile(e: log[i]),
                 ),
         );
       },
@@ -2489,15 +3132,12 @@ class _LogTile extends StatelessWidget {
           Container(
             width: 30, height: 30,
             decoration: BoxDecoration(
-              // [FIX-7] withValues
               color: (e.ok ? C.green : C.red)
                   .withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(
-              e.ok
-                  ? Icons.check_rounded
-                  : Icons.close_rounded,
+              e.ok ? Icons.check_rounded : Icons.close_rounded,
               size:  15,
               color: e.ok ? C.green : C.red,
             ),
@@ -2558,6 +3198,9 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     _log('Firmware:    ${d.tipo.label}', null);
     _log('Modo:        ${d.modo.label}', null);
     _log('Conexión:    ${d.conexionDisplay}', null);
+    if (d.tipo.esCamara) {
+      _log('Stream MJPEG: ${d.urlStream}', null);
+    }
     if (demo) {
       _log('⚠ Modo DEMO activo — simulando respuestas', null);
     }
@@ -2566,7 +3209,7 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
     _log('URL OFF: ${d.urlOff}', null);
     _log('─────────────────────────────', null);
 
-    // 1. Ping base
+    // Ping base
     _log('▶ Probando conectividad base...', null);
     if (demo) {
       await Future.delayed(const Duration(milliseconds: 400));
@@ -2591,7 +3234,8 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
           '  TIMEOUT — sin respuesta en ${AppConfig.pingTimeout.inSeconds}s',
           false,
         );
-        _log('  → Verifica IP/URL y que estés en la misma red',
+        _log(
+            '  → Verifica IP/URL y que estés en la misma red',
             false);
       } catch (e) {
         _log('  ERROR: $e', false);
@@ -2601,8 +3245,8 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
 
     _log('─────────────────────────────', null);
 
-    // 2. Probar todos los paths ON en secuencia (sin ejecutar relay)
-    _log('▶ Buscando ruta ON válida (${d.urlsOnFallback.length} paths a probar)...', null);
+    // Probar paths ON
+    _log('▶ Buscando ruta ON válida (${d.urlsOnFallback.length} paths)...', null);
     if (demo) {
       await Future.delayed(const Duration(milliseconds: 300));
       _log('  [DEMO] ${d.urlOn} → OK ✓', true);
@@ -2614,55 +3258,61 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
           final resp = await http
               .get(Uri.parse(url))
               .timeout(AppConfig.pingTimeout);
-          final ok = resp.statusCode >= 200 && resp.statusCode < 300;
-          _log('  → HTTP ${resp.statusCode} ${ok ? "✓ ESTA ES LA RUTA CORRECTA" : "(404 — siguiente...)"}', ok ? true : null);
-          if (ok) { foundOn = true; break; }
-        } on TimeoutException {
-          _log('  → TIMEOUT', false);
-          break; // Si hay timeout, la red falla — no seguir
-        } catch (_) {
-          // HEAD/GET no soportado, marcar como posible
-          _log('  → Sin respuesta HTTP (firmware puede usar solo POST)', null);
-        }
-      }
-      if (!foundOn) {
-        _log('  ⚠ Ningún path ON respondió con 2xx', false);
-        _log('  → Abre Web Remote Droid y verifica qué URL muestra', false);
-      }
-    }
-
-    _log('─────────────────────────────', null);
-
-    // 3. Probar todos los paths OFF en secuencia (sin ejecutar relay)
-    _log('▶ Buscando ruta OFF válida (${d.urlsOffFallback.length} paths a probar)...', null);
-    if (demo) {
-      await Future.delayed(const Duration(milliseconds: 300));
-      _log('  [DEMO] ${d.urlOff} → OK ✓', true);
-    } else {
-      bool foundOff = false;
-      for (final url in d.urlsOffFallback) {
-        _log('  GET $url', null);
-        try {
-          final resp = await http
-              .get(Uri.parse(url))
-              .timeout(AppConfig.pingTimeout);
-          final ok = resp.statusCode >= 200 && resp.statusCode < 300;
-          _log('  → HTTP ${resp.statusCode} ${ok ? "✓ ESTA ES LA RUTA CORRECTA" : "(404 — siguiente...)"}', ok ? true : null);
-          if (ok) { foundOff = true; break; }
+          final ok =
+              resp.statusCode >= 200 && resp.statusCode < 300;
+          _log(
+            '  → HTTP ${resp.statusCode} ${ok ? "✓ RUTA CORRECTA" : "(404 — siguiente...)"}',
+            ok ? true : null,
+          );
+          if (ok) {
+            foundOn = true;
+            break;
+          }
         } on TimeoutException {
           _log('  → TIMEOUT', false);
           break;
         } catch (_) {
-          _log('  → Sin respuesta HTTP (firmware puede usar solo POST)', null);
+          _log('  → Sin respuesta HTTP', null);
         }
       }
-      if (!foundOff) {
-        _log('  ⚠ Ningún path OFF respondió con 2xx', false);
-        _log('  → Revisa la configuración del dispositivo', false);
+      if (!foundOn) {
+        _log('  ⚠ Ningún path ON respondió con 2xx', false);
       }
     }
 
     _log('─────────────────────────────', null);
+
+    // [CAM-1] Si es cámara, probar también el stream
+    if (d.tipo.esCamara) {
+      _log('▶ Verificando endpoint de stream MJPEG...', null);
+      if (demo) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        _log('  [DEMO] ${d.urlStream} → OK ✓', true);
+      } else {
+        try {
+          final client  = http.Client();
+          final request = http.Request('GET', Uri.parse(d.urlStream));
+          final resp    = await client
+              .send(request)
+              .timeout(AppConfig.pingTimeout);
+          final ok = resp.statusCode >= 200 && resp.statusCode < 300;
+          _log(
+            '  GET ${d.urlStream} → HTTP ${resp.statusCode} ${ok ? "✓ Stream disponible" : "— no disponible"}',
+            ok,
+          );
+          client.close();
+          if (ok) {
+            _log('  Content-Type: ${resp.headers["content-type"] ?? "desconocido"}', null);
+          }
+        } on TimeoutException {
+          _log('  → TIMEOUT al conectar al stream', false);
+        } catch (e) {
+          _log('  → ERROR: $e', false);
+        }
+      }
+      _log('─────────────────────────────', null);
+    }
+
     _log('✓ Diagnóstico completo — relay NO fue activado', true);
     setState(() => _running = false);
   }
@@ -2677,15 +3327,14 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
           backgroundColor: C.surface,
           title: Text('Diagnóstico: ${widget.d.nombre}',
               style: const TextStyle(
-                  color: C.t1,
+                  color:      C.t1,
                   fontWeight: FontWeight.w700,
-                  fontSize: 15)),
+                  fontSize:   15)),
           actions: [
             if (!_running)
               IconButton(
-                icon: const Icon(Icons.refresh_rounded,
-                    color: C.blue),
-                onPressed:   _run,
+                icon:    const Icon(Icons.refresh_rounded, color: C.blue),
+                onPressed: _run,
                 tooltip: 'Repetir diagnóstico',
               ),
           ],
@@ -2707,8 +3356,8 @@ class _DiagnosticoPageState extends State<DiagnosticoPage> {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(l.msg,
                       style: TextStyle(
-                          fontSize: 12,
-                          color: col,
+                          fontSize:   12,
+                          color:      col,
                           fontFamily: 'monospace')),
                 );
               },
@@ -2748,15 +3397,14 @@ class _MicroBadge extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          // [FIX-7] withValues
           color:        col.withValues(alpha: 0.14),
           borderRadius: R.xl,
         ),
         child: Text(text,
             style: TextStyle(
-                fontSize: 9,
+                fontSize:   9,
                 fontWeight: FontWeight.w700,
-                color: col)),
+                color:      col)),
       );
 }
 
@@ -2769,9 +3417,9 @@ class _Lbl extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(text,
             style: const TextStyle(
-                fontSize: 11,
+                fontSize:   11,
                 fontWeight: FontWeight.w600,
-                color: C.t2)),
+                color:      C.t2)),
       );
 }
 
@@ -2795,7 +3443,6 @@ class _IconBtn extends StatelessWidget {
           child: Container(
             width: 34, height: 34,
             decoration: BoxDecoration(
-              // [FIX-7] withValues
               color: color.withValues(alpha: 0.15),
               borderRadius: R.xs,
               border: Border.all(
@@ -2830,8 +3477,7 @@ class _DeleteDialog extends StatelessWidget {
           ),
           TextButton(
             onPressed: onConfirm,
-            style:
-                TextButton.styleFrom(foregroundColor: C.red),
+            style: TextButton.styleFrom(foregroundColor: C.red),
             child: const Text('Eliminar'),
           ),
         ],

@@ -676,8 +676,9 @@ class _TasksPageState extends State<TasksPage> {
       ..sort((a, b) => b.priority.index.compareTo(a.priority.index));
     final done = _tasks.where((t) => t.completed).toList();
 
-    return SafeArea(
-      child: _tasks.isEmpty
+    return Scaffold(
+      body: SafeArea(
+        child: _tasks.isEmpty
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -711,6 +712,7 @@ class _TasksPageState extends State<TasksPage> {
                 const SizedBox(height: 80),
               ],
             ),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addTaskDialog,
         icon: const Icon(Icons.add),

@@ -1,66 +1,34 @@
 // =============================================================================
-// GUARDIAN LOCK — main.dart (versión autocontenida, un solo archivo)
+// GUARDIAN LOCK — main.dart (versión 100% LOCAL, sin API keys)
 // =============================================================================
 //
-// Este archivo reemplaza ÚNICAMENTE lib/main.dart. No requiere ni toca las
-// carpetas existentes del proyecto (core/theme, data, db, domain/usecases,
-// features, presentation, routes, screens, services) usadas por las otras
-// apps de este repositorio.
+// Esta versión NO usa Firebase, NO usa Google Maps, NO usa Google Sign-In ni
+// notificaciones push. Todo el login y los datos (dispositivo, historial de
+// ubicaciones, contactos, eventos) se guardan cifrados en el propio teléfono:
 //
-// REQUISITO OBLIGATORIO: agrega el bloque de dependencias del final de este
-// comentario a tu pubspec.yaml (sección `dependencies:`), y luego corre
-// `flutter pub get`. Sin esto, el build seguirá fallando con "Couldn't
-// resolve the package X" — eso ocurre siempre que un archivo Dart importa un
-// paquete no declarado en pubspec.yaml, sin importar en cuántos archivos
-// esté repartido el código.
+//   - Credenciales de cuenta y sesión → flutter_secure_storage
+//   - Historial de ubicaciones, contactos, eventos → sqflite (SQLite local)
+//   - Ubicación actual → geolocator (no requiere API key en Android)
 //
-//   firebase_core: ^3.6.0
-//   firebase_auth: ^5.3.1
-//   cloud_firestore: ^5.4.4
-//   firebase_messaging: ^15.1.3
-//   google_sign_in: ^6.2.1
-//   provider: ^6.1.2
-//   geolocator: ^13.0.1
-//   google_maps_flutter: ^2.9.0
-//   flutter_secure_storage: ^9.2.2
-//   sqflite: ^2.3.3
-//   path: ^1.9.0
-//   flutter_local_notifications: ^18.0.1
-//   permission_handler: ^11.3.1
-//   uuid: ^4.5.1
-//   intl: ^0.19.0
+// LIMITACIÓN IMPORTANTE: al no haber servidor/nube, la cuenta y los datos
+// existen SOLO en este dispositivo. No hay sincronización entre teléfonos,
+// ni comandos remotos (bloqueo/alarma a distancia), ni alertas push. La
+// pantalla de "Mapa" muestra el historial como lista de coordenadas en vez
+// de un mapa visual, porque el mapa visual (Google Maps SDK) sí requiere una
+// API key — si más adelante quieres agregarlo, dímelo.
 //
-// También necesitarás, una sola vez:
-//   flutterfire configure
-// para generar tus credenciales reales de Firebase (ver docs/INSTALL.md del
-// paquete original de Guardian Lock). Mientras tanto, este archivo incluye
-// una configuración de Firebase de MARCADOR DE POSICIÓN al final: la app
-// compilará, pero las llamadas a Firebase fallarán hasta que la reemplaces.
-//
-// Protección contra desinstalación / bloqueo remoto / alarma remota:
-// requieren un pequeño puente nativo en Kotlin (MainActivity.kt +
-// GuardianDeviceAdminReceiver.kt) que SÍ vive fuera de lib/, en
-// android/app/src/main/kotlin/... — Dart no tiene forma de acceder a
-// DeviceAdminReceiver sin ese puente. Este archivo ya incluye el lado Dart
-// (DeviceAdminService) apuntando a ese canal; si no agregas el código
-// Kotlin, esas funciones lanzarán un error controlado y quedan sin efecto,
-// pero el resto de la app compila y funciona con normalidad.
+// REQUISITO: agrega el bloque de dependencias del pubspec.yaml que te di
+// junto con este archivo, y corre `flutter pub get`.
 // =============================================================================
 
-import 'dart:async';
+import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -75,124 +43,76 @@ import 'package:uuid/uuid.dart';
 class LocationPoint {
   final double latitude;
   final double longitude;
-  final double accuracy;
   final int timestamp;
 
-  const LocationPoint({
-    this.latitude = 0.0,
-    this.longitude = 0.0,
-    this.accuracy = 0.0,
-    int? timestamp,
-  }) : timestamp = timestamp ?? 0;
+  const LocationPoint({this.latitude = 0.0, this.longitude = 0.0, int? timestamp})
+      : timestamp = timestamp ?? 0;
 
   factory LocationPoint.fromMap(Map<String, dynamic> map) => LocationPoint(
         latitude: (map['latitude'] ?? 0.0).toDouble(),
         longitude: (map['longitude'] ?? 0.0).toDouble(),
-        accuracy: (map['accuracy'] ?? 0.0).toDouble(),
         timestamp: map['timestamp'] ?? 0,
       );
 
-  Map<String, dynamic> toMap() => {
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracy': accuracy,
-        'timestamp': timestamp,
-      };
+  Map<String, dynamic> toMap() =>
+      {'latitude': latitude, 'longitude': longitude, 'timestamp': timestamp};
 }
 
 class Device {
   final String deviceId;
-  final String ownerUid;
   final String deviceName;
   final bool isLost;
   final bool hiddenModeEnabled;
   final LocationPoint? lastKnownLocation;
-  final int batteryLevel;
-  final bool isOnline;
 
   const Device({
     this.deviceId = '',
-    this.ownerUid = '',
-    this.deviceName = '',
+    this.deviceName = 'Mi dispositivo',
     this.isLost = false,
     this.hiddenModeEnabled = false,
     this.lastKnownLocation,
-    this.batteryLevel = 100,
-    this.isOnline = false,
   });
 
   factory Device.fromMap(Map<String, dynamic> map) => Device(
         deviceId: map['deviceId'] ?? '',
-        ownerUid: map['ownerUid'] ?? '',
-        deviceName: map['deviceName'] ?? '',
+        deviceName: map['deviceName'] ?? 'Mi dispositivo',
         isLost: map['isLost'] ?? false,
         hiddenModeEnabled: map['hiddenModeEnabled'] ?? false,
-        lastKnownLocation: map['lastKnownLocation'] != null
-            ? LocationPoint.fromMap(Map<String, dynamic>.from(map['lastKnownLocation']))
-            : null,
-        batteryLevel: map['batteryLevel'] ?? 100,
-        isOnline: map['isOnline'] ?? false,
+        lastKnownLocation:
+            map['lastKnownLocation'] != null ? LocationPoint.fromMap(map['lastKnownLocation']) : null,
       );
 
   Map<String, dynamic> toMap() => {
         'deviceId': deviceId,
-        'ownerUid': ownerUid,
         'deviceName': deviceName,
         'isLost': isLost,
         'hiddenModeEnabled': hiddenModeEnabled,
         'lastKnownLocation': lastKnownLocation?.toMap(),
-        'batteryLevel': batteryLevel,
-        'isOnline': isOnline,
       };
+
+  Device copyWith({bool? isLost, bool? hiddenModeEnabled, LocationPoint? lastKnownLocation}) => Device(
+        deviceId: deviceId,
+        deviceName: deviceName,
+        isLost: isLost ?? this.isLost,
+        hiddenModeEnabled: hiddenModeEnabled ?? this.hiddenModeEnabled,
+        lastKnownLocation: lastKnownLocation ?? this.lastKnownLocation,
+      );
 }
 
 class EmergencyContact {
   final String id;
   final String name;
   final String phoneNumber;
-  final String email;
 
-  const EmergencyContact({
-    this.id = '',
-    this.name = '',
-    this.phoneNumber = '',
-    this.email = '',
-  });
+  const EmergencyContact({this.id = '', this.name = '', this.phoneNumber = ''});
 
-  factory EmergencyContact.fromMap(Map<String, dynamic> map) => EmergencyContact(
-        id: map['id'] ?? '',
-        name: map['name'] ?? '',
-        phoneNumber: map['phoneNumber'] ?? '',
-        email: map['email'] ?? '',
-      );
+  factory EmergencyContact.fromMap(Map<String, dynamic> map) =>
+      EmergencyContact(id: map['id'] ?? '', name: map['name'] ?? '', phoneNumber: map['phoneNumber'] ?? '');
 
-  Map<String, dynamic> toMap() =>
-      {'id': id, 'name': name, 'phoneNumber': phoneNumber, 'email': email};
-
-  EmergencyContact copyWithId(String newId) =>
-      EmergencyContact(id: newId, name: name, phoneNumber: phoneNumber, email: email);
+  Map<String, dynamic> toMap() => {'id': id, 'name': name, 'phoneNumber': phoneNumber};
 }
 
-enum SecurityEventType {
-  markedAsLost,
-  markedAsFound,
-  remoteLockTriggered,
-  alarmTriggered,
-  locationUpdated,
-  deviceRegistered,
-}
-
-enum RemoteCommand { lockDevice, triggerAlarm, locateNow, wipeDevice }
-
-RemoteCommand? remoteCommandFromString(String raw) {
-  for (final c in RemoteCommand.values) {
-    if (_toSnake(c.name).toUpperCase() == raw.toUpperCase()) return c;
-  }
-  return null;
-}
-
-String _toSnake(String camel) =>
-    camel.replaceAllMapped(RegExp(r'[A-Z]'), (m) => '_${m.group(0)}').toUpperCase();
+enum SecurityEventType { markedAsLost, markedAsFound, locationUpdated, deviceRegistered, hiddenModeToggled }
 
 class SecurityEvent {
   final String id;
@@ -205,258 +125,182 @@ class SecurityEvent {
 
   factory SecurityEvent.fromMap(Map<String, dynamic> map) => SecurityEvent(
         id: map['id'] ?? '',
-        type: SecurityEventType.values.firstWhere((e) => e.name == map['type'],
-            orElse: () => SecurityEventType.locationUpdated),
+        type: SecurityEventType.values
+            .firstWhere((e) => e.name == map['type'], orElse: () => SecurityEventType.locationUpdated),
         description: map['description'] ?? '',
         timestamp: map['timestamp'] ?? 0,
       );
 
   Map<String, dynamic> toMap() =>
       {'id': id, 'type': type.name, 'description': description, 'timestamp': timestamp};
-
-  SecurityEvent copyWithId(String newId) =>
-      SecurityEvent(id: newId, type: type, description: description, timestamp: timestamp);
 }
 
 // =============================================================================
-// SECCIÓN 2: SERVICIOS (equivalentes a los Repository de la versión Kotlin)
+// SECCIÓN 2: BASE DE DATOS LOCAL (SQLite) — historial, contactos, ubicaciones
 // =============================================================================
 
-class SecureStorageService {
-  SecureStorageService._internal();
-  static final SecureStorageService instance = SecureStorageService._internal();
-
-  final _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
-
-  static const _keyDeviceId = 'guardian_lock_device_id';
-
-  Future<void> saveDeviceId(String deviceId) => _storage.write(key: _keyDeviceId, value: deviceId);
-  Future<String?> getDeviceId() => _storage.read(key: _keyDeviceId);
-}
-
-sealed class AuthResult {}
-
-class AuthSuccess extends AuthResult {
-  final User user;
-  AuthSuccess(this.user);
-}
-
-class AuthError extends AuthResult {
-  final String message;
-  AuthError(this.message);
-}
-
-class AuthService {
-  AuthService({FirebaseAuth? auth, GoogleSignIn? googleSignIn})
-      : _auth = auth ?? FirebaseAuth.instance,
-        _googleSignIn = googleSignIn ?? GoogleSignIn();
-
-  final FirebaseAuth _auth;
-  final GoogleSignIn _googleSignIn;
-
-  User? get currentUser => _auth.currentUser;
-
-  Future<AuthResult> signInWithEmail(String email, String password) async {
-    try {
-      final cred = await _auth.signInWithEmailAndPassword(email: email, password: password);
-      return cred.user != null ? AuthSuccess(cred.user!) : AuthError('No se pudo iniciar sesión.');
-    } on FirebaseAuthException catch (e) {
-      return AuthError(_mapError(e));
-    } catch (_) {
-      return AuthError('Ocurrió un error inesperado.');
-    }
-  }
-
-  Future<AuthResult> registerWithEmail(String email, String password) async {
-    try {
-      final cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-      return cred.user != null ? AuthSuccess(cred.user!) : AuthError('No se pudo crear la cuenta.');
-    } on FirebaseAuthException catch (e) {
-      return AuthError(_mapError(e));
-    } catch (_) {
-      return AuthError('Ocurrió un error inesperado.');
-    }
-  }
-
-  Future<AuthResult> signInWithGoogle() async {
-    try {
-      final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return AuthError('Inicio de sesión con Google cancelado.');
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      final result = await _auth.signInWithCredential(credential);
-      return result.user != null
-          ? AuthSuccess(result.user!)
-          : AuthError('No se pudo iniciar sesión con Google.');
-    } catch (_) {
-      return AuthError('No se pudo completar el inicio de sesión con Google.');
-    }
-  }
-
-  Future<void> signOut() async {
-    await _googleSignIn.signOut();
-    await _auth.signOut();
-  }
-
-  String _mapError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'network-request-failed':
-        return 'Sin conexión a internet.';
-      case 'wrong-password':
-      case 'invalid-credential':
-        return 'Correo o contraseña incorrectos.';
-      case 'email-already-in-use':
-        return 'Ya existe una cuenta con este correo.';
-      case 'weak-password':
-        return 'La contraseña es demasiado débil.';
-      default:
-        return e.message ?? 'Ocurrió un error inesperado.';
-    }
-  }
-}
-
-class DeviceRepository {
-  DeviceRepository({FirebaseFirestore? firestore}) : _firestore = firestore ?? FirebaseFirestore.instance;
-  final FirebaseFirestore _firestore;
-
-  CollectionReference<Map<String, dynamic>> get _devices => _firestore.collection('devices');
-
-  Future<void> registerDevice(Device device) => _devices.doc(device.deviceId).set(device.toMap());
-
-  Stream<Device?> observeDevice(String deviceId) => _devices
-      .doc(deviceId)
-      .snapshots()
-      .map((s) => s.exists ? Device.fromMap(s.data()!) : null);
-
-  Future<void> updateLostStatus(String deviceId, bool isLost) =>
-      _devices.doc(deviceId).update({'isLost': isLost});
-
-  Future<void> updateLastLocation(String deviceId, LocationPoint point) =>
-      _devices.doc(deviceId).update({'lastKnownLocation': point.toMap()});
-
-  Future<void> updateBatteryAndOnline(String deviceId, int battery, bool online) =>
-      _devices.doc(deviceId).update({'batteryLevel': battery, 'isOnline': online});
-}
-
-class LocationRepository {
-  LocationRepository({FirebaseFirestore? firestore}) : _firestore = firestore ?? FirebaseFirestore.instance;
-  final FirebaseFirestore _firestore;
-
-  Future<LocationPoint> getCurrentLocation() async {
-    final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    return LocationPoint(
-      latitude: position.latitude,
-      longitude: position.longitude,
-      accuracy: position.accuracy,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-    );
-  }
-
-  Future<void> saveToHistory(String deviceId, LocationPoint point) => _firestore
-      .collection('devices')
-      .doc(deviceId)
-      .collection('location_history')
-      .add(point.toMap());
-
-  Future<List<LocationPoint>> getHistory(String deviceId, {int limit = 100}) async {
-    final snap = await _firestore
-        .collection('devices')
-        .doc(deviceId)
-        .collection('location_history')
-        .orderBy('timestamp')
-        .limitToLast(limit)
-        .get();
-    return snap.docs.map((d) => LocationPoint.fromMap(d.data())).toList();
-  }
-}
-
-class ContactRepository {
-  ContactRepository({FirebaseFirestore? firestore}) : _firestore = firestore ?? FirebaseFirestore.instance;
-  final FirebaseFirestore _firestore;
-  final _uuid = const Uuid();
-
-  CollectionReference<Map<String, dynamic>> _contacts(String deviceId) =>
-      _firestore.collection('devices').doc(deviceId).collection('emergency_contacts');
-
-  Future<void> addContact(String deviceId, EmergencyContact contact) async {
-    final id = contact.id.isNotEmpty ? contact.id : _uuid.v4();
-    await _contacts(deviceId).doc(id).set(contact.copyWithId(id).toMap());
-  }
-
-  Future<void> removeContact(String deviceId, String contactId) =>
-      _contacts(deviceId).doc(contactId).delete();
-
-  Future<List<EmergencyContact>> getContacts(String deviceId) async {
-    final snap = await _contacts(deviceId).get();
-    return snap.docs.map((d) => EmergencyContact.fromMap(d.data())).toList();
-  }
-}
-
-class LocalEventDatabase {
-  LocalEventDatabase._internal();
-  static final LocalEventDatabase instance = LocalEventDatabase._internal();
+class LocalDatabase {
+  LocalDatabase._internal();
+  static final LocalDatabase instance = LocalDatabase._internal();
   Database? _db;
 
   Future<Database> get database async => _db ??= await _init();
 
   Future<Database> _init() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'guardian_lock.db');
+    final dbFile = join(dbPath, 'guardian_lock_local.db');
     return openDatabase(
-      path,
+      dbFile,
       version: 1,
-      onCreate: (db, version) => db.execute('''
-        CREATE TABLE security_events (
-          id TEXT PRIMARY KEY, type TEXT NOT NULL, description TEXT NOT NULL, timestamp INTEGER NOT NULL
-        )
-      '''),
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE security_events (
+            id TEXT PRIMARY KEY, type TEXT NOT NULL, description TEXT NOT NULL, timestamp INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE location_history (
+            id TEXT PRIMARY KEY, latitude REAL NOT NULL, longitude REAL NOT NULL, timestamp INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE contacts (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, phoneNumber TEXT NOT NULL
+          )
+        ''');
+      },
     );
   }
+}
 
-  Future<void> insert(SecurityEvent event) async {
-    final db = await database;
-    await db.insert('security_events', event.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+// =============================================================================
+// SECCIÓN 3: SERVICIOS LOCALES (reemplazan a Firebase Auth / Firestore)
+// =============================================================================
+
+/// Autenticación 100% local: guarda una única cuenta (correo + hash de la
+/// contraseña) cifrada con flutter_secure_storage. No hay servidor, así que
+/// la cuenta solo existe en este dispositivo.
+class LocalAuthService {
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  static const _keyEmail = 'guardian_lock_account_email';
+  static const _keyPasswordHash = 'guardian_lock_account_password_hash';
+  static const _keySessionActive = 'guardian_lock_session_active';
+
+  String _hash(String input) => sha256.convert(utf8.encode(input)).toString();
+
+  Future<bool> hasAccount() async => (await _storage.read(key: _keyEmail)) != null;
+
+  Future<bool> hasActiveSession() async => (await _storage.read(key: _keySessionActive)) == 'true';
+
+  Future<String?> register(String email, String password) async {
+    if (await hasAccount()) {
+      return 'Ya existe una cuenta local en este dispositivo. Inicia sesión.';
+    }
+    await _storage.write(key: _keyEmail, value: email);
+    await _storage.write(key: _keyPasswordHash, value: _hash(password));
+    await _storage.write(key: _keySessionActive, value: 'true');
+    return null; // null = éxito
+  }
+
+  Future<String?> signIn(String email, String password) async {
+    final storedEmail = await _storage.read(key: _keyEmail);
+    final storedHash = await _storage.read(key: _keyPasswordHash);
+    if (storedEmail == null) {
+      return 'No existe una cuenta local todavía. Regístrate primero.';
+    }
+    if (storedEmail != email || storedHash != _hash(password)) {
+      return 'Correo o contraseña incorrectos.';
+    }
+    await _storage.write(key: _keySessionActive, value: 'true');
+    return null;
+  }
+
+  Future<void> signOut() async {
+    await _storage.write(key: _keySessionActive, value: 'false');
+  }
+}
+
+/// Guarda el único dispositivo registrado como JSON cifrado local.
+class LocalDeviceStore {
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  static const _key = 'guardian_lock_device_data';
+  final _uuid = const Uuid();
+
+  Future<Device> getOrCreateDevice() async {
+    final raw = await _storage.read(key: _key);
+    if (raw != null) return Device.fromMap(jsonDecode(raw));
+    final device = Device(deviceId: _uuid.v4());
+    await save(device);
+    return device;
+  }
+
+  Future<void> save(Device device) => _storage.write(key: _key, value: jsonEncode(device.toMap()));
+}
+
+class LocationHistoryStore {
+  final _uuid = const Uuid();
+
+  Future<void> add(LocationPoint point) async {
+    final db = await LocalDatabase.instance.database;
+    await db.insert('location_history', {'id': _uuid.v4(), ...point.toMap()});
+  }
+
+  Future<List<LocationPoint>> getAll() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.query('location_history', orderBy: 'timestamp DESC', limit: 100);
+    return rows.map((r) => LocationPoint.fromMap(r)).toList();
+  }
+}
+
+class ContactStore {
+  final _uuid = const Uuid();
+
+  Future<void> add(EmergencyContact contact) async {
+    final db = await LocalDatabase.instance.database;
+    final withId = EmergencyContact(id: _uuid.v4(), name: contact.name, phoneNumber: contact.phoneNumber);
+    await db.insert('contacts', withId.toMap());
+  }
+
+  Future<void> remove(String id) async {
+    final db = await LocalDatabase.instance.database;
+    await db.delete('contacts', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<EmergencyContact>> getAll() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.query('contacts');
+    return rows.map((r) => EmergencyContact.fromMap(r)).toList();
+  }
+}
+
+class SecurityEventStore {
+  final _uuid = const Uuid();
+
+  Future<void> log(SecurityEventType type, String description) async {
+    final db = await LocalDatabase.instance.database;
+    final event = SecurityEvent(id: _uuid.v4(), type: type, description: description);
+    await db.insert('security_events', event.toMap());
   }
 
   Future<List<SecurityEvent>> getAll() async {
-    final db = await database;
+    final db = await LocalDatabase.instance.database;
     final rows = await db.query('security_events', orderBy: 'timestamp DESC');
     return rows.map((r) => SecurityEvent.fromMap(r)).toList();
   }
 }
 
-class SecurityEventRepository {
-  SecurityEventRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
-  final FirebaseFirestore _firestore;
-  final _uuid = const Uuid();
-
-  Future<List<SecurityEvent>> getLocalHistory() => LocalEventDatabase.instance.getAll();
-
-  Future<void> logEvent(String deviceId, SecurityEvent event) async {
-    final id = event.id.isNotEmpty ? event.id : _uuid.v4();
-    final finalEvent = event.copyWithId(id);
-    await LocalEventDatabase.instance.insert(finalEvent);
-    try {
-      await _firestore.collection('devices').doc(deviceId).collection('events').doc(id).set(finalEvent.toMap());
-    } catch (_) {
-      // Se queda persistido localmente; se puede reintentar más tarde.
-    }
-  }
-}
-
-/// Puente hacia el canal nativo Android para DeviceAdminReceiver /
-/// DevicePolicyManager. Requiere código Kotlin adicional (ver comentario al
-/// inicio del archivo). Si ese código no está presente, cada llamada lanza
-/// un PlatformException que se captura y se ignora silenciosamente aquí,
-/// para que el resto de la app no se vea afectado.
+/// Puente opcional hacia código nativo Android para protección contra
+/// desinstalación (DeviceAdminReceiver). No requiere ninguna API key — es
+/// 100% local también. Si el código Kotlin del canal aún no existe en tu
+/// proyecto, cada llamada falla en silencio y el resto de la app sigue
+/// funcionando con normalidad.
 class DeviceAdminService {
-  static const _channel = MethodChannel('com.guardianlock.app/device_admin');
+  static const _channel = MethodChannel('com.example.domotica/device_admin');
 
   Future<bool> isAdminActive() async {
     try {
@@ -471,102 +315,45 @@ class DeviceAdminService {
       await _channel.invokeMethod('requestAdminActivation');
     } catch (_) {}
   }
-
-  Future<void> lockDeviceNow() async {
-    try {
-      await _channel.invokeMethod('lockDeviceNow');
-    } catch (_) {}
-  }
-
-  Future<void> triggerAlarm() async {
-    try {
-      await _channel.invokeMethod('triggerAlarm');
-    } catch (_) {}
-  }
 }
 
 class PermissionUtils {
-  static Future<Map<Permission, PermissionStatus>> requestCorePermissions() async {
-    return {
-      Permission.locationWhenInUse: await Permission.locationWhenInUse.request(),
-      Permission.camera: await Permission.camera.request(),
-      Permission.notification: await Permission.notification.request(),
-    };
-  }
-}
-
-class FcmService {
-  final _deviceAdmin = DeviceAdminService();
-  final _localNotifications = FlutterLocalNotificationsPlugin();
-
-  Future<void> initialize() async {
-    await FirebaseMessaging.instance.requestPermission(alert: true, badge: true, sound: true);
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _localNotifications.initialize(const InitializationSettings(android: androidInit));
-    FirebaseMessaging.onMessage.listen(_handleMessage);
-  }
-
-  Future<void> _handleMessage(RemoteMessage message) async {
-    final commandRaw = message.data['command'];
-    if (commandRaw == null) return;
-    final command = remoteCommandFromString(commandRaw);
-    if (command == null) return;
-
-    switch (command) {
-      case RemoteCommand.lockDevice:
-        await _deviceAdmin.lockDeviceNow();
-        break;
-      case RemoteCommand.triggerAlarm:
-        await _deviceAdmin.triggerAlarm();
-        await _showAlert('Alarma activada de forma remota', 'El propietario activó la alarma.');
-        break;
-      case RemoteCommand.locateNow:
-      case RemoteCommand.wipeDevice:
-        break;
-    }
-  }
-
-  Future<void> _showAlert(String title, String body) async {
-    const details = AndroidNotificationDetails(
-      'security_alerts_channel',
-      'Alertas de seguridad',
-      importance: Importance.high,
-      priority: Priority.high,
-    );
-    await _localNotifications.show(2001, title, body, const NotificationDetails(android: details));
+  static Future<void> requestCorePermissions() async {
+    await Permission.locationWhenInUse.request();
+    await Permission.notification.request();
   }
 }
 
 // =============================================================================
-// SECCIÓN 3: PROVIDERS (estado, equivalentes a los ViewModel de Kotlin)
+// SECCIÓN 4: PROVIDERS (estado de la app)
 // =============================================================================
 
 class AuthProvider extends ChangeNotifier {
-  AuthProvider({AuthService? authService}) : _authService = authService ?? AuthService() {
-    isAuthenticated = _authService.currentUser != null;
-  }
-  final AuthService _authService;
+  AuthProvider({LocalAuthService? authService}) : _authService = authService ?? LocalAuthService();
+  final LocalAuthService _authService;
 
   bool isLoading = false;
   String? errorMessage;
   bool isAuthenticated = false;
 
+  Future<void> checkSession() async {
+    isAuthenticated = await _authService.hasActiveSession();
+    notifyListeners();
+  }
+
   Future<void> signIn(String email, String password) async {
     if (!_validate(email, password)) return;
     _setLoading();
-    _handleResult(await _authService.signInWithEmail(email, password));
+    final error = await _authService.signIn(email, password);
+    _finish(error);
   }
 
   Future<void> register(String email, String password, String confirm) async {
     if (password != confirm) return _setError('Las contraseñas no coinciden.');
     if (!_validate(email, password)) return;
     _setLoading();
-    _handleResult(await _authService.registerWithEmail(email, password));
-  }
-
-  Future<void> signInWithGoogle() async {
-    _setLoading();
-    _handleResult(await _authService.signInWithGoogle());
+    final error = await _authService.register(email, password);
+    _finish(error);
   }
 
   Future<void> signOut() async {
@@ -575,13 +362,13 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _handleResult(AuthResult result) {
+  void _finish(String? error) {
     isLoading = false;
-    if (result is AuthSuccess) {
+    if (error == null) {
       isAuthenticated = true;
       errorMessage = null;
-    } else if (result is AuthError) {
-      errorMessage = result.message;
+    } else {
+      errorMessage = error;
     }
     notifyListeners();
   }
@@ -611,114 +398,157 @@ class AuthProvider extends ChangeNotifier {
 }
 
 class DashboardProvider extends ChangeNotifier {
-  DashboardProvider({DeviceRepository? deviceRepository}) : _deviceRepository = deviceRepository ?? DeviceRepository() {
-    _init();
+  DashboardProvider({LocalDeviceStore? store, SecurityEventStore? events})
+      : _store = store ?? LocalDeviceStore(),
+        _events = events ?? SecurityEventStore() {
+    _load();
   }
-  final DeviceRepository _deviceRepository;
-  StreamSubscription<Device?>? _sub;
+  final LocalDeviceStore _store;
+  final SecurityEventStore _events;
 
   Device? device;
   bool isLoading = true;
-  String? errorMessage;
 
-  Future<void> _init() async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null) {
-      isLoading = false;
-      errorMessage = 'No hay dispositivo registrado.';
-      notifyListeners();
-      return;
-    }
-    _sub = _deviceRepository.observeDevice(deviceId).listen((d) {
-      device = d;
-      isLoading = false;
-      notifyListeners();
-    });
+  Future<void> _load() async {
+    device = await _store.getOrCreateDevice();
+    isLoading = false;
+    notifyListeners();
   }
 
   Future<void> toggleLostMode(bool isLost) async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null) return;
-    await _deviceRepository.updateLostStatus(deviceId, isLost);
+    if (device == null) return;
+    device = device!.copyWith(isLost: isLost);
+    await _store.save(device!);
+    await _events.log(
+      isLost ? SecurityEventType.markedAsLost : SecurityEventType.markedAsFound,
+      isLost ? 'Dispositivo marcado como perdido.' : 'Dispositivo marcado como encontrado.',
+    );
+    notifyListeners();
   }
 
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
+  Future<void> toggleHiddenMode(bool enabled) async {
+    if (device == null) return;
+    device = device!.copyWith(hiddenModeEnabled: enabled);
+    await _store.save(device!);
+    await _events.log(SecurityEventType.hiddenModeToggled, 'Modo oculto ${enabled ? "activado" : "desactivado"}.');
+    notifyListeners();
+  }
+
+  Future<void> updateLastLocation(LocationPoint point) async {
+    if (device == null) return;
+    device = device!.copyWith(lastKnownLocation: point);
+    await _store.save(device!);
+    notifyListeners();
   }
 }
 
 class MapProvider extends ChangeNotifier {
-  MapProvider({LocationRepository? locationRepository}) : _locationRepository = locationRepository ?? LocationRepository() {
+  MapProvider({LocationHistoryStore? store, SecurityEventStore? events})
+      : _store = store ?? LocationHistoryStore(),
+        _events = events ?? SecurityEventStore() {
     loadHistory();
   }
-  final LocationRepository _locationRepository;
+  final LocationHistoryStore _store;
+  final SecurityEventStore _events;
 
   List<LocationPoint> history = [];
   bool isLoading = true;
+  bool isLocating = false;
+  String? errorMessage;
 
   Future<void> loadHistory() async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null) return;
     isLoading = true;
     notifyListeners();
-    history = await _locationRepository.getHistory(deviceId);
+    history = await _store.getAll();
     isLoading = false;
     notifyListeners();
+  }
+
+  /// Obtiene la ubicación actual real del dispositivo (geolocator no
+  /// requiere ninguna API key en Android) y la agrega al historial local.
+  Future<LocationPoint?> locateNow() async {
+    isLocating = true;
+    errorMessage = null;
+    notifyListeners();
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        final requested = await Geolocator.requestPermission();
+        if (requested == LocationPermission.denied || requested == LocationPermission.deniedForever) {
+          errorMessage = 'Permiso de ubicación denegado.';
+          isLocating = false;
+          notifyListeners();
+          return null;
+        }
+      }
+      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final point = LocationPoint(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+      await _store.add(point);
+      await _events.log(SecurityEventType.locationUpdated, 'Ubicación actualizada manualmente.');
+      await loadHistory();
+      return point;
+    } catch (e) {
+      errorMessage = 'No se pudo obtener la ubicación. Verifica que el GPS esté activo.';
+      notifyListeners();
+      return null;
+    } finally {
+      isLocating = false;
+      notifyListeners();
+    }
   }
 }
 
 class ContactsProvider extends ChangeNotifier {
-  ContactsProvider({ContactRepository? contactRepository}) : _contactRepository = contactRepository ?? ContactRepository() {
+  ContactsProvider({ContactStore? store}) : _store = store ?? ContactStore() {
     loadContacts();
   }
-  final ContactRepository _contactRepository;
+  final ContactStore _store;
 
   List<EmergencyContact> contacts = [];
   bool isLoading = true;
 
   Future<void> loadContacts() async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null) return;
-    contacts = await _contactRepository.getContacts(deviceId);
+    contacts = await _store.getAll();
     isLoading = false;
     notifyListeners();
   }
 
-  Future<void> addContact(String name, String phone, String email) async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null || name.trim().isEmpty || phone.trim().isEmpty) return;
-    await _contactRepository.addContact(deviceId, EmergencyContact(name: name, phoneNumber: phone, email: email));
+  Future<void> addContact(String name, String phone) async {
+    if (name.trim().isEmpty || phone.trim().isEmpty) return;
+    await _store.add(EmergencyContact(name: name, phoneNumber: phone));
     await loadContacts();
   }
 
-  Future<void> removeContact(String contactId) async {
-    final deviceId = await SecureStorageService.instance.getDeviceId();
-    if (deviceId == null) return;
-    await _contactRepository.removeContact(deviceId, contactId);
+  Future<void> removeContact(String id) async {
+    await _store.remove(id);
     await loadContacts();
   }
 }
 
 class HistoryProvider extends ChangeNotifier {
-  HistoryProvider({SecurityEventRepository? eventRepository}) : _eventRepository = eventRepository ?? SecurityEventRepository() {
+  HistoryProvider({SecurityEventStore? store}) : _store = store ?? SecurityEventStore() {
     _load();
   }
-  final SecurityEventRepository _eventRepository;
+  final SecurityEventStore _store;
 
   List<SecurityEvent> events = [];
   bool isLoading = true;
 
   Future<void> _load() async {
-    events = await _eventRepository.getLocalHistory();
+    events = await _store.getAll();
     isLoading = false;
     notifyListeners();
   }
+
+  Future<void> refresh() => _load();
 }
 
 // =============================================================================
-// SECCIÓN 4: PANTALLAS
+// SECCIÓN 5: PANTALLAS
 // =============================================================================
 
 class WelcomeScreen extends StatelessWidget {
@@ -742,12 +572,10 @@ class WelcomeScreen extends StatelessWidget {
                 child: Icon(Icons.shield, size: 48, color: theme.colorScheme.primary),
               ),
               const SizedBox(height: 24),
-              Text('Guardian Lock',
-                  style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
+              Text('Guardian Lock', style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               const Text(
-                'Protege tu dispositivo contra pérdida y robo. Localízalo, bloquéalo y '
-                'recibe alertas en tiempo real.',
+                'Protege tu dispositivo contra pérdida y robo — versión local, sin conexión a servidores.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 48),
@@ -812,16 +640,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: auth.isLoading ? null : () => context.read<AuthProvider>().signIn(_email.text.trim(), _password.text),
+              onPressed: auth.isLoading
+                  ? null
+                  : () => context.read<AuthProvider>().signIn(_email.text.trim(), _password.text),
               child: auth.isLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Entrar'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => context.read<AuthProvider>().signInWithGoogle(),
-              icon: const Icon(Icons.g_mobiledata),
-              label: const Text('Continuar con Google'),
             ),
             const SizedBox(height: 16),
             TextButton(onPressed: widget.onNavigateToRegister, child: const Text('¿No tienes cuenta? Regístrate')),
@@ -911,95 +735,119 @@ class DashboardScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: state.isLoading
             ? const Center(child: CircularProgressIndicator())
-            : state.errorMessage != null
-                ? Center(child: Text(state.errorMessage!))
-                : SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(state.device?.deviceName ?? 'Dispositivo sin nombre',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                const SizedBox(height: 12),
-                                Text('Batería: ${state.device?.batteryLevel ?? 0}%'),
-                                Text('Conexión: ${state.device?.isOnline == true ? "En línea" : "Sin conexión"}'),
-                                Text(state.device?.lastKnownLocation != null
-                                    ? 'Ubicación: ${state.device!.lastKnownLocation!.latitude.toStringAsFixed(4)}, ${state.device!.lastKnownLocation!.longitude.toStringAsFixed(4)}'
-                                    : 'Ubicación: desconocida'),
-                              ],
-                            ),
-                          ),
+            : SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(state.device?.deviceName ?? 'Dispositivo',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                            const SizedBox(height: 12),
+                            Text(state.device?.lastKnownLocation != null
+                                ? 'Última ubicación: ${state.device!.lastKnownLocation!.latitude.toStringAsFixed(4)}, '
+                                    '${state.device!.lastKnownLocation!.longitude.toStringAsFixed(4)}'
+                                : 'Última ubicación: aún no localizado'),
+                            const SizedBox(height: 4),
+                            const Text('Modo: 100% local (sin servidor)', style: TextStyle(fontSize: 12)),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Row(children: [
-                          Expanded(child: FilledButton.tonalIcon(onPressed: onOpenMap, icon: const Icon(Icons.map), label: const Text('Mapa'))),
-                          const SizedBox(width: 12),
-                          Expanded(child: FilledButton.tonalIcon(onPressed: onOpenHistory, icon: const Icon(Icons.history), label: const Text('Historial'))),
-                        ]),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(onPressed: onOpenContacts, icon: const Icon(Icons.contact_phone), label: const Text('Contactos de emergencia')),
-                        const SizedBox(height: 24),
-                        Card(
-                          color: state.device?.isLost == true
-                              ? Theme.of(context).colorScheme.errorContainer
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Row(children: [
-                              Expanded(
-                                child: Text(state.device?.isLost == true ? 'Modo perdido activado' : 'Marcar como perdido',
-                                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                              Switch(
-                                value: state.device?.isLost ?? false,
-                                onChanged: (v) => context.read<DashboardProvider>().toggleLostMode(v),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    Row(children: [
+                      Expanded(child: FilledButton.tonalIcon(onPressed: onOpenMap, icon: const Icon(Icons.map), label: const Text('Ubicación'))),
+                      const SizedBox(width: 12),
+                      Expanded(child: FilledButton.tonalIcon(onPressed: onOpenHistory, icon: const Icon(Icons.history), label: const Text('Historial'))),
+                    ]),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(onPressed: onOpenContacts, icon: const Icon(Icons.contact_phone), label: const Text('Contactos de emergencia')),
+                    const SizedBox(height: 24),
+                    Card(
+                      color: state.device?.isLost == true
+                          ? Theme.of(context).colorScheme.errorContainer
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Row(children: [
+                          Expanded(
+                            child: Text(state.device?.isLost == true ? 'Modo perdido activado' : 'Marcar como perdido',
+                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          Switch(
+                            value: state.device?.isLost ?? false,
+                            onChanged: (v) => context.read<DashboardProvider>().toggleLostMode(v),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
       ),
     );
   }
 }
 
+/// Pantalla de ubicación sin mapa visual (Google Maps requiere API key).
+/// Muestra la última ubicación y el historial como lista de coordenadas, y
+/// permite pedir la ubicación actual real del dispositivo.
 class MapScreen extends StatelessWidget {
   const MapScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<MapProvider>();
+    final fmt = DateFormat('dd MMM yyyy, HH:mm');
+
     return Scaffold(
       appBar: AppBar(title: const Text('Ubicación del dispositivo')),
-      body: state.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : state.history.isEmpty
-              ? const Center(child: Text('Aún no hay ubicaciones registradas.'))
-              : GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                    target: LatLng(state.history.last.latitude, state.history.last.longitude),
-                    zoom: 15,
-                  ),
-                  markers: {
-                    Marker(
-                      markerId: const MarkerId('last'),
-                      position: LatLng(state.history.last.latitude, state.history.last.longitude),
-                    ),
-                  },
-                  polylines: {
-                    Polyline(
-                      polylineId: const PolylineId('history'),
-                      points: state.history.map((p) => LatLng(p.latitude, p.longitude)).toList(),
-                    ),
-                  },
-                ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: state.isLocating
+            ? null
+            : () async {
+                final point = await context.read<MapProvider>().locateNow();
+                if (point != null && context.mounted) {
+                  await context.read<DashboardProvider>().updateLastLocation(point);
+                }
+              },
+        icon: state.isLocating
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.my_location),
+        label: const Text('Localizar ahora'),
+      ),
+      body: Column(
+        children: [
+          if (state.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(state.errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          Expanded(
+            child: state.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : state.history.isEmpty
+                    ? const Center(child: Text('Aún no hay ubicaciones registradas.\nToca "Localizar ahora".', textAlign: TextAlign.center))
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: state.history.length,
+                        separatorBuilder: (_, __) => const Divider(),
+                        itemBuilder: (context, index) {
+                          final point = state.history[index];
+                          return ListTile(
+                            leading: const Icon(Icons.location_on),
+                            title: Text('${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}'),
+                            subtitle: Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(point.timestamp))),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1024,6 +872,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dashboardState = context.watch<DashboardProvider>();
     return Scaffold(
       appBar: AppBar(title: const Text('Configuración')),
       body: Padding(
@@ -1031,9 +880,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            SwitchListTile(
+              title: const Text('Modo oculto'),
+              subtitle: const Text('Reduce la visibilidad de notificaciones no críticas.'),
+              value: dashboardState.device?.hiddenModeEnabled ?? false,
+              onChanged: (v) => context.read<DashboardProvider>().toggleHiddenMode(v),
+            ),
+            const Divider(),
             ListTile(
               title: const Text('Protección contra desinstalación'),
-              subtitle: Text(_isAdminActive ? 'Activada' : 'Desactivada'),
+              subtitle: Text(_isAdminActive ? 'Activada' : 'Desactivada (requiere código nativo Android)'),
               trailing: OutlinedButton(
                 onPressed: () async {
                   await _deviceAdmin.requestAdminActivation();
@@ -1066,10 +922,7 @@ class ContactsScreen extends StatelessWidget {
     final state = context.watch<ContactsProvider>();
     return Scaffold(
       appBar: AppBar(title: const Text('Contactos de emergencia')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddDialog(context),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: FloatingActionButton(onPressed: () => _showAddDialog(context), child: const Icon(Icons.add)),
       body: state.contacts.isEmpty
           ? const Center(child: Text('No has agregado contactos todavía.'))
           : ListView(
@@ -1090,7 +943,6 @@ class ContactsScreen extends StatelessWidget {
   void _showAddDialog(BuildContext context) {
     final name = TextEditingController();
     final phone = TextEditingController();
-    final email = TextEditingController();
     final provider = context.read<ContactsProvider>();
 
     showDialog(
@@ -1100,13 +952,12 @@ class ContactsScreen extends StatelessWidget {
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre')),
           TextField(controller: phone, decoration: const InputDecoration(labelText: 'Teléfono')),
-          TextField(controller: email, decoration: const InputDecoration(labelText: 'Correo (opcional)')),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
           TextButton(
             onPressed: () {
-              provider.addContact(name.text, phone.text, email.text);
+              provider.addContact(name.text, phone.text);
               Navigator.pop(dialogContext);
             },
             child: const Text('Guardar'),
@@ -1141,7 +992,7 @@ class HistoryScreen extends StatelessWidget {
 }
 
 // =============================================================================
-// SECCIÓN 5: APP RAÍZ Y NAVEGACIÓN
+// SECCIÓN 6: APP RAÍZ Y NAVEGACIÓN
 // =============================================================================
 
 class Routes {
@@ -1156,15 +1007,14 @@ class Routes {
 }
 
 class GuardianLockApp extends StatelessWidget {
-  const GuardianLockApp({super.key});
+  const GuardianLockApp({super.key, required this.startRoute});
+  final String startRoute;
 
   @override
   Widget build(BuildContext context) {
-    final start = FirebaseAuth.instance.currentUser != null ? Routes.dashboard : Routes.welcome;
-
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()..checkSession()),
         ChangeNotifierProvider(create: (_) => DashboardProvider()),
         ChangeNotifierProvider(create: (_) => MapProvider()),
         ChangeNotifierProvider(create: (_) => ContactsProvider()),
@@ -1174,7 +1024,7 @@ class GuardianLockApp extends StatelessWidget {
         title: 'Guardian Lock',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(useMaterial3: true, colorSchemeSeed: const Color(0xFF1B3A6B)),
-        initialRoute: start,
+        initialRoute: startRoute,
         onGenerateRoute: (settings) {
           switch (settings.name) {
             case Routes.welcome:
@@ -1234,46 +1084,17 @@ class GuardianLockApp extends StatelessWidget {
 }
 
 // =============================================================================
-// SECCIÓN 6: CONFIGURACIÓN DE FIREBASE (MARCADOR DE POSICIÓN)
-// =============================================================================
-//
-// Reemplaza estos valores con los reales ejecutando `flutterfire configure`,
-// o copia aquí los valores de tu archivo firebase_options.dart si ya lo
-// tienes generado en otro lado. Mientras tengan estos valores de ejemplo,
-// la app COMPILA pero las llamadas a Firebase (login, Firestore, FCM)
-// fallarán en tiempo de ejecución.
-
-FirebaseOptions get _firebaseOptionsAndroid => const FirebaseOptions(
-      apiKey: 'REEMPLAZAR_CON_flutterfire_configure',
-      appId: 'REEMPLAZAR_CON_flutterfire_configure',
-      messagingSenderId: 'REEMPLAZAR_CON_flutterfire_configure',
-      projectId: 'REEMPLAZAR_CON_flutterfire_configure',
-      storageBucket: 'REEMPLAZAR_CON_flutterfire_configure',
-    );
-
-// =============================================================================
-// SECCIÓN 7: SINCRONIZACIÓN PERIÓDICA (pendiente)
-// =============================================================================
-//
-// La sincronización periódica en segundo plano (batería/estado cada 15 min)
-// se implementaba con el paquete `workmanager`, pero ese paquete no compila
-// con versiones recientes de Flutter/Kotlin (APIs internas obsoletas del
-// plugin). Se quitó temporalmente para desbloquear el build. Alternativas a
-// futuro: WorkManager nativo vía MethodChannel propio, o el paquete
-// `android_alarm_manager_plus`.
-//
-// =============================================================================
-// SECCIÓN 8: PUNTO DE ENTRADA
+// SECCIÓN 7: PUNTO DE ENTRADA
 // =============================================================================
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: _firebaseOptionsAndroid);
-
   await PermissionUtils.requestCorePermissions();
 
-  await FcmService().initialize();
+  // Decide la pantalla inicial según si ya hay una sesión local activa,
+  // sin depender de ningún servidor.
+  final hasSession = await LocalAuthService().hasActiveSession();
 
-  runApp(const GuardianLockApp());
+  runApp(GuardianLockApp(startRoute: hasSession ? Routes.dashboard : Routes.welcome));
 }

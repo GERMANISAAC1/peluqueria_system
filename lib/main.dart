@@ -25,7 +25,6 @@
 //   flutter_secure_storage: ^9.2.2
 //   sqflite: ^2.3.3
 //   path: ^1.9.0
-//   workmanager: ^0.5.2
 //   flutter_local_notifications: ^18.0.1
 //   permission_handler: ^11.3.1
 //   uuid: ^4.5.1
@@ -68,7 +67,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
-import 'package:workmanager/workmanager.dart';
 
 // =============================================================================
 // SECCIÓN 1: MODELOS DE DOMINIO
@@ -1254,20 +1252,16 @@ FirebaseOptions get _firebaseOptionsAndroid => const FirebaseOptions(
     );
 
 // =============================================================================
-// SECCIÓN 7: WORKMANAGER (sincronización periódica en segundo plano)
+// SECCIÓN 7: SINCRONIZACIÓN PERIÓDICA (pendiente)
 // =============================================================================
-
-const _statusSyncTaskName = 'guardian_lock_status_sync';
-
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    // Sincronización de batería/estado; se mantiene mínima aquí porque los
-    // isolates de background no comparten estado con la UI.
-    return Future.value(true);
-  });
-}
-
+//
+// La sincronización periódica en segundo plano (batería/estado cada 15 min)
+// se implementaba con el paquete `workmanager`, pero ese paquete no compila
+// con versiones recientes de Flutter/Kotlin (APIs internas obsoletas del
+// plugin). Se quitó temporalmente para desbloquear el build. Alternativas a
+// futuro: WorkManager nativo vía MethodChannel propio, o el paquete
+// `android_alarm_manager_plus`.
+//
 // =============================================================================
 // SECCIÓN 8: PUNTO DE ENTRADA
 // =============================================================================
@@ -1280,14 +1274,6 @@ Future<void> main() async {
   await PermissionUtils.requestCorePermissions();
 
   await FcmService().initialize();
-
-  await Workmanager().initialize(callbackDispatcher);
-  await Workmanager().registerPeriodicTask(
-    _statusSyncTaskName,
-    _statusSyncTaskName,
-    frequency: const Duration(minutes: 15),
-    constraints: Constraints(networkType: NetworkType.connected),
-  );
 
   runApp(const GuardianLockApp());
 }

@@ -33,6 +33,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -221,6 +222,14 @@ class LocalAuthService {
   Future<void> signOut() async {
     await _storage.write(key: _keySessionActive, value: 'false');
   }
+
+  /// Verifica una contraseña contra la cuenta guardada, sin cambiar el
+  /// estado de sesión. Se usa en la pantalla de bloqueo por encendido.
+  Future<bool> verifyPassword(String password) async {
+    final storedHash = await _storage.read(key: _keyPasswordHash);
+    if (storedHash == null) return false;
+    return storedHash == _hash(password);
+  }
 }
 
 /// Guarda el único dispositivo registrado como JSON cifrado local.
@@ -321,6 +330,27 @@ class PermissionUtils {
   static Future<void> requestCorePermissions() async {
     await Permission.locationWhenInUse.request();
     await Permission.notification.request();
+  }
+}
+
+/// Lee/escribe la bandera "el dispositivo se acaba de encender y necesita
+/// desbloqueo". El lado nativo (BootReceiver.kt) escribe esta misma bandera
+/// directamente en el archivo de SharedPreferences de Android cuando detecta
+/// el evento BOOT_COMPLETED — por eso usamos el paquete `shared_preferences`
+/// aquí en vez de flutter_secure_storage (el receptor nativo no puede
+/// escribir datos cifrados con el Keystore sin duplicar esa lógica, pero sí
+/// puede escribir un SharedPreferences simple).
+class BootLockService {
+  static const _key = 'guardian_lock_requires_unlock_after_boot';
+
+  Future<bool> isLockRequired() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_key) ?? false;
+  }
+
+  Future<void> clearLock() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_key, false);
   }
 }
 
@@ -550,6 +580,131 @@ class HistoryProvider extends ChangeNotifier {
 // =============================================================================
 // SECCIÓN 5: PANTALLAS
 // =============================================================================
+
+/// Pantalla de bloqueo de pantalla completa mostrada cuando el dispositivo
+/// se acaba de encender. Incluye un mensaje disuasorio para desalentar a
+/// quien tenga el dispositivo sin autorización, y exige la contraseña de la
+/// cuenta local para continuar.
+class BootLockScreen extends StatefulWidget {
+  const BootLockScreen({super.key, required this.onUnlocked});
+  final VoidCallback onUnlocked;
+
+  @override
+  State<BootLockScreen> createState() => _BootLockScreenState();
+}
+
+class _BootLockScreenState extends State<BootLockScreen> {
+  final _password = TextEditingController();
+  final _authService = LocalAuthService();
+  final _events = SecurityEventStore();
+  bool _isChecking = false;
+  String? _error;
+  int _failedAttempts = 0;
+
+  Future<void> _tryUnlock() async {
+    setState(() {
+      _isChecking = true;
+      _error = null;
+    });
+
+    final valid = await _authService.verifyPassword(_password.text);
+
+    if (valid) {
+      await BootLockService().clearLock();
+      await _events.log(SecurityEventType.deviceRegistered, 'Dispositivo desbloqueado tras encendido.');
+      if (mounted) widget.onUnlocked();
+      return;
+    }
+
+    _failedAttempts++;
+    await _events.log(
+      SecurityEventType.deviceRegistered,
+      'Intento fallido de desbloqueo tras encendido (#$_failedAttempts).',
+    );
+    setState(() {
+      _isChecking = false;
+      _error = 'Contraseña incorrecta.';
+      _password.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false, // Bloquea el botón "atrás" — no se puede saltar esta pantalla.
+      child: Scaffold(
+        backgroundColor: const Color(0xFF10141C),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.lock_outline, size: 72, color: Colors.white),
+                const SizedBox(height: 24),
+                const Text(
+                  'Dispositivo bloqueado',
+                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                // Mensaje de persuasión: busca disuadir a quien tenga el
+                // dispositivo sin autorización, sin hacer afirmaciones
+                // falsas sobre capacidades que la app no tiene realmente.
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Este dispositivo está protegido por Guardian Lock y registrado a nombre '
+                    'de su propietario.\n\n'
+                    'Cada intento de desbloqueo, así como la ubicación aproximada, quedan '
+                    'guardados en el historial de seguridad del dispositivo.\n\n'
+                    'Si encontraste este teléfono, por favor contacta a su propietario para '
+                    'devolverlo. Si fue extraviado o sustraído, esto ya ha sido registrado.',
+                    style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                TextField(
+                  controller: _password,
+                  obscureText: true,
+                  autofocus: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Contraseña del propietario',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.3))),
+                    focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                  ),
+                  onSubmitted: (_) => _isChecking ? null : _tryUnlock(),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _isChecking ? null : _tryUnlock,
+                    child: _isChecking
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Desbloquear'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key, required this.onLoginTap, required this.onRegisterTap});
@@ -1006,6 +1161,35 @@ class Routes {
   static const history = '/history';
 }
 
+/// Punto de entrada visual de la app. Si el dispositivo se acaba de
+/// encender (bandera puesta por BootReceiver.kt), muestra primero la
+/// pantalla de bloqueo de pantalla completa — nada más es accesible hasta
+/// que se ingrese la contraseña correcta.
+class RootGate extends StatefulWidget {
+  const RootGate({super.key, required this.startRoute, required this.requiresUnlock});
+  final String startRoute;
+  final bool requiresUnlock;
+
+  @override
+  State<RootGate> createState() => _RootGateState();
+}
+
+class _RootGateState extends State<RootGate> {
+  late bool _locked = widget.requiresUnlock;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_locked) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(useMaterial3: true, colorSchemeSeed: const Color(0xFF1B3A6B)),
+        home: BootLockScreen(onUnlocked: () => setState(() => _locked = false)),
+      );
+    }
+    return GuardianLockApp(startRoute: widget.startRoute);
+  }
+}
+
 class GuardianLockApp extends StatelessWidget {
   const GuardianLockApp({super.key, required this.startRoute});
   final String startRoute;
@@ -1096,5 +1280,13 @@ Future<void> main() async {
   // sin depender de ningún servidor.
   final hasSession = await LocalAuthService().hasActiveSession();
 
-  runApp(GuardianLockApp(startRoute: hasSession ? Routes.dashboard : Routes.welcome));
+  // Si el dispositivo se acaba de encender, BootReceiver.kt ya dejó esta
+  // bandera en true — se exige contraseña antes de mostrar cualquier otra
+  // pantalla, incluso si ya había sesión activa.
+  final requiresUnlock = await BootLockService().isLockRequired();
+
+  runApp(RootGate(
+    startRoute: hasSession ? Routes.dashboard : Routes.welcome,
+    requiresUnlock: requiresUnlock,
+  ));
 }

@@ -582,7 +582,7 @@ class FocusTaskHandler extends TaskHandler {
   }
 
   @override
-        Future<void> onDestroy(DateTime timestamp) async {}
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
 
   Future<void> _refreshConfig() async {
     final prefs = await SharedPreferences.getInstance();

@@ -1,1002 +1,1304 @@
 // =============================================================================
-// GUARDIAN LOCK — main.dart (versión 100% LOCAL, sin API keys)
+// main.dart — "Enfoque" App de Productividad / Bloqueador de Apps
 // =============================================================================
+// Flutter + Material 3 · TODO el código Dart vive en este único archivo.
 //
-// Esta versión NO usa Firebase, NO usa Google Maps, NO usa Google Sign-In ni
-// notificaciones push. Todo el login y los datos (dispositivo, historial de
-// ubicaciones, contactos, eventos) se guardan cifrados en el propio teléfono:
+// ⚠️ LEE ESTO PRIMERO:
+// El bloqueo REAL de otras apps (detectar que el usuario abrió Instagram y
+// sacarlo de ahí de forma confiable, incluso con pantalla apagada) requiere
+// piezas NATIVAS de Android que NO pueden escribirse en Dart:
+//   1) Un AccessibilityService en Kotlin (detecta cambios de ventana y actúa
+//      al instante, sin las restricciones de "background activity launch"
+//      que Android 10+ impone a los servicios normales).
+//   2) Un BroadcastReceiver para BOOT_COMPLETED (reiniciar el bloqueo tras
+//      reiniciar el teléfono).
+//   3) Declaraciones en AndroidManifest.xml (permisos, servicio, receiver).
+//   4) Ajustes en build.gradle (compileSdk/targetSdk, minSdk 29).
 //
-//   - Credenciales de cuenta y sesión → flutter_secure_storage
-//   - Historial de ubicaciones, contactos, eventos → sqflite (SQLite local)
-//   - Ubicación actual → geolocator (no requiere API key en Android)
+// Estas piezas se entregan en archivos aparte (ver README.md del proyecto).
+// En este archivo, cada sección que depende de esas piezas está marcada con
+// el comentario "// NATIVE:" explicando qué hace falta y por qué.
 //
-// LIMITACIÓN IMPORTANTE: al no haber servidor/nube, la cuenta y los datos
-// existen SOLO en este dispositivo. No hay sincronización entre teléfonos,
-// ni comandos remotos (bloqueo/alarma a distancia), ni alertas push. La
-// pantalla de "Mapa" muestra el historial como lista de coordenadas en vez
-// de un mapa visual, porque el mapa visual (Google Maps SDK) sí requiere una
-// API key — si más adelante quieres agregarlo, dímelo.
-//
-// REQUISITO: agrega el bloque de dependencias del pubspec.yaml que te di
-// junto con este archivo, y corre `flutter pub get`.
+// Sin esas piezas nativas, esta app SIGUE FUNCIONANDO como:
+//   - Selector de apps a bloquear + temporizador + UI completa.
+//   - Detección de la app en primer plano vía UsageStatsManager (paquete
+//     `usage_stats`, sondeo cada pocos segundos) mientras el Foreground
+//     Service esté vivo.
+//   - Registro de intentos, notificación persistente y pantalla de bloqueo
+//     propia cuando el usuario vuelve a "Enfoque" o cuando el sondeo logra
+//     redirigir a tiempo.
+//   - Sin el AccessibilityService, la redirección puede no ser 100% instantánea
+//     (limitación del propio sistema operativo, no del código).
 // =============================================================================
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
-import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:intl/intl.dart';
-import 'package:path/path.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:uuid/uuid.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:device_apps/device_apps.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:usage_stats/usage_stats.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+// -----------------------------------------------------------------------------
+// Navigator global: nos permite mostrar la pantalla de bloqueo desde
+// cualquier punto (incluido el listener del Foreground Service) sin pasar
+// context manualmente por todos lados.
+// -----------------------------------------------------------------------------
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// Instancia global de notificaciones locales (para el aviso de felicitación
+// al terminar el temporizador). La notificación PERSISTENTE de "Modo
+// Productividad activado" la gestiona flutter_foreground_task directamente.
+final FlutterLocalNotificationsPlugin localNotifications =
+    FlutterLocalNotificationsPlugin();
 
 // =============================================================================
-// SECCIÓN 1: MODELOS DE DOMINIO
+// PUNTO DE ENTRADA
 // =============================================================================
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-class LocationPoint {
-  final double latitude;
-  final double longitude;
-  final int timestamp;
+  // Necesario para que flutter_foreground_task pueda comunicarse con el
+  // isolate de la UI mediante un puerto de mensajes.
+  FlutterForegroundTask.initCommunicationPort();
 
-  const LocationPoint({this.latitude = 0.0, this.longitude = 0.0, int? timestamp})
-      : timestamp = timestamp ?? 0;
+  await _initLocalNotifications();
 
-  factory LocationPoint.fromMap(Map<String, dynamic> map) => LocationPoint(
-        latitude: (map['latitude'] ?? 0.0).toDouble(),
-        longitude: (map['longitude'] ?? 0.0).toDouble(),
-        timestamp: map['timestamp'] ?? 0,
-      );
-
-  Map<String, dynamic> toMap() =>
-      {'latitude': latitude, 'longitude': longitude, 'timestamp': timestamp};
+  // Envolvemos todo en un try/catch amplio: requisito #19 (evitar cierres
+  // inesperados). Cualquier error de inicialización no debe tumbar la app.
+  runZonedGuarded(() {
+    runApp(const FocusApp());
+  }, (error, stack) {
+    debugPrint('Error no controlado: $error');
+  });
 }
 
-class Device {
-  final String deviceId;
-  final String deviceName;
-  final bool isLost;
-  final bool hiddenModeEnabled;
-  final LocationPoint? lastKnownLocation;
+Future<void> _initLocalNotifications() async {
+  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidInit);
+  await localNotifications.initialize(initSettings);
+}
 
-  const Device({
-    this.deviceId = '',
-    this.deviceName = 'Mi dispositivo',
-    this.isLost = false,
-    this.hiddenModeEnabled = false,
-    this.lastKnownLocation,
+// =============================================================================
+// MODELOS
+// =============================================================================
+
+/// Representa una app instalada en el dispositivo.
+class AppInfo {
+  final String packageName;
+  final String appName;
+  final bool isSystemApp;
+
+  AppInfo({
+    required this.packageName,
+    required this.appName,
+    required this.isSystemApp,
+  });
+}
+
+/// Una sesión de bloqueo registrada en el historial (requisito #20).
+class BlockSession {
+  final DateTime start;
+  final DateTime end;
+  final int durationMinutes;
+  final int attempts;
+  final bool completed; // true si terminó por tiempo, false si se canceló
+
+  BlockSession({
+    required this.start,
+    required this.end,
+    required this.durationMinutes,
+    required this.attempts,
+    required this.completed,
   });
 
-  factory Device.fromMap(Map<String, dynamic> map) => Device(
-        deviceId: map['deviceId'] ?? '',
-        deviceName: map['deviceName'] ?? 'Mi dispositivo',
-        isLost: map['isLost'] ?? false,
-        hiddenModeEnabled: map['hiddenModeEnabled'] ?? false,
-        lastKnownLocation:
-            map['lastKnownLocation'] != null ? LocationPoint.fromMap(map['lastKnownLocation']) : null,
-      );
-
-  Map<String, dynamic> toMap() => {
-        'deviceId': deviceId,
-        'deviceName': deviceName,
-        'isLost': isLost,
-        'hiddenModeEnabled': hiddenModeEnabled,
-        'lastKnownLocation': lastKnownLocation?.toMap(),
+  Map<String, dynamic> toJson() => {
+        'start': start.toIso8601String(),
+        'end': end.toIso8601String(),
+        'durationMinutes': durationMinutes,
+        'attempts': attempts,
+        'completed': completed,
       };
 
-  Device copyWith({bool? isLost, bool? hiddenModeEnabled, LocationPoint? lastKnownLocation}) => Device(
-        deviceId: deviceId,
-        deviceName: deviceName,
-        isLost: isLost ?? this.isLost,
-        hiddenModeEnabled: hiddenModeEnabled ?? this.hiddenModeEnabled,
-        lastKnownLocation: lastKnownLocation ?? this.lastKnownLocation,
+  factory BlockSession.fromJson(Map<String, dynamic> json) => BlockSession(
+        start: DateTime.parse(json['start']),
+        end: DateTime.parse(json['end']),
+        durationMinutes: json['durationMinutes'],
+        attempts: json['attempts'],
+        completed: json['completed'] ?? true,
       );
 }
 
-class EmergencyContact {
-  final String id;
-  final String name;
-  final String phoneNumber;
+// =============================================================================
+// FRASES MOTIVACIONALES Y SUGERENCIAS (requisitos #8 y #9)
+// =============================================================================
 
-  const EmergencyContact({this.id = '', this.name = '', this.phoneNumber = ''});
+const List<String> kMotivationalPhrases = [
+  'Sigue concentrado, vas muy bien.',
+  'Tu futuro agradecerá este esfuerzo.',
+  'Evita las distracciones, tú puedes.',
+  'Cada minuto sin distraerte es una victoria.',
+  'La disciplina de hoy es tu libertad de mañana.',
+  'Respira, enfócate, avanza.',
+  'Las distracciones pueden esperar, tus metas no.',
+  'Estás construyendo un mejor hábito ahora mismo.',
+];
 
-  factory EmergencyContact.fromMap(Map<String, dynamic> map) =>
-      EmergencyContact(id: map['id'] ?? '', name: map['name'] ?? '', phoneNumber: map['phoneNumber'] ?? '');
+const List<String> kProductiveSuggestions = [
+  'Leer un libro 📖',
+  'Estudiar 📚',
+  'Aprender programación 💻',
+  'Hacer ejercicio 🏃',
+  'Meditar 🧘',
+  'Organizar tareas ✅',
+  'Practicar inglés 🗣️',
+];
 
-  Map<String, dynamic> toMap() => {'id': id, 'name': name, 'phoneNumber': phoneNumber};
+String randomPhrase() =>
+    kMotivationalPhrases[Random().nextInt(kMotivationalPhrases.length)];
+
+String randomSuggestion() =>
+    kProductiveSuggestions[Random().nextInt(kProductiveSuggestions.length)];
+
+// =============================================================================
+// PERSISTENCIA — Claves de SharedPreferences (requisito #11)
+// =============================================================================
+class PrefsKeys {
+  static const themeMode = 'theme_mode';
+  static const blockedPackages = 'blocked_packages';
+  static const isBlockingActive = 'is_blocking_active';
+  static const blockEndTimeMs = 'block_end_time_ms';
+  static const blockStartTimeMs = 'block_start_time_ms';
+  static const selectedDurationMinutes = 'selected_duration_minutes';
+  static const blockedAttempts = 'blocked_attempts';
+  static const totalSecondsSaved = 'total_seconds_saved';
+  static const streakDays = 'streak_days';
+  static const lastActiveDate = 'last_active_date';
+  static const history = 'history';
 }
 
-enum SecurityEventType { markedAsLost, markedAsFound, locationUpdated, deviceRegistered, hiddenModeToggled }
+// =============================================================================
+// ESTADO GLOBAL DE LA APP (ChangeNotifier — sin paquetes externos de estado,
+// requisito #20 "usar únicamente paquetes necesarios")
+// =============================================================================
+class AppState extends ChangeNotifier {
+  ThemeMode themeMode = ThemeMode.system;
 
-class SecurityEvent {
-  final String id;
-  final SecurityEventType type;
-  final String description;
-  final int timestamp;
+  Set<String> blockedPackages = {};
+  bool isBlockingActive = false;
+  DateTime? blockStartTime;
+  DateTime? blockEndTime;
+  int selectedDurationMinutes = 30;
 
-  SecurityEvent({this.id = '', required this.type, required this.description, int? timestamp})
-      : timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch;
+  int blockedAttempts = 0;
+  int totalSecondsSaved = 0;
+  int streakDays = 0;
+  DateTime? lastActiveDate;
+  List<BlockSession> history = [];
 
-  factory SecurityEvent.fromMap(Map<String, dynamic> map) => SecurityEvent(
-        id: map['id'] ?? '',
-        type: SecurityEventType.values
-            .firstWhere((e) => e.name == map['type'], orElse: () => SecurityEventType.locationUpdated),
-        description: map['description'] ?? '',
-        timestamp: map['timestamp'] ?? 0,
+  Timer? _countdownTicker;
+  Duration remaining = Duration.zero;
+
+  // ----------------------------- Carga / guardado -----------------------------
+
+  Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final themeStr = prefs.getString(PrefsKeys.themeMode);
+      themeMode = switch (themeStr) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+
+      blockedPackages = (prefs.getStringList(PrefsKeys.blockedPackages) ?? [])
+          .toSet();
+      isBlockingActive = prefs.getBool(PrefsKeys.isBlockingActive) ?? false;
+
+      final endMs = prefs.getInt(PrefsKeys.blockEndTimeMs);
+      blockEndTime =
+          endMs != null ? DateTime.fromMillisecondsSinceEpoch(endMs) : null;
+
+      final startMs = prefs.getInt(PrefsKeys.blockStartTimeMs);
+      blockStartTime = startMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(startMs)
+          : null;
+
+      selectedDurationMinutes =
+          prefs.getInt(PrefsKeys.selectedDurationMinutes) ?? 30;
+      blockedAttempts = prefs.getInt(PrefsKeys.blockedAttempts) ?? 0;
+      totalSecondsSaved = prefs.getInt(PrefsKeys.totalSecondsSaved) ?? 0;
+      streakDays = prefs.getInt(PrefsKeys.streakDays) ?? 0;
+
+      final lastActiveStr = prefs.getString(PrefsKeys.lastActiveDate);
+      lastActiveDate =
+          lastActiveStr != null ? DateTime.tryParse(lastActiveStr) : null;
+
+      final historyStr = prefs.getString(PrefsKeys.history);
+      if (historyStr != null) {
+        final list = jsonDecode(historyStr) as List;
+        history = list
+            .map((e) => BlockSession.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+
+      // Si el bloqueo estaba activo y ya venció (p. ej. la app estuvo
+      // cerrada), lo cerramos correctamente al reabrir.
+      if (isBlockingActive &&
+          blockEndTime != null &&
+          DateTime.now().isAfter(blockEndTime!)) {
+        await _finishBlocking(completed: true);
+      } else if (isBlockingActive) {
+        _startCountdown();
+      }
+    } catch (e) {
+      debugPrint('Error cargando preferencias: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> _savePrimitive() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        PrefsKeys.themeMode,
+        switch (themeMode) {
+          ThemeMode.light => 'light',
+          ThemeMode.dark => 'dark',
+          ThemeMode.system => 'system',
+        },
       );
+      await prefs.setStringList(
+          PrefsKeys.blockedPackages, blockedPackages.toList());
+      await prefs.setBool(PrefsKeys.isBlockingActive, isBlockingActive);
+      await prefs.setInt(
+          PrefsKeys.selectedDurationMinutes, selectedDurationMinutes);
+      await prefs.setInt(PrefsKeys.blockedAttempts, blockedAttempts);
+      await prefs.setInt(PrefsKeys.totalSecondsSaved, totalSecondsSaved);
+      await prefs.setInt(PrefsKeys.streakDays, streakDays);
+      if (lastActiveDate != null) {
+        await prefs.setString(
+            PrefsKeys.lastActiveDate, lastActiveDate!.toIso8601String());
+      }
+      if (blockEndTime != null) {
+        await prefs.setInt(
+            PrefsKeys.blockEndTimeMs, blockEndTime!.millisecondsSinceEpoch);
+      } else {
+        await prefs.remove(PrefsKeys.blockEndTimeMs);
+      }
+      if (blockStartTime != null) {
+        await prefs.setInt(PrefsKeys.blockStartTimeMs,
+            blockStartTime!.millisecondsSinceEpoch);
+      } else {
+        await prefs.remove(PrefsKeys.blockStartTimeMs);
+      }
+      await prefs.setString(
+        PrefsKeys.history,
+        jsonEncode(history.map((e) => e.toJson()).toList()),
+      );
+    } catch (e) {
+      debugPrint('Error guardando preferencias: $e');
+    }
+  }
 
-  Map<String, dynamic> toMap() =>
-      {'id': id, 'type': type.name, 'description': description, 'timestamp': timestamp};
-}
+  // ----------------------------- Tema -----------------------------
 
-// =============================================================================
-// SECCIÓN 2: BASE DE DATOS LOCAL (SQLite) — historial, contactos, ubicaciones
-// =============================================================================
+  void setThemeMode(ThemeMode mode) {
+    themeMode = mode;
+    _savePrimitive();
+    notifyListeners();
+  }
 
-class LocalDatabase {
-  LocalDatabase._internal();
-  static final LocalDatabase instance = LocalDatabase._internal();
-  Database? _db;
+  // ----------------------------- Selección de apps -----------------------------
 
-  Future<Database> get database async => _db ??= await _init();
+  void toggleBlockedPackage(String packageName) {
+    if (blockedPackages.contains(packageName)) {
+      blockedPackages.remove(packageName);
+    } else {
+      blockedPackages.add(packageName);
+    }
+    _savePrimitive();
+    notifyListeners();
+  }
 
-  Future<Database> _init() async {
-    final dbPath = await getDatabasesPath();
-    final dbFile = join(dbPath, 'guardian_lock_local.db');
-    return openDatabase(
-      dbFile,
-      version: 1,
-      onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE security_events (
-            id TEXT PRIMARY KEY, type TEXT NOT NULL, description TEXT NOT NULL, timestamp INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE location_history (
-            id TEXT PRIMARY KEY, latitude REAL NOT NULL, longitude REAL NOT NULL, timestamp INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE contacts (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, phoneNumber TEXT NOT NULL
-          )
-        ''');
-      },
+  void setSelectedDuration(int minutes) {
+    selectedDurationMinutes = minutes;
+    _savePrimitive();
+    notifyListeners();
+  }
+
+  // ----------------------------- Bloqueo -----------------------------
+
+  Future<void> startBlocking() async {
+    if (blockedPackages.isEmpty) return;
+
+    isBlockingActive = true;
+    blockStartTime = DateTime.now();
+    blockEndTime =
+        blockStartTime!.add(Duration(minutes: selectedDurationMinutes));
+    blockedAttempts = 0;
+
+    _updateStreak();
+    await _savePrimitive();
+
+    // NATIVE-ASSISTED: arrancamos el Foreground Service (paquete
+    // flutter_foreground_task). Esto SÍ es 100% Dart/plugin, pero para que
+    // sobreviva a pantalla apagada y arranque tras reiniciar el equipo,
+    // AndroidManifest.xml debe declarar el servicio y el receiver de
+    // BOOT_COMPLETED (ver README.md / archivos nativos adjuntos).
+    await _startForegroundService();
+
+    notifyListeners();
+    _startCountdown();
+  }
+
+  Future<void> stopBlocking({bool completed = false}) async {
+    await _finishBlocking(completed: completed);
+  }
+
+  Future<void> _finishBlocking({required bool completed}) async {
+    _countdownTicker?.cancel();
+
+    if (blockStartTime != null) {
+      final now = DateTime.now();
+      final actualMinutes = now.difference(blockStartTime!).inMinutes;
+      history.insert(
+        0,
+        BlockSession(
+          start: blockStartTime!,
+          end: now,
+          durationMinutes: actualMinutes,
+          attempts: blockedAttempts,
+          completed: completed,
+        ),
+      );
+      if (history.length > 100) {
+        history = history.sublist(0, 100);
+      }
+      // El "tiempo ahorrado" acumula el tiempo real que la app estuvo
+      // bloqueando distracciones.
+      totalSecondsSaved += now.difference(blockStartTime!).inSeconds;
+    }
+
+    isBlockingActive = false;
+    blockStartTime = null;
+    blockEndTime = null;
+    remaining = Duration.zero;
+
+    await _savePrimitive();
+    await FlutterForegroundTask.stopService();
+
+    if (completed) {
+      await _showCompletionNotification();
+    }
+
+    notifyListeners();
+  }
+
+  void _updateStreak() {
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+    if (lastActiveDate == null) {
+      streakDays = 1;
+    } else {
+      final lastDateOnly = DateTime(
+          lastActiveDate!.year, lastActiveDate!.month, lastActiveDate!.day);
+      final diff = todayDateOnly.difference(lastDateOnly).inDays;
+      if (diff == 1) {
+        streakDays += 1;
+      } else if (diff > 1) {
+        streakDays = 1;
+      }
+      // Si diff == 0 (mismo día) no cambiamos la racha.
+    }
+    lastActiveDate = today;
+  }
+
+  void _startCountdown() {
+    _countdownTicker?.cancel();
+    _tick();
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      _tick();
+    });
+  }
+
+  void _tick() {
+    if (blockEndTime == null) return;
+    final now = DateTime.now();
+    if (now.isAfter(blockEndTime!)) {
+      remaining = Duration.zero;
+      _finishBlocking(completed: true);
+      return;
+    }
+    remaining = blockEndTime!.difference(now);
+    notifyListeners();
+  }
+
+  /// Se llama cuando el Foreground Service detecta que el usuario intentó
+  /// abrir una app bloqueada (requisito #6/#4).
+  void registerBlockedAttempt() {
+    blockedAttempts += 1;
+    _savePrimitive();
+    notifyListeners();
+  }
+
+  // ----------------------------- Foreground Service -----------------------------
+
+  Future<void> _startForegroundService() async {
+    // Guardamos también la config en prefs "planas" para que el isolate del
+    // servicio (que corre por separado) pueda leerlas sin depender de este
+    // objeto en memoria.
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'Modo Productividad activado',
+      notificationText: 'Bloqueando distracciones. Toca para volver a Enfoque.',
+      callback: startCallback,
     );
   }
+
+  Future<void> _showCompletionNotification() async {
+    const androidDetails = AndroidNotificationDetails(
+      'focus_completion_channel',
+      'Sesiones completadas',
+      channelDescription: 'Notificaciones al finalizar una sesión de enfoque',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const details = NotificationDetails(android: androidDetails);
+    await localNotifications.show(
+      1001,
+      '¡Sesión completada! 🎉',
+      'Terminaste tu tiempo de enfoque. ¡Buen trabajo!',
+      details,
+    );
+  }
+
+  @override
+  void dispose() {
+    _countdownTicker?.cancel();
+    super.dispose();
+  }
+}
+
+/// Acceso simple al AppState desde cualquier widget, vía InheritedNotifier.
+class AppStateScope extends InheritedNotifier<AppState> {
+  const AppStateScope({
+    super.key,
+    required AppState appState,
+    required super.child,
+  }) : super(notifier: appState);
+
+  static AppState of(BuildContext context) {
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<AppStateScope>();
+    assert(scope != null, 'AppStateScope no encontrado en el árbol');
+    return scope!.notifier!;
+  }
 }
 
 // =============================================================================
-// SECCIÓN 3: SERVICIOS LOCALES (reemplazan a Firebase Auth / Firestore)
+// FOREGROUND SERVICE — TaskHandler (requisitos #5, #6, #7)
 // =============================================================================
+// NATIVE: Este TaskHandler corre dentro de un servicio en primer plano real
+// de Android (implementado por el plugin flutter_foreground_task), lo cual
+// requiere declarar el <service> correspondiente en AndroidManifest.xml.
+// Aquí solo sondeamos la app en primer plano vía UsageStatsManager
+// (paquete `usage_stats`). Esto detecta el cambio de app, pero la capacidad
+// de "sacar" al usuario de la app bloqueada de forma instantánea y 100%
+// confiable —incluso con pantalla apagada— depende del AccessibilityService
+// nativo (ver AppBlockAccessibilityService.kt).
+// -----------------------------------------------------------------------------
 
-/// Autenticación 100% local: guarda una única cuenta (correo + hash de la
-/// contraseña) cifrada con flutter_secure_storage. No hay servidor, así que
-/// la cuenta solo existe en este dispositivo.
-class LocalAuthService {
-  final _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+@pragma('vm:entry-point')
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(FocusTaskHandler());
+}
 
-  static const _keyEmail = 'guardian_lock_account_email';
-  static const _keyPasswordHash = 'guardian_lock_account_password_hash';
-  static const _keySessionActive = 'guardian_lock_session_active';
+class FocusTaskHandler extends TaskHandler {
+  Set<String> _blockedPackages = {};
+  DateTime? _blockEndTime;
+  String? _lastForegroundPackage;
 
-  String _hash(String input) => sha256.convert(utf8.encode(input)).toString();
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await _refreshConfig();
+  }
 
-  Future<bool> hasAccount() async => (await _storage.read(key: _keyEmail)) != null;
+  @override
+  void onRepeatEvent(DateTime timestamp) async {
+    await _refreshConfig();
 
-  Future<bool> hasActiveSession() async => (await _storage.read(key: _keySessionActive)) == 'true';
-
-  Future<String?> register(String email, String password) async {
-    if (await hasAccount()) {
-      return 'Ya existe una cuenta local en este dispositivo. Inicia sesión.';
+    if (_blockEndTime == null || DateTime.now().isAfter(_blockEndTime!)) {
+      // El tiempo terminó; avisamos a la UI y dejamos de sondear apps.
+      FlutterForegroundTask.sendDataToMain({'type': 'session_finished'});
+      return;
     }
-    await _storage.write(key: _keyEmail, value: email);
-    await _storage.write(key: _keyPasswordHash, value: _hash(password));
-    await _storage.write(key: _keySessionActive, value: 'true');
-    return null; // null = éxito
-  }
 
-  Future<String?> signIn(String email, String password) async {
-    final storedEmail = await _storage.read(key: _keyEmail);
-    final storedHash = await _storage.read(key: _keyPasswordHash);
-    if (storedEmail == null) {
-      return 'No existe una cuenta local todavía. Regístrate primero.';
-    }
-    if (storedEmail != email || storedHash != _hash(password)) {
-      return 'Correo o contraseña incorrectos.';
-    }
-    await _storage.write(key: _keySessionActive, value: 'true');
-    return null;
-  }
-
-  Future<void> signOut() async {
-    await _storage.write(key: _keySessionActive, value: 'false');
-  }
-
-  /// Verifica una contraseña contra la cuenta guardada, sin cambiar el
-  /// estado de sesión. Se usa en la pantalla de bloqueo por encendido.
-  Future<bool> verifyPassword(String password) async {
-    final storedHash = await _storage.read(key: _keyPasswordHash);
-    if (storedHash == null) return false;
-    return storedHash == _hash(password);
-  }
-}
-
-/// Guarda el único dispositivo registrado como JSON cifrado local.
-class LocalDeviceStore {
-  final _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
-  static const _key = 'guardian_lock_device_data';
-  final _uuid = const Uuid();
-
-  Future<Device> getOrCreateDevice() async {
-    final raw = await _storage.read(key: _key);
-    if (raw != null) return Device.fromMap(jsonDecode(raw));
-    final device = Device(deviceId: _uuid.v4());
-    await save(device);
-    return device;
-  }
-
-  Future<void> save(Device device) => _storage.write(key: _key, value: jsonEncode(device.toMap()));
-}
-
-class LocationHistoryStore {
-  final _uuid = const Uuid();
-
-  Future<void> add(LocationPoint point) async {
-    final db = await LocalDatabase.instance.database;
-    await db.insert('location_history', {'id': _uuid.v4(), ...point.toMap()});
-  }
-
-  Future<List<LocationPoint>> getAll() async {
-    final db = await LocalDatabase.instance.database;
-    final rows = await db.query('location_history', orderBy: 'timestamp DESC', limit: 100);
-    return rows.map((r) => LocationPoint.fromMap(r)).toList();
-  }
-}
-
-class ContactStore {
-  final _uuid = const Uuid();
-
-  Future<void> add(EmergencyContact contact) async {
-    final db = await LocalDatabase.instance.database;
-    final withId = EmergencyContact(id: _uuid.v4(), name: contact.name, phoneNumber: contact.phoneNumber);
-    await db.insert('contacts', withId.toMap());
-  }
-
-  Future<void> remove(String id) async {
-    final db = await LocalDatabase.instance.database;
-    await db.delete('contacts', where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<List<EmergencyContact>> getAll() async {
-    final db = await LocalDatabase.instance.database;
-    final rows = await db.query('contacts');
-    return rows.map((r) => EmergencyContact.fromMap(r)).toList();
-  }
-}
-
-class SecurityEventStore {
-  final _uuid = const Uuid();
-
-  Future<void> log(SecurityEventType type, String description) async {
-    final db = await LocalDatabase.instance.database;
-    final event = SecurityEvent(id: _uuid.v4(), type: type, description: description);
-    await db.insert('security_events', event.toMap());
-  }
-
-  Future<List<SecurityEvent>> getAll() async {
-    final db = await LocalDatabase.instance.database;
-    final rows = await db.query('security_events', orderBy: 'timestamp DESC');
-    return rows.map((r) => SecurityEvent.fromMap(r)).toList();
-  }
-}
-
-/// Puente opcional hacia código nativo Android para protección contra
-/// desinstalación (DeviceAdminReceiver). No requiere ninguna API key — es
-/// 100% local también. Si el código Kotlin del canal aún no existe en tu
-/// proyecto, cada llamada falla en silencio y el resto de la app sigue
-/// funcionando con normalidad.
-class DeviceAdminService {
-  static const _channel = MethodChannel('com.example.domotica/device_admin');
-
-  Future<bool> isAdminActive() async {
     try {
-      return (await _channel.invokeMethod<bool>('isAdminActive')) ?? false;
+      final end = DateTime.now();
+      final start = end.subtract(const Duration(seconds: 10));
+      final events = await UsageStats.queryEvents(start, end);
+      if (events.isEmpty) return;
+
+      // El último evento de "MOVE_TO_FOREGROUND" indica la app activa.
+      String? foregroundPackage;
+      for (final event in events.reversed) {
+        if (event.eventType == '1' /* MOVE_TO_FOREGROUND */) {
+          foregroundPackage = event.packageName;
+          break;
+        }
+      }
+      if (foregroundPackage == null ||
+          foregroundPackage == _lastForegroundPackage) {
+        return;
+      }
+      _lastForegroundPackage = foregroundPackage;
+
+      if (_blockedPackages.contains(foregroundPackage)) {
+        // Avisamos a la UI para: 1) contar el intento, 2) mostrar la
+        // pantalla de bloqueo si Enfoque está en primer plano, o 3) intentar
+        // traer a Enfoque al frente (best-effort; ver limitación arriba).
+        FlutterForegroundTask.sendDataToMain({
+          'type': 'blocked_attempt',
+          'package': foregroundPackage,
+        });
+
+        FlutterForegroundTask.updateService(
+          notificationTitle: 'Modo Productividad activado',
+          notificationText: 'App bloqueada detectada. ${randomPhrase()}',
+        );
+      }
+    } catch (e) {
+      // No dejamos que un error de lectura de UsageStats tumbe el servicio.
+      debugPrint('Error en sondeo de UsageStats: $e');
+    }
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+
+  Future<void> _refreshConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    _blockedPackages =
+        (prefs.getStringList(PrefsKeys.blockedPackages) ?? []).toSet();
+    final endMs = prefs.getInt(PrefsKeys.blockEndTimeMs);
+    _blockEndTime =
+        endMs != null ? DateTime.fromMillisecondsSinceEpoch(endMs) : null;
+  }
+}
+
+// =============================================================================
+// PERMISOS (requisitos #14, #15)
+// =============================================================================
+class PermissionStatusInfo {
+  final String title;
+  final String description;
+  final bool granted;
+  final VoidCallback onFix;
+
+  PermissionStatusInfo({
+    required this.title,
+    required this.description,
+    required this.granted,
+    required this.onFix,
+  });
+}
+
+class PermissionsHelper {
+  /// Usage Access no tiene un flag estándar en permission_handler; se
+  /// verifica intentando leer estadísticas de uso.
+  static Future<bool> hasUsageAccess() async {
+    try {
+      final granted = await UsageStats.checkUsagePermission();
+      return granted ?? false;
     } catch (_) {
       return false;
     }
   }
 
-  Future<void> requestAdminActivation() async {
-    try {
-      await _channel.invokeMethod('requestAdminActivation');
-    } catch (_) {}
+  static void openUsageAccessSettings() {
+    // NATIVE: abre la pantalla de sistema "Acceso a datos de uso". Esto
+    // funciona directamente vía Intent, sin necesidad de código Kotlin
+    // adicional, gracias a android_intent_plus.
+    const intent = AndroidIntent(
+      action: 'android.settings.USAGE_ACCESS_SETTINGS',
+    );
+    intent.launch();
   }
-}
 
-class PermissionUtils {
-  static Future<void> requestCorePermissions() async {
-    await Permission.locationWhenInUse.request();
+  /// No existe API pública para verificar si NUESTRO AccessibilityService
+  /// está habilitado sin código nativo. Aquí solo abrimos la pantalla de
+  /// ajustes; la verificación real de "¿está mi servicio activo?" debe
+  /// hacerse en Kotlin (AppBlockAccessibilityService) y exponerse a Dart
+  /// mediante un MethodChannel. Ver README.md.
+  static void openAccessibilitySettings() {
+    const intent = AndroidIntent(
+      action: 'android.settings.ACCESSIBILITY_SETTINGS',
+    );
+    intent.launch();
+  }
+
+  static Future<bool> hasIgnoreBatteryOptimization() async {
+    final status = await Permission.ignoreBatteryOptimizations.status;
+    return status.isGranted;
+  }
+
+  static Future<void> requestIgnoreBatteryOptimization() async {
+    await Permission.ignoreBatteryOptimizations.request();
+  }
+
+  static Future<bool> hasNotificationPermission() async {
+    final status = await Permission.notification.status;
+    return status.isGranted;
+  }
+
+  static Future<void> requestNotificationPermission() async {
     await Permission.notification.request();
   }
 }
 
-/// Lee/escribe la bandera "el dispositivo se acaba de encender y necesita
-/// desbloqueo". El lado nativo (BootReceiver.kt) escribe esta misma bandera
-/// directamente en el archivo de SharedPreferences de Android cuando detecta
-/// el evento BOOT_COMPLETED — por eso usamos el paquete `shared_preferences`
-/// aquí en vez de flutter_secure_storage (el receptor nativo no puede
-/// escribir datos cifrados con el Keystore sin duplicar esa lógica, pero sí
-/// puede escribir un SharedPreferences simple).
-class BootLockService {
-  static const _key = 'guardian_lock_requires_unlock_after_boot';
+// =============================================================================
+// APP RAÍZ
+// =============================================================================
+class FocusApp extends StatefulWidget {
+  const FocusApp({super.key});
 
-  Future<bool> isLockRequired() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_key) ?? false;
-  }
-
-  Future<void> clearLock() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_key, false);
-  }
+  @override
+  State<FocusApp> createState() => _FocusAppState();
 }
 
-// =============================================================================
-// SECCIÓN 4: PROVIDERS (estado de la app)
-// =============================================================================
+class _FocusAppState extends State<FocusApp> {
+  final AppState _appState = AppState();
+  bool _loaded = false;
 
-class AuthProvider extends ChangeNotifier {
-  AuthProvider({LocalAuthService? authService}) : _authService = authService ?? LocalAuthService();
-  final LocalAuthService _authService;
-
-  bool isLoading = false;
-  String? errorMessage;
-  bool isAuthenticated = false;
-
-  Future<void> checkSession() async {
-    isAuthenticated = await _authService.hasActiveSession();
-    notifyListeners();
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
   }
 
-  Future<void> signIn(String email, String password) async {
-    if (!_validate(email, password)) return;
-    _setLoading();
-    final error = await _authService.signIn(email, password);
-    _finish(error);
-  }
+  Future<void> _bootstrap() async {
+    await _appState.load();
 
-  Future<void> register(String email, String password, String confirm) async {
-    if (password != confirm) return _setError('Las contraseñas no coinciden.');
-    if (!_validate(email, password)) return;
-    _setLoading();
-    final error = await _authService.register(email, password);
-    _finish(error);
-  }
-
-  Future<void> signOut() async {
-    await _authService.signOut();
-    isAuthenticated = false;
-    notifyListeners();
-  }
-
-  void _finish(String? error) {
-    isLoading = false;
-    if (error == null) {
-      isAuthenticated = true;
-      errorMessage = null;
-    } else {
-      errorMessage = error;
-    }
-    notifyListeners();
-  }
-
-  bool _validate(String email, String password) {
-    if (email.isEmpty || !email.contains('@')) {
-      _setError('Ingresa un correo válido.');
-      return false;
-    }
-    if (password.length < 8) {
-      _setError('La contraseña debe tener al menos 8 caracteres.');
-      return false;
-    }
-    return true;
-  }
-
-  void _setLoading() {
-    isLoading = true;
-    errorMessage = null;
-    notifyListeners();
-  }
-
-  void _setError(String message) {
-    errorMessage = message;
-    notifyListeners();
-  }
-}
-
-class DashboardProvider extends ChangeNotifier {
-  DashboardProvider({LocalDeviceStore? store, SecurityEventStore? events})
-      : _store = store ?? LocalDeviceStore(),
-        _events = events ?? SecurityEventStore() {
-    _load();
-  }
-  final LocalDeviceStore _store;
-  final SecurityEventStore _events;
-
-  Device? device;
-  bool isLoading = true;
-
-  Future<void> _load() async {
-    device = await _store.getOrCreateDevice();
-    isLoading = false;
-    notifyListeners();
-  }
-
-  Future<void> toggleLostMode(bool isLost) async {
-    if (device == null) return;
-    device = device!.copyWith(isLost: isLost);
-    await _store.save(device!);
-    await _events.log(
-      isLost ? SecurityEventType.markedAsLost : SecurityEventType.markedAsFound,
-      isLost ? 'Dispositivo marcado como perdido.' : 'Dispositivo marcado como encontrado.',
+    // Configuración del Foreground Service. NATIVE: los canales/permisos
+    // que esto usa deben existir en AndroidManifest.xml.
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'focus_foreground_channel',
+        channelName: 'Modo Productividad',
+        channelDescription:
+            'Notificación persistente mientras el bloqueo está activo.',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(3000),
+        autoRunOnBoot: true,
+        allowWifiLock: false,
+      ),
     );
-    notifyListeners();
+
+    // Escuchamos los mensajes que llegan del TaskHandler en segundo plano.
+    FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+
+    if (mounted) setState(() => _loaded = true);
   }
 
-  Future<void> toggleHiddenMode(bool enabled) async {
-    if (device == null) return;
-    device = device!.copyWith(hiddenModeEnabled: enabled);
-    await _store.save(device!);
-    await _events.log(SecurityEventType.hiddenModeToggled, 'Modo oculto ${enabled ? "activado" : "desactivado"}.');
-    notifyListeners();
-  }
-
-  Future<void> updateLastLocation(LocationPoint point) async {
-    if (device == null) return;
-    device = device!.copyWith(lastKnownLocation: point);
-    await _store.save(device!);
-    notifyListeners();
-  }
-}
-
-class MapProvider extends ChangeNotifier {
-  MapProvider({LocationHistoryStore? store, SecurityEventStore? events})
-      : _store = store ?? LocationHistoryStore(),
-        _events = events ?? SecurityEventStore() {
-    loadHistory();
-  }
-  final LocationHistoryStore _store;
-  final SecurityEventStore _events;
-
-  List<LocationPoint> history = [];
-  bool isLoading = true;
-  bool isLocating = false;
-  String? errorMessage;
-
-  Future<void> loadHistory() async {
-    isLoading = true;
-    notifyListeners();
-    history = await _store.getAll();
-    isLoading = false;
-    notifyListeners();
-  }
-
-  /// Obtiene la ubicación actual real del dispositivo (geolocator no
-  /// requiere ninguna API key en Android) y la agrega al historial local.
-  Future<LocationPoint?> locateNow() async {
-    isLocating = true;
-    errorMessage = null;
-    notifyListeners();
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        final requested = await Geolocator.requestPermission();
-        if (requested == LocationPermission.denied || requested == LocationPermission.deniedForever) {
-          errorMessage = 'Permiso de ubicación denegado.';
-          isLocating = false;
-          notifyListeners();
-          return null;
-        }
+  void _onTaskData(Object data) {
+    if (data is! Map) return;
+    final type = data['type'];
+    if (type == 'blocked_attempt') {
+      _appState.registerBlockedAttempt();
+      final ctx = navigatorKey.currentState?.overlay?.context;
+      if (ctx != null) {
+        _showBlockScreenIfNeeded(data['package'] as String?);
       }
-      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final point = LocationPoint(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
+    } else if (type == 'session_finished') {
+      _appState.stopBlocking(completed: true);
+    }
+  }
+
+  void _showBlockScreenIfNeeded(String? package) {
+    final navigator = navigatorKey.currentState;
+    if (navigator == null) return;
+    // Evitamos apilar varias pantallas de bloqueo.
+    if (ModalRoute.of(navigator.context)?.settings.name == '/block') return;
+    navigator.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: '/block'),
+        builder: (_) => BlockScreen(packageName: package),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+    _appState.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const MaterialApp(
+        home: Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        ),
       );
-      await _store.add(point);
-      await _events.log(SecurityEventType.locationUpdated, 'Ubicación actualizada manualmente.');
-      await loadHistory();
-      return point;
-    } catch (e) {
-      errorMessage = 'No se pudo obtener la ubicación. Verifica que el GPS esté activo.';
-      notifyListeners();
-      return null;
-    } finally {
-      isLocating = false;
-      notifyListeners();
-    }
-  }
-}
-
-class ContactsProvider extends ChangeNotifier {
-  ContactsProvider({ContactStore? store}) : _store = store ?? ContactStore() {
-    loadContacts();
-  }
-  final ContactStore _store;
-
-  List<EmergencyContact> contacts = [];
-  bool isLoading = true;
-
-  Future<void> loadContacts() async {
-    contacts = await _store.getAll();
-    isLoading = false;
-    notifyListeners();
-  }
-
-  Future<void> addContact(String name, String phone) async {
-    if (name.trim().isEmpty || phone.trim().isEmpty) return;
-    await _store.add(EmergencyContact(name: name, phoneNumber: phone));
-    await loadContacts();
-  }
-
-  Future<void> removeContact(String id) async {
-    await _store.remove(id);
-    await loadContacts();
-  }
-}
-
-class HistoryProvider extends ChangeNotifier {
-  HistoryProvider({SecurityEventStore? store}) : _store = store ?? SecurityEventStore() {
-    _load();
-  }
-  final SecurityEventStore _store;
-
-  List<SecurityEvent> events = [];
-  bool isLoading = true;
-
-  Future<void> _load() async {
-    events = await _store.getAll();
-    isLoading = false;
-    notifyListeners();
-  }
-
-  Future<void> refresh() => _load();
-}
-
-// =============================================================================
-// SECCIÓN 5: PANTALLAS
-// =============================================================================
-
-/// Pantalla de bloqueo de pantalla completa mostrada cuando el dispositivo
-/// se acaba de encender. Incluye un mensaje disuasorio para desalentar a
-/// quien tenga el dispositivo sin autorización, y exige la contraseña de la
-/// cuenta local para continuar.
-class BootLockScreen extends StatefulWidget {
-  const BootLockScreen({super.key, required this.onUnlocked});
-  final VoidCallback onUnlocked;
-
-  @override
-  State<BootLockScreen> createState() => _BootLockScreenState();
-}
-
-class _BootLockScreenState extends State<BootLockScreen> {
-  final _password = TextEditingController();
-  final _authService = LocalAuthService();
-  final _events = SecurityEventStore();
-  bool _isChecking = false;
-  String? _error;
-  int _failedAttempts = 0;
-
-  Future<void> _tryUnlock() async {
-    setState(() {
-      _isChecking = true;
-      _error = null;
-    });
-
-    final valid = await _authService.verifyPassword(_password.text);
-
-    if (valid) {
-      await BootLockService().clearLock();
-      await _events.log(SecurityEventType.deviceRegistered, 'Dispositivo desbloqueado tras encendido.');
-      if (mounted) widget.onUnlocked();
-      return;
     }
 
-    _failedAttempts++;
-    await _events.log(
-      SecurityEventType.deviceRegistered,
-      'Intento fallido de desbloqueo tras encendido (#$_failedAttempts).',
-    );
-    setState(() {
-      _isChecking = false;
-      _error = 'Contraseña incorrecta.';
-      _password.clear();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false, // Bloquea el botón "atrás" — no se puede saltar esta pantalla.
-      child: Scaffold(
-        backgroundColor: const Color(0xFF10141C),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_outline, size: 72, color: Colors.white),
-                const SizedBox(height: 24),
-                const Text(
-                  'Dispositivo bloqueado',
-                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                // Mensaje de persuasión: busca disuadir a quien tenga el
-                // dispositivo sin autorización, sin hacer afirmaciones
-                // falsas sobre capacidades que la app no tiene realmente.
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'Este dispositivo está protegido por Guardian Lock y registrado a nombre '
-                    'de su propietario.\n\n'
-                    'Cada intento de desbloqueo, así como la ubicación aproximada, quedan '
-                    'guardados en el historial de seguridad del dispositivo.\n\n'
-                    'Si encontraste este teléfono, por favor contacta a su propietario para '
-                    'devolverlo. Si fue extraviado o sustraído, esto ya ha sido registrado.',
-                    style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                TextField(
-                  controller: _password,
-                  obscureText: true,
-                  autofocus: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Contraseña del propietario',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.3))),
-                    focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-                  ),
-                  onSubmitted: (_) => _isChecking ? null : _tryUnlock(),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-                ],
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _isChecking ? null : _tryUnlock,
-                    child: _isChecking
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Desbloquear'),
-                  ),
-                ),
-              ],
+    return AppStateScope(
+      appState: _appState,
+      child: AnimatedBuilder(
+        animation: _appState,
+        builder: (context, _) {
+          return MaterialApp(
+            navigatorKey: navigatorKey,
+            title: 'Enfoque',
+            debugShowCheckedModeBanner: false,
+            themeMode: _appState.themeMode,
+            theme: ThemeData(
+              useMaterial3: true,
+              colorSchemeSeed: Colors.indigo,
+              brightness: Brightness.light,
             ),
-          ),
-        ),
+            darkTheme: ThemeData(
+              useMaterial3: true,
+              colorSchemeSeed: Colors.indigo,
+              brightness: Brightness.dark,
+            ),
+            home: const HomeShell(),
+          );
+        },
       ),
     );
   }
 }
 
-class WelcomeScreen extends StatelessWidget {
-  const WelcomeScreen({super.key, required this.onLoginTap, required this.onRegisterTap});
-  final VoidCallback onLoginTap;
-  final VoidCallback onRegisterTap;
+// =============================================================================
+// HOME SHELL — Navegación inferior con animación (requisito #16)
+// =============================================================================
+class HomeShell extends StatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int _index = 0;
+
+  final _pages = const [
+    DashboardScreen(),
+    AppsScreen(),
+    StatsScreen(),
+    SettingsScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: _pages[_index],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(
+              icon: Icon(Icons.shield_outlined),
+              selectedIcon: Icon(Icons.shield),
+              label: 'Inicio'),
+          NavigationDestination(
+              icon: Icon(Icons.apps_outlined),
+              selectedIcon: Icon(Icons.apps),
+              label: 'Apps'),
+          NavigationDestination(
+              icon: Icon(Icons.bar_chart_outlined),
+              selectedIcon: Icon(Icons.bar_chart),
+              label: 'Estadísticas'),
+          NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: 'Ajustes'),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// DASHBOARD — Pantalla principal (toggle de bloqueo, cuenta atrás, frases)
+// =============================================================================
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  String _phrase = randomPhrase();
+  String _suggestion = randomSuggestion();
+  Timer? _phraseTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _phraseTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      setState(() {
+        _phrase = randomPhrase();
+        _suggestion = randomSuggestion();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _phraseTimer?.cancel();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = AppStateScope.of(context);
     final theme = Theme.of(context);
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 48,
-                backgroundColor: theme.colorScheme.primaryContainer,
-                child: Icon(Icons.shield, size: 48, color: theme.colorScheme.primary),
-              ),
-              const SizedBox(height: 24),
-              Text('Guardian Lock', style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              const Text(
-                'Protege tu dispositivo contra pérdida y robo — versión local, sin conexión a servidores.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 48),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(onPressed: onLoginTap, child: const Text('Iniciar sesión')),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: OutlinedButton(onPressed: onRegisterTap, child: const Text('Crear cuenta')),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.onSuccess, required this.onNavigateToRegister});
-  final VoidCallback onSuccess;
-  final VoidCallback onNavigateToRegister;
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    if (auth.isAuthenticated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => widget.onSuccess());
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Iniciar sesión')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _email,
-              decoration: const InputDecoration(labelText: 'Correo electrónico', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _password,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder()),
-            ),
-            if (auth.errorMessage != null) ...[
-              const SizedBox(height: 8),
-              Text(auth.errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: auth.isLoading
-                  ? null
-                  : () => context.read<AuthProvider>().signIn(_email.text.trim(), _password.text),
-              child: auth.isLoading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Entrar'),
-            ),
-            const SizedBox(height: 16),
-            TextButton(onPressed: widget.onNavigateToRegister, child: const Text('¿No tienes cuenta? Regístrate')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key, required this.onSuccess, required this.onNavigateToLogin});
-  final VoidCallback onSuccess;
-  final VoidCallback onNavigateToLogin;
-
-  @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
-}
-
-class _RegisterScreenState extends State<RegisterScreen> {
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  final _confirm = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    if (auth.isAuthenticated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => widget.onSuccess());
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Crear cuenta')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(controller: _email, decoration: const InputDecoration(labelText: 'Correo electrónico', border: OutlineInputBorder())),
-            const SizedBox(height: 16),
-            TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder())),
-            const SizedBox(height: 16),
-            TextField(controller: _confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirmar contraseña', border: OutlineInputBorder())),
-            if (auth.errorMessage != null) ...[
-              const SizedBox(height: 8),
-              Text(auth.errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: auth.isLoading
-                  ? null
-                  : () => context.read<AuthProvider>().register(_email.text.trim(), _password.text, _confirm.text),
-              child: auth.isLoading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Registrarme'),
-            ),
-            const SizedBox(height: 16),
-            TextButton(onPressed: widget.onNavigateToLogin, child: const Text('¿Ya tienes cuenta? Inicia sesión')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({
-    super.key,
-    required this.onOpenMap,
-    required this.onOpenContacts,
-    required this.onOpenHistory,
-    required this.onOpenSettings,
-  });
-  final VoidCallback onOpenMap;
-  final VoidCallback onOpenContacts;
-  final VoidCallback onOpenHistory;
-  final VoidCallback onOpenSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.watch<DashboardProvider>();
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Guardian Lock'),
-        actions: [IconButton(icon: const Icon(Icons.settings), onPressed: onOpenSettings)],
-      ),
-      body: Padding(
+    return SafeArea(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        child: state.isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
+        children: [
+          Text('Enfoque', style: theme.textTheme.headlineMedium),
+          const SizedBox(height: 4),
+          Text(
+            appState.isBlockingActive
+                ? 'Modo productividad activo'
+                : 'Listo para concentrarte',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.outline),
+          ),
+          const SizedBox(height: 24),
+
+          // ------------------- Tarjeta principal de estado -------------------
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+            child: Card(
+              elevation: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(state.device?.deviceName ?? 'Dispositivo',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                            const SizedBox(height: 12),
-                            Text(state.device?.lastKnownLocation != null
-                                ? 'Última ubicación: ${state.device!.lastKnownLocation!.latitude.toStringAsFixed(4)}, '
-                                    '${state.device!.lastKnownLocation!.longitude.toStringAsFixed(4)}'
-                                : 'Última ubicación: aún no localizado'),
-                            const SizedBox(height: 4),
-                            const Text('Modo: 100% local (sin servidor)', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: appState.isBlockingActive
+                          ? Column(
+                              key: const ValueKey('active'),
+                              children: [
+                                Icon(Icons.lock_clock,
+                                    size: 56,
+                                    color: theme.colorScheme.primary),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _formatDuration(appState.remaining),
+                                  style: theme.textTheme.displaySmall,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '${appState.blockedPackages.length} apps bloqueadas',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ],
+                            )
+                          : Column(
+                              key: const ValueKey('inactive'),
+                              children: [
+                                Icon(Icons.lock_open,
+                                    size: 56,
+                                    color: theme.colorScheme.outline),
+                                const SizedBox(height: 12),
+                                Text('${appState.selectedDurationMinutes} min',
+                                    style: theme.textTheme.headlineMedium),
+                                const SizedBox(height: 8),
+                                Text(
+                                  appState.blockedPackages.isEmpty
+                                      ? 'Selecciona apps en la pestaña "Apps"'
+                                      : '${appState.blockedPackages.length} apps seleccionadas',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
                     ),
-                    const SizedBox(height: 16),
-                    Row(children: [
-                      Expanded(child: FilledButton.tonalIcon(onPressed: onOpenMap, icon: const Icon(Icons.map), label: const Text('Ubicación'))),
-                      const SizedBox(width: 12),
-                      Expanded(child: FilledButton.tonalIcon(onPressed: onOpenHistory, icon: const Icon(Icons.history), label: const Text('Historial'))),
-                    ]),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(onPressed: onOpenContacts, icon: const Icon(Icons.contact_phone), label: const Text('Contactos de emergencia')),
-                    const SizedBox(height: 24),
-                    Card(
-                      color: state.device?.isLost == true
-                          ? Theme.of(context).colorScheme.errorContainer
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Row(children: [
-                          Expanded(
-                            child: Text(state.device?.isLost == true ? 'Modo perdido activado' : 'Marcar como perdido',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                          Switch(
-                            value: state.device?.isLost ?? false,
-                            onChanged: (v) => context.read<DashboardProvider>().toggleLostMode(v),
-                          ),
-                        ]),
+                    const SizedBox(height: 20),
+                    if (!appState.isBlockingActive)
+                      _DurationPicker(appState: appState),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: appState.isBlockingActive
+                              ? theme.colorScheme.error
+                              : null,
+                        ),
+                        onPressed: () async {
+                          if (appState.isBlockingActive) {
+                            await appState.stopBlocking(completed: false);
+                          } else {
+                            if (appState.blockedPackages.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Selecciona al menos una app para bloquear')),
+                              );
+                              return;
+                            }
+                            await appState.startBlocking();
+                          }
+                        },
+                        icon: Icon(appState.isBlockingActive
+                            ? Icons.stop_circle_outlined
+                            : Icons.play_circle_outline),
+                        label: Text(appState.isBlockingActive
+                            ? 'Detener bloqueo'
+                            : 'Activar modo productividad'),
                       ),
                     ),
                   ],
                 ),
               ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ------------------- Frase motivacional -------------------
+          Card(
+            color: theme.colorScheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                child: Row(
+                  key: ValueKey(_phrase),
+                  children: [
+                    Icon(Icons.format_quote,
+                        color: theme.colorScheme.onPrimaryContainer),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _phrase,
+                        style: TextStyle(
+                            color: theme.colorScheme.onPrimaryContainer),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ------------------- Sugerencia productiva -------------------
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.lightbulb_outline),
+              title: const Text('En vez de eso, prueba:'),
+              subtitle: Text(_suggestion),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+          const _PermissionsBanner(),
+        ],
       ),
     );
   }
 }
 
-/// Pantalla de ubicación sin mapa visual (Google Maps requiere API key).
-/// Muestra la última ubicación y el historial como lista de coordenadas, y
-/// permite pedir la ubicación actual real del dispositivo.
-class MapScreen extends StatelessWidget {
-  const MapScreen({super.key});
+class _DurationPicker extends StatelessWidget {
+  final AppState appState;
+  const _DurationPicker({required this.appState});
+
+  static const _options = [15, 30, 60, 120, 240];
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<MapProvider>();
-    final fmt = DateFormat('dd MMM yyyy, HH:mm');
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.center,
+      children: [
+        for (final minutes in _options)
+          ChoiceChip(
+            label: Text(minutes < 60 ? '$minutes min' : '${minutes ~/ 60} h'),
+            selected: appState.selectedDurationMinutes == minutes,
+            onSelected: (_) => appState.setSelectedDuration(minutes),
+          ),
+        ChoiceChip(
+          label: const Text('Personalizado'),
+          selected: !_options.contains(appState.selectedDurationMinutes),
+          onSelected: (_) async {
+            final result = await _pickCustomDuration(context, appState);
+            if (result != null) appState.setSelectedDuration(result);
+          },
+        ),
+      ],
+    );
+  }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ubicación del dispositivo')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: state.isLocating
-            ? null
-            : () async {
-                final point = await context.read<MapProvider>().locateNow();
-                if (point != null && context.mounted) {
-                  await context.read<DashboardProvider>().updateLastLocation(point);
-                }
-              },
-        icon: state.isLocating
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            : const Icon(Icons.my_location),
-        label: const Text('Localizar ahora'),
-      ),
-      body: Column(
-        children: [
-          if (state.errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(state.errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+  Future<int?> _pickCustomDuration(BuildContext context, AppState appState) {
+    int minutes = appState.selectedDurationMinutes;
+    return showModalBottomSheet<int>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) => Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Duración personalizada',
+                    style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                Text('$minutes minutos',
+                    style: Theme.of(ctx).textTheme.headlineSmall),
+                Slider(
+                  min: 5,
+                  max: 480,
+                  divisions: 95,
+                  value: minutes.toDouble(),
+                  label: '$minutes min',
+                  onChanged: (v) =>
+                      setSheetState(() => minutes = v.round()),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, minutes),
+                  child: const Text('Confirmar'),
+                ),
+              ],
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Aviso breve si falta algún permiso, con acceso rápido a Ajustes.
+class _PermissionsBanner extends StatefulWidget {
+  const _PermissionsBanner();
+
+  @override
+  State<_PermissionsBanner> createState() => _PermissionsBannerState();
+}
+
+class _PermissionsBannerState extends State<_PermissionsBanner> {
+  bool? _usageOk;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final ok = await PermissionsHelper.hasUsageAccess();
+    if (mounted) setState(() => _usageOk = ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_usageOk == null || _usageOk == true) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.errorContainer,
+      child: ListTile(
+        leading: Icon(Icons.warning_amber,
+            color: theme.colorScheme.onErrorContainer),
+        title: const Text('Falta un permiso importante'),
+        subtitle: const Text(
+            'Concede "Acceso a datos de uso" para que el bloqueo funcione.'),
+        trailing: FilledButton(
+          onPressed: () {
+            PermissionsHelper.openUsageAccessSettings();
+          },
+          child: const Text('Abrir'),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// PANTALLA DE APPS — lista, búsqueda y selección (requisitos #1, #2)
+// =============================================================================
+class AppsScreen extends StatefulWidget {
+  const AppsScreen({super.key});
+
+  @override
+  State<AppsScreen> createState() => _AppsScreenState();
+}
+
+class _AppsScreenState extends State<AppsScreen> {
+  List<Application> _allApps = [];
+  List<Application> _filtered = [];
+  bool _loading = true;
+  String _query = '';
+
+  // Paquetes conocidos de apps que suelen distraer, para preseleccionar
+  // sugerencias rápidas (requisito: Facebook, TikTok, Instagram, YouTube,
+  // X/Twitter, Discord, etc.).
+  static const _knownDistractors = <String>{
+    'com.facebook.katana',
+    'com.zhiliaoapp.musically', // TikTok
+    'com.ss.android.ugc.trill', // TikTok (variante)
+    'com.instagram.android',
+    'com.google.android.youtube',
+    'com.twitter.android', // X / Twitter
+    'com.discord',
+    'com.snapchat.android',
+    'com.reddit.frontpage',
+    'com.whatsapp',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApps();
+  }
+
+  Future<void> _loadApps() async {
+    try {
+      final apps = await DeviceApps.getInstalledApplications(
+        includeSystemApps: false,
+        onlyAppsWithLaunchIntent: true,
+      );
+      apps.sort((a, b) =>
+          a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
+      setState(() {
+        _allApps = apps;
+        _filtered = apps;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Error listando apps: $e');
+      setState(() => _loading = false);
+    }
+  }
+
+  void _onSearch(String query) {
+    setState(() {
+      _query = query;
+      _filtered = _allApps
+          .where((a) =>
+              a.appName.toLowerCase().contains(query.toLowerCase()) ||
+              a.packageName.toLowerCase().contains(query.toLowerCase()))
+          .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = AppStateScope.of(context);
+
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('Apps a bloquear',
+                      style: Theme.of(context).textTheme.headlineSmall),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    final appState = AppStateScope.of(context);
+                    for (final pkg in _knownDistractors) {
+                      final exists =
+                          _allApps.any((a) => a.packageName == pkg);
+                      if (exists && !appState.blockedPackages.contains(pkg)) {
+                        appState.toggleBlockedPackage(pkg);
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.bolt),
+                  label: const Text('Sugeridas'),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: 'Buscar app...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onChanged: _onSearch,
+            ),
+          ),
+          const SizedBox(height: 8),
           Expanded(
-            child: state.isLoading
+            child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : state.history.isEmpty
-                    ? const Center(child: Text('Aún no hay ubicaciones registradas.\nToca "Localizar ahora".', textAlign: TextAlign.center))
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: state.history.length,
-                        separatorBuilder: (_, __) => const Divider(),
-                        itemBuilder: (context, index) {
-                          final point = state.history[index];
-                          return ListTile(
-                            leading: const Icon(Icons.location_on),
-                            title: Text('${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}'),
-                            subtitle: Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(point.timestamp))),
+                : _filtered.isEmpty
+                    ? const Center(child: Text('No se encontraron apps'))
+                    : ListView.builder(
+                        itemCount: _filtered.length,
+                        itemBuilder: (context, i) {
+                          final app = _filtered[i];
+                          final selected =
+                              appState.blockedPackages.contains(app.packageName);
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            color: selected
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer
+                                    .withOpacity(0.3)
+                                : Colors.transparent,
+                            child: CheckboxListTile(
+                              value: selected,
+                              onChanged: (_) => appState
+                                  .toggleBlockedPackage(app.packageName),
+                              secondary: app is ApplicationWithIcon
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.memory(app.icon,
+                                          width: 40, height: 40),
+                                    )
+                                  : const Icon(Icons.apps),
+                              title: Text(app.appName),
+                              subtitle: Text(app.packageName,
+                                  style: const TextStyle(fontSize: 11)),
+                            ),
                           );
                         },
                       ),
@@ -1007,61 +1309,113 @@ class MapScreen extends StatelessWidget {
   }
 }
 
-class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.onSignOut});
-  final VoidCallback onSignOut;
+// =============================================================================
+// ESTADÍSTICAS (requisito #10)
+// =============================================================================
+class StatsScreen extends StatelessWidget {
+  const StatsScreen({super.key});
 
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  final _deviceAdmin = DeviceAdminService();
-  bool _isAdminActive = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _deviceAdmin.isAdminActive().then((v) => setState(() => _isAdminActive = v));
+  String _formatHours(int totalSeconds) {
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    return '${h}h ${m}m';
   }
 
   @override
   Widget build(BuildContext context) {
-    final dashboardState = context.watch<DashboardProvider>();
-    return Scaffold(
-      appBar: AppBar(title: const Text('Configuración')),
-      body: Padding(
+    final appState = AppStateScope.of(context);
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('Estadísticas', style: theme.textTheme.headlineMedium),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                  icon: Icons.savings_outlined,
+                  label: 'Tiempo ahorrado',
+                  value: _formatHours(appState.totalSecondsSaved),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                  icon: Icons.block,
+                  label: 'Intentos bloqueados',
+                  value: '${appState.blockedAttempts}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _StatCard(
+            icon: Icons.local_fire_department,
+            label: 'Días consecutivos de productividad',
+            value: '${appState.streakDays}',
+            wide: true,
+          ),
+          const SizedBox(height: 20),
+          Text('Historial de sesiones', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (appState.history.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: Text('Aún no hay sesiones registradas')),
+            )
+          else
+            ...appState.history.take(30).map(
+                  (s) => Card(
+                    child: ListTile(
+                      leading: Icon(
+                        s.completed ? Icons.check_circle : Icons.cancel,
+                        color: s.completed ? Colors.green : Colors.orange,
+                      ),
+                      title: Text('${s.durationMinutes} min · '
+                          '${s.completed ? "Completada" : "Cancelada"}'),
+                      subtitle: Text(
+                          '${s.start.day}/${s.start.month}/${s.start.year} · '
+                          '${s.attempts} intentos bloqueados'),
+                    ),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool wide;
+
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.wide = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SwitchListTile(
-              title: const Text('Modo oculto'),
-              subtitle: const Text('Reduce la visibilidad de notificaciones no críticas.'),
-              value: dashboardState.device?.hiddenModeEnabled ?? false,
-              onChanged: (v) => context.read<DashboardProvider>().toggleHiddenMode(v),
-            ),
-            const Divider(),
-            ListTile(
-              title: const Text('Protección contra desinstalación'),
-              subtitle: Text(_isAdminActive ? 'Activada' : 'Desactivada (requiere código nativo Android)'),
-              trailing: OutlinedButton(
-                onPressed: () async {
-                  await _deviceAdmin.requestAdminActivation();
-                  final v = await _deviceAdmin.isAdminActive();
-                  setState(() => _isAdminActive = v);
-                },
-                child: Text(_isAdminActive ? 'Gestionar' : 'Activar'),
-              ),
-            ),
-            const Spacer(),
-            OutlinedButton(
-              onPressed: () {
-                context.read<AuthProvider>().signOut();
-                widget.onSignOut();
-              },
-              child: const Text('Cerrar sesión'),
-            ),
+            Icon(icon, color: theme.colorScheme.primary),
+            const SizedBox(height: 8),
+            Text(value, style: theme.textTheme.headlineSmall),
+            Text(label,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline)),
           ],
         ),
       ),
@@ -1069,53 +1423,135 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class ContactsScreen extends StatelessWidget {
-  const ContactsScreen({super.key});
+// =============================================================================
+// AJUSTES — tema, permisos (requisitos #13, #14, #15)
+// =============================================================================
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _usageAccess = false;
+  bool _batteryIgnored = false;
+  bool _notifications = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshPermissions();
+  }
+
+  Future<void> _refreshPermissions() async {
+    final usage = await PermissionsHelper.hasUsageAccess();
+    final battery = await PermissionsHelper.hasIgnoreBatteryOptimization();
+    final notif = await PermissionsHelper.hasNotificationPermission();
+    if (!mounted) return;
+    setState(() {
+      _usageAccess = usage;
+      _batteryIgnored = battery;
+      _notifications = notif;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<ContactsProvider>();
-    return Scaffold(
-      appBar: AppBar(title: const Text('Contactos de emergencia')),
-      floatingActionButton: FloatingActionButton(onPressed: () => _showAddDialog(context), child: const Icon(Icons.add)),
-      body: state.contacts.isEmpty
-          ? const Center(child: Text('No has agregado contactos todavía.'))
-          : ListView(
-              children: state.contacts
-                  .map((c) => ListTile(
-                        title: Text(c.name),
-                        subtitle: Text(c.phoneNumber),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => context.read<ContactsProvider>().removeContact(c.id),
-                        ),
-                      ))
-                  .toList(),
+    final appState = AppStateScope.of(context);
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('Ajustes', style: theme.textTheme.headlineMedium),
+          const SizedBox(height: 16),
+
+          // ---------------- Tema ----------------
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Apariencia', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(
+                          value: ThemeMode.light,
+                          icon: Icon(Icons.light_mode),
+                          label: Text('Claro')),
+                      ButtonSegment(
+                          value: ThemeMode.system,
+                          icon: Icon(Icons.brightness_auto),
+                          label: Text('Auto')),
+                      ButtonSegment(
+                          value: ThemeMode.dark,
+                          icon: Icon(Icons.dark_mode),
+                          label: Text('Oscuro')),
+                    ],
+                    selected: {appState.themeMode},
+                    onSelectionChanged: (s) =>
+                        appState.setThemeMode(s.first),
+                  ),
+                ],
+              ),
             ),
-    );
-  }
+          ),
 
-  void _showAddDialog(BuildContext context) {
-    final name = TextEditingController();
-    final phone = TextEditingController();
-    final provider = context.read<ContactsProvider>();
+          const SizedBox(height: 16),
+          Text('Permisos necesarios', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Nuevo contacto'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre')),
-          TextField(controller: phone, decoration: const InputDecoration(labelText: 'Teléfono')),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () {
-              provider.addContact(name.text, phone.text);
-              Navigator.pop(dialogContext);
+          _PermissionTile(
+            title: 'Acceso a datos de uso',
+            subtitle:
+                'Necesario para detectar qué app está en primer plano.',
+            granted: _usageAccess,
+            onTap: () {
+              PermissionsHelper.openUsageAccessSettings();
+              Future.delayed(
+                  const Duration(seconds: 1), _refreshPermissions);
             },
-            child: const Text('Guardar'),
+          ),
+          _PermissionTile(
+            title: 'Servicio de accesibilidad',
+            subtitle:
+                'Permite bloquear apps al instante (requiere configuración nativa, ver README).',
+            granted: null, // No verificable sin MethodChannel nativo.
+            onTap: () {
+              PermissionsHelper.openAccessibilitySettings();
+            },
+          ),
+          _PermissionTile(
+            title: 'Ignorar optimización de batería',
+            subtitle: 'Evita que Android cierre el servicio en segundo plano.',
+            granted: _batteryIgnored,
+            onTap: () async {
+              await PermissionsHelper.requestIgnoreBatteryOptimization();
+              _refreshPermissions();
+            },
+          ),
+          _PermissionTile(
+            title: 'Notificaciones',
+            subtitle: 'Para mostrar el estado del modo productividad.',
+            granted: _notifications,
+            onTap: () async {
+              await PermissionsHelper.requestNotificationPermission();
+              _refreshPermissions();
+            },
+          ),
+
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Acerca de Enfoque'),
+              subtitle: const Text(
+                  'App de productividad para bloquear distracciones. v1.0.0'),
+            ),
           ),
         ],
       ),
@@ -1123,170 +1559,124 @@ class ContactsScreen extends StatelessWidget {
   }
 }
 
-class HistoryScreen extends StatelessWidget {
-  const HistoryScreen({super.key});
+class _PermissionTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool? granted; // null = desconocido/no verificable desde Dart puro
+  final VoidCallback onTap;
+
+  const _PermissionTile({
+    required this.title,
+    required this.subtitle,
+    required this.granted,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<HistoryProvider>();
-    final fmt = DateFormat('dd MMM yyyy, HH:mm');
-    return Scaffold(
-      appBar: AppBar(title: const Text('Historial de eventos')),
-      body: state.events.isEmpty
-          ? const Center(child: Text('Sin eventos registrados todavía.'))
-          : ListView(
-              children: state.events
-                  .map((e) => ListTile(
-                        title: Text(e.description),
-                        subtitle: Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(e.timestamp))),
-                      ))
-                  .toList(),
-            ),
-    );
-  }
-}
+    final icon = granted == true
+        ? Icons.check_circle
+        : granted == false
+            ? Icons.error_outline
+            : Icons.help_outline;
+    final color = granted == true
+        ? Colors.green
+        : granted == false
+            ? Colors.red
+            : Colors.orange;
 
-// =============================================================================
-// SECCIÓN 6: APP RAÍZ Y NAVEGACIÓN
-// =============================================================================
-
-class Routes {
-  static const welcome = '/';
-  static const login = '/login';
-  static const register = '/register';
-  static const dashboard = '/dashboard';
-  static const map = '/map';
-  static const settings = '/settings';
-  static const contacts = '/contacts';
-  static const history = '/history';
-}
-
-/// Punto de entrada visual de la app. Si el dispositivo se acaba de
-/// encender (bandera puesta por BootReceiver.kt), muestra primero la
-/// pantalla de bloqueo de pantalla completa — nada más es accesible hasta
-/// que se ingrese la contraseña correcta.
-class RootGate extends StatefulWidget {
-  const RootGate({super.key, required this.startRoute, required this.requiresUnlock});
-  final String startRoute;
-  final bool requiresUnlock;
-
-  @override
-  State<RootGate> createState() => _RootGateState();
-}
-
-class _RootGateState extends State<RootGate> {
-  late bool _locked = widget.requiresUnlock;
-
-  @override
-  Widget build(BuildContext context) {
-    if (_locked) {
-      return MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: const Color(0xFF1B3A6B)),
-        home: BootLockScreen(onUnlocked: () => setState(() => _locked = false)),
-      );
-    }
-    return GuardianLockApp(startRoute: widget.startRoute);
-  }
-}
-
-class GuardianLockApp extends StatelessWidget {
-  const GuardianLockApp({super.key, required this.startRoute});
-  final String startRoute;
-
-  @override
-  Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()..checkSession()),
-        ChangeNotifierProvider(create: (_) => DashboardProvider()),
-        ChangeNotifierProvider(create: (_) => MapProvider()),
-        ChangeNotifierProvider(create: (_) => ContactsProvider()),
-        ChangeNotifierProvider(create: (_) => HistoryProvider()),
-      ],
-      child: MaterialApp(
-        title: 'Guardian Lock',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: const Color(0xFF1B3A6B)),
-        initialRoute: startRoute,
-        onGenerateRoute: (settings) {
-          switch (settings.name) {
-            case Routes.welcome:
-              return MaterialPageRoute(
-                builder: (c) => WelcomeScreen(
-                  onLoginTap: () => Navigator.pushNamed(c, Routes.login),
-                  onRegisterTap: () => Navigator.pushNamed(c, Routes.register),
-                ),
-              );
-            case Routes.login:
-              return MaterialPageRoute(
-                builder: (c) => LoginScreen(
-                  onSuccess: () => Navigator.pushNamedAndRemoveUntil(c, Routes.dashboard, (r) => false),
-                  onNavigateToRegister: () => Navigator.pushNamed(c, Routes.register),
-                ),
-              );
-            case Routes.register:
-              return MaterialPageRoute(
-                builder: (c) => RegisterScreen(
-                  onSuccess: () => Navigator.pushNamedAndRemoveUntil(c, Routes.dashboard, (r) => false),
-                  onNavigateToLogin: () => Navigator.pushNamed(c, Routes.login),
-                ),
-              );
-            case Routes.dashboard:
-              return MaterialPageRoute(
-                builder: (c) => DashboardScreen(
-                  onOpenMap: () => Navigator.pushNamed(c, Routes.map),
-                  onOpenContacts: () => Navigator.pushNamed(c, Routes.contacts),
-                  onOpenHistory: () => Navigator.pushNamed(c, Routes.history),
-                  onOpenSettings: () => Navigator.pushNamed(c, Routes.settings),
-                ),
-              );
-            case Routes.map:
-              return MaterialPageRoute(builder: (_) => const MapScreen());
-            case Routes.settings:
-              return MaterialPageRoute(
-                builder: (c) => SettingsScreen(
-                  onSignOut: () => Navigator.pushNamedAndRemoveUntil(c, Routes.welcome, (r) => false),
-                ),
-              );
-            case Routes.contacts:
-              return MaterialPageRoute(builder: (_) => const ContactsScreen());
-            case Routes.history:
-              return MaterialPageRoute(builder: (_) => const HistoryScreen());
-            default:
-              return MaterialPageRoute(
-                builder: (c) => WelcomeScreen(
-                  onLoginTap: () => Navigator.pushNamed(c, Routes.login),
-                  onRegisterTap: () => Navigator.pushNamed(c, Routes.register),
-                ),
-              );
-          }
-        },
+    return Card(
+      child: ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(title),
+        subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
+        trailing: FilledButton.tonal(
+          onPressed: onTap,
+          child: const Text('Configurar'),
+        ),
       ),
     );
   }
 }
 
 // =============================================================================
-// SECCIÓN 7: PUNTO DE ENTRADA
+// PANTALLA DE BLOQUEO — se muestra cuando se detecta un intento de abrir
+// una app bloqueada (requisito #4)
 // =============================================================================
+class BlockScreen extends StatelessWidget {
+  final String? packageName;
+  const BlockScreen({super.key, this.packageName});
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  @override
+  Widget build(BuildContext context) {
+    final appState = AppStateScope.of(context);
+    final theme = Theme.of(context);
 
-  await PermissionUtils.requestCorePermissions();
-
-  // Decide la pantalla inicial según si ya hay una sesión local activa,
-  // sin depender de ningún servidor.
-  final hasSession = await LocalAuthService().hasActiveSession();
-
-  // Si el dispositivo se acaba de encender, BootReceiver.kt ya dejó esta
-  // bandera en true — se exige contraseña antes de mostrar cualquier otra
-  // pantalla, incluso si ya había sesión activa.
-  final requiresUnlock = await BootLockService().isLockRequired();
-
-  runApp(RootGate(
-    startRoute: hasSession ? Routes.dashboard : Routes.welcome,
-    requiresUnlock: requiresUnlock,
-  ));
+    return PopScope(
+      canPop: false, // El usuario no puede "volver" a la app bloqueada.
+      child: Scaffold(
+        backgroundColor: theme.colorScheme.errorContainer,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lock,
+                    size: 96, color: theme.colorScheme.onErrorContainer),
+                const SizedBox(height: 24),
+                Text(
+                  'Esta app está bloqueada',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineMedium
+                      ?.copyWith(color: theme.colorScheme.onErrorContainer),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  randomPhrase(),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge
+                      ?.copyWith(color: theme.colorScheme.onErrorContainer),
+                ),
+                const SizedBox(height: 8),
+                if (appState.remaining > Duration.zero)
+                  Text(
+                    'Quedan ${appState.remaining.inMinutes} minutos',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onErrorContainer),
+                  ),
+                const SizedBox(height: 32),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.lightbulb_outline),
+                    title: const Text('Prueba esto en su lugar:'),
+                    subtitle: Text(randomSuggestion()),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () {
+                    // NATIVE: idealmente esto lo dispara directamente el
+                    // AccessibilityService (GLOBAL_ACTION_HOME) en el mismo
+                    // instante en que detecta la app bloqueada. Aquí, como
+                    // acción explícita del usuario dentro de nuestra propia
+                    // app, es seguro lanzar el intent HOME.
+                    const intent = AndroidIntent(
+                      action: 'android.intent.action.MAIN',
+                      category: 'android.intent.category.HOME',
+                      flags: [Flag.FLAG_ACTIVITY_NEW_TASK],
+                    );
+                    intent.launch();
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.home),
+                  label: const Text('Volver al inicio'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

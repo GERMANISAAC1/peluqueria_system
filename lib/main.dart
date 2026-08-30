@@ -42,7 +42,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:usage_stats/usage_stats.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 // -----------------------------------------------------------------------------
@@ -71,6 +70,13 @@ final FlutterLocalNotificationsPlugin localNotifications =
 // elimina por completo el riesgo de romper el build por culpa de un
 // mantenedor externo.
 const MethodChannel _appsChannel = MethodChannel('focus_app/apps');
+
+// Canal para consultar el permiso de "Acceso a datos de uso" y para recibir
+// avisos de MainActivity cuando el AccessibilityService detecta un intento
+// de abrir una app bloqueada (reemplaza al paquete `usage_stats`, que tenía
+// el mismo problema de compileSdk desactualizado que `device_apps`).
+const MethodChannel _nativeEventsChannel =
+    MethodChannel('focus_app/native_events');
 
 // =============================================================================
 // PUNTO DE ENTRADA
@@ -545,16 +551,23 @@ class AppStateScope extends InheritedNotifier<AppState> {
 }
 
 // =============================================================================
-// FOREGROUND SERVICE — TaskHandler (requisitos #5, #6, #7)
+// FOREGROUND SERVICE — TaskHandler (requisitos #5, #7)
 // =============================================================================
 // NATIVE: Este TaskHandler corre dentro de un servicio en primer plano real
 // de Android (implementado por el plugin flutter_foreground_task), lo cual
 // requiere declarar el <service> correspondiente en AndroidManifest.xml.
-// Aquí solo sondeamos la app en primer plano vía UsageStatsManager
-// (paquete `usage_stats`). Esto detecta el cambio de app, pero la capacidad
-// de "sacar" al usuario de la app bloqueada de forma instantánea y 100%
-// confiable —incluso con pantalla apagada— depende del AccessibilityService
-// nativo (ver AppBlockAccessibilityService.kt).
+//
+// IMPORTANTE: la detección de apps bloqueadas y la redirección instantánea
+// (requisito #6) YA NO se hacen aquí sondeando UsageStatsManager desde
+// Dart. Ese enfoque dependía del paquete `usage_stats`, que resultó
+// incompatible con versiones modernas de Android Gradle Plugin (mismo
+// problema de compileSdk que tuvimos con `device_apps`). En su lugar, esa
+// responsabilidad quedó 100% en AppBlockAccessibilityService.kt (nativo),
+// que además es más confiable porque reacciona al instante al cambio de
+// ventana, sin depender de un sondeo cada pocos segundos.
+//
+// Este TaskHandler ahora solo mantiene viva la notificación persistente y
+// avisa a la UI cuando el tiempo de bloqueo termina.
 // -----------------------------------------------------------------------------
 
 @pragma('vm:entry-point')
@@ -563,9 +576,7 @@ void startCallback() {
 }
 
 class FocusTaskHandler extends TaskHandler {
-  Set<String> _blockedPackages = {};
   DateTime? _blockEndTime;
-  String? _lastForegroundPackage;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -577,48 +588,7 @@ class FocusTaskHandler extends TaskHandler {
     await _refreshConfig();
 
     if (_blockEndTime == null || DateTime.now().isAfter(_blockEndTime!)) {
-      // El tiempo terminó; avisamos a la UI y dejamos de sondear apps.
       FlutterForegroundTask.sendDataToMain({'type': 'session_finished'});
-      return;
-    }
-
-    try {
-      final end = DateTime.now();
-      final start = end.subtract(const Duration(seconds: 10));
-      final events = await UsageStats.queryEvents(start, end);
-      if (events.isEmpty) return;
-
-      // El último evento de "MOVE_TO_FOREGROUND" indica la app activa.
-      String? foregroundPackage;
-      for (final event in events.reversed) {
-        if (event.eventType == '1' /* MOVE_TO_FOREGROUND */) {
-          foregroundPackage = event.packageName;
-          break;
-        }
-      }
-      if (foregroundPackage == null ||
-          foregroundPackage == _lastForegroundPackage) {
-        return;
-      }
-      _lastForegroundPackage = foregroundPackage;
-
-      if (_blockedPackages.contains(foregroundPackage)) {
-        // Avisamos a la UI para: 1) contar el intento, 2) mostrar la
-        // pantalla de bloqueo si Enfoque está en primer plano, o 3) intentar
-        // traer a Enfoque al frente (best-effort; ver limitación arriba).
-        FlutterForegroundTask.sendDataToMain({
-          'type': 'blocked_attempt',
-          'package': foregroundPackage,
-        });
-
-        FlutterForegroundTask.updateService(
-          notificationTitle: 'Modo Productividad activado',
-          notificationText: 'App bloqueada detectada. ${randomPhrase()}',
-        );
-      }
-    } catch (e) {
-      // No dejamos que un error de lectura de UsageStats tumbe el servicio.
-      debugPrint('Error en sondeo de UsageStats: $e');
     }
   }
 
@@ -627,8 +597,6 @@ class FocusTaskHandler extends TaskHandler {
 
   Future<void> _refreshConfig() async {
     final prefs = await SharedPreferences.getInstance();
-    _blockedPackages =
-        (prefs.getStringList(PrefsKeys.blockedPackages) ?? []).toSet();
     final endMs = prefs.getInt(PrefsKeys.blockEndTimeMs);
     _blockEndTime =
         endMs != null ? DateTime.fromMillisecondsSinceEpoch(endMs) : null;
@@ -654,10 +622,12 @@ class PermissionStatusInfo {
 
 class PermissionsHelper {
   /// Usage Access no tiene un flag estándar en permission_handler; se
-  /// verifica intentando leer estadísticas de uso.
+  /// verifica vía AppOpsManager desde el lado nativo (MainActivity.kt,
+  /// método "hasUsageAccess" del canal focus_app/native_events).
   static Future<bool> hasUsageAccess() async {
     try {
-      final granted = await UsageStats.checkUsagePermission();
+      final granted =
+          await _nativeEventsChannel.invokeMethod<bool>('hasUsageAccess');
       return granted ?? false;
     } catch (_) {
       return false;
@@ -715,14 +685,43 @@ class FocusApp extends StatefulWidget {
   State<FocusApp> createState() => _FocusAppState();
 }
 
-class _FocusAppState extends State<FocusApp> {
+class _FocusAppState extends State<FocusApp> with WidgetsBindingObserver {
   final AppState _appState = AppState();
   bool _loaded = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Cuando AppBlockAccessibilityService detecta una app bloqueada, saca al
+    // usuario a la pantalla de inicio y trae a Enfoque al frente. Ese
+    // "volver a primer plano" dispara este callback: aprovechamos para
+    // preguntarle al lado nativo si venimos de un bloqueo pendiente
+    // (patrón "pull", sin necesidad de que Kotlin llame directamente a
+    // Dart, lo cual simplifica bastante la integración).
+    if (state == AppLifecycleState.resumed) {
+      _checkPendingBlockedApp();
+    }
+  }
+
+  Future<void> _checkPendingBlockedApp() async {
+    try {
+      final package = await _nativeEventsChannel
+          .invokeMethod<String>('consumePendingBlockedPackage');
+      if (package == null) return;
+      // El contador de intentos ya lo incrementó el propio
+      // AccessibilityService directamente en SharedPreferences; solo
+      // necesitamos recargar el estado para reflejarlo en la UI.
+      await _appState.load();
+      _showBlockScreenIfNeeded(package);
+    } catch (e) {
+      debugPrint('Error consultando bloqueo pendiente: $e');
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -747,22 +746,22 @@ class _FocusAppState extends State<FocusApp> {
       ),
     );
 
-    // Escuchamos los mensajes que llegan del TaskHandler en segundo plano.
+    // Escuchamos los mensajes que llegan del TaskHandler en segundo plano
+    // (solo "session_finished" ahora; la detección de apps bloqueadas la
+    // hace AppBlockAccessibilityService.kt de forma nativa).
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
 
     if (mounted) setState(() => _loaded = true);
+
+    // Cubre el caso de arranque en frío: MainActivity pudo haber sido
+    // lanzada directamente por AppBlockAccessibilityService.
+    _checkPendingBlockedApp();
   }
 
   void _onTaskData(Object data) {
     if (data is! Map) return;
     final type = data['type'];
-    if (type == 'blocked_attempt') {
-      _appState.registerBlockedAttempt();
-      final ctx = navigatorKey.currentState?.overlay?.context;
-      if (ctx != null) {
-        _showBlockScreenIfNeeded(data['package'] as String?);
-      }
-    } else if (type == 'session_finished') {
+    if (type == 'session_finished') {
       _appState.stopBlocking(completed: true);
     }
   }
@@ -782,6 +781,7 @@ class _FocusAppState extends State<FocusApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     _appState.dispose();
     super.dispose();

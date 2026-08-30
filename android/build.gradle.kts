@@ -20,16 +20,21 @@ subprojects {
 }
 
 // -----------------------------------------------------------------------
-// FIX: algunos plugins antiguos (como device_apps) no declaran "namespace"
-// en su build.gradle, algo que AGP 8+ exige. Usamos plugins.withId en vez
-// de afterEvaluate para evitar conflicto con evaluationDependsOn de arriba
-// (afterEvaluate revienta con "project already evaluated" en ese escenario).
+// FIX: varios plugins antiguos (device_apps, usage_stats, etc.) no
+// declaran "namespace" y/o usan un "compileSdk" desactualizado en su
+// propio build.gradle. Esto hace que AAPT falle al enlazar recursos que
+// dependen de atributos de plataformas más nuevas (p. ej.
+// android:attr/lStar, de API 31+) que otras dependencias sí traen.
+// Corregimos ambas cosas para TODOS los subproyectos de tipo librería,
+// sin modificar el código de ningún plugin.
 // -----------------------------------------------------------------------
 subprojects {
     plugins.withId("com.android.library") {
         val androidExt = extensions.getByType(
             com.android.build.gradle.LibraryExtension::class.java
         )
+
+        // Fix 1: namespace faltante.
         if (androidExt.namespace == null) {
             val manifestFile = file("src/main/AndroidManifest.xml")
             if (manifestFile.exists()) {
@@ -43,6 +48,12 @@ subprojects {
                 }
             }
         }
+
+        // Fix 2: compileSdk desactualizado -> forzamos uno moderno para
+        // TODOS los subproyectos, sin excepción (esto es lo que faltaba:
+        // el fix anterior solo cubría casos puntuales si no se aplicaba
+        // globalmente a cada subproyecto de tipo librería detectado).
+        androidExt.compileSdk = 35
     }
 }
 

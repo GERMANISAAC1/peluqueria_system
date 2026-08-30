@@ -20,22 +20,24 @@ subprojects {
 }
 
 // -----------------------------------------------------------------------
-// FIX: varios plugins antiguos (device_apps, usage_stats, etc.) declaran
-// ellos mismos un "compileSdkVersion" desactualizado DENTRO de su propio
-// build.gradle, en una línea que se ejecuta DESPUÉS de que nuestro
-// "plugins.withId" se dispara. Eso significa que si forzamos compileSdk
-// justo ahí, el propio plugin lo vuelve a pisar un instante después.
+// FIX: solo ciertos plugins antiguos (usage_stats, y device_apps si
+// vuelve a usarse) declaran un "compileSdk"/"namespace" desactualizado en
+// su propio build.gradle, lo que rompe AAPT con recursos que dependen de
+// atributos de plataformas más nuevas (p. ej. android:attr/lStar, API 31+).
 //
-// La solución es aplicar el fix en "afterEvaluate" (cuando el script
-// completo del subproyecto, incluido su bloque android{}, ya terminó de
-// ejecutarse) para que nuestro valor sea el que quede al final. Pero como
-// "evaluationDependsOn(:app)" de arriba puede hacer que algunos
-// subproyectos YA estén evaluados para cuando llegamos aquí (lo cual
-// rompía afterEvaluate con "already evaluated"), verificamos el estado
-// primero y aplicamos el fix inmediatamente en ese caso.
+// IMPORTANTE: este parche se limita EXPLÍCITAMENTE por nombre de
+// subproyecto a los plugins rotos conocidos. Aplicarlo a TODOS los
+// subproyectos (como hacíamos antes) rompe a plugins bien mantenidos como
+// android_intent_plus, porque Gradle ya "congela" su compileSdk correcto
+// muy temprano, y forzar un nuevo valor después lanza
+// "It is too late to set compileSdk". Al tocar solo los módulos
+// realmente problemáticos, evitamos ese efecto colateral.
 // -----------------------------------------------------------------------
+val brokenLegacyModules = setOf("usage_stats", "device_apps")
+
 subprojects {
     val proj = this
+    if (proj.name !in brokenLegacyModules) return@subprojects
 
     plugins.withId("com.android.library") {
         fun applyGradleCompatFix() {
@@ -43,7 +45,7 @@ subprojects {
                 com.android.build.gradle.LibraryExtension::class.java
             )
 
-            // Fix 1: namespace faltante.
+            // Namespace faltante.
             if (androidExt.namespace == null) {
                 val manifestFile = proj.file("src/main/AndroidManifest.xml")
                 if (manifestFile.exists()) {
@@ -58,14 +60,14 @@ subprojects {
                 }
             }
 
-            // Fix 2: forzamos compileSdk moderno DESPUÉS de que el plugin
-            // haya terminado de configurar su propio bloque android{}.
-            androidExt.compileSdk = 35
+            // compileSdk desactualizado -> solo lo subimos si de verdad
+            // hace falta (evita tocar módulos que ya estén bien).
+            val current = androidExt.compileSdk
+            if (current == null || current < 31) {
+                androidExt.compileSdk = 35
+            }
         }
 
-        // Si el subproyecto ya terminó de evaluarse (puede pasar por el
-        // evaluationDependsOn(":app") de arriba), aplicamos el fix ya
-        // mismo. Si no, esperamos a que termine con afterEvaluate.
         if (proj.state.executed) {
             applyGradleCompatFix()
         } else {

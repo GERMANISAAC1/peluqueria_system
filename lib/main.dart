@@ -39,7 +39,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:device_apps/device_apps.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -58,6 +57,20 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // Productividad activado" la gestiona flutter_foreground_task directamente.
 final FlutterLocalNotificationsPlugin localNotifications =
     FlutterLocalNotificationsPlugin();
+
+// -----------------------------------------------------------------------------
+// Canal nativo propio para listar apps instaladas (requisito #1).
+// -----------------------------------------------------------------------------
+// NOTA: originalmente esta app usaba el paquete de terceros `device_apps`,
+// pero ese plugin quedó sin mantenimiento y su propio build.gradle no es
+// compatible con versiones modernas de Android Gradle Plugin (namespace
+// faltante, compileSdk desactualizado, recursos rotos). En vez de depender
+// de un paquete externo frágil para algo tan simple como "listar apps con
+// PackageManager", implementamos un MethodChannel propio hacia
+// MainActivity.kt (ver método "getInstalledApps" en ese archivo). Esto
+// elimina por completo el riesgo de romper el build por culpa de un
+// mantenedor externo.
+const MethodChannel _appsChannel = MethodChannel('focus_app/apps');
 
 // =============================================================================
 // PUNTO DE ENTRADA
@@ -95,12 +108,40 @@ class AppInfo {
   final String packageName;
   final String appName;
   final bool isSystemApp;
+  final Uint8List? icon;
 
   AppInfo({
     required this.packageName,
     required this.appName,
     required this.isSystemApp,
+    this.icon,
   });
+
+  /// Construye una instancia a partir del mapa que devuelve el canal nativo
+  /// `focus_app/apps` (ver MainActivity.kt, método getInstalledApps).
+  factory AppInfo.fromChannelMap(Map<dynamic, dynamic> map) {
+    final iconBytes = map['icon'];
+    return AppInfo(
+      packageName: map['packageName'] as String,
+      appName: map['appName'] as String,
+      isSystemApp: map['isSystemApp'] as bool? ?? false,
+      icon: iconBytes is Uint8List
+          ? iconBytes
+          : (iconBytes is List ? Uint8List.fromList(iconBytes.cast<int>()) : null),
+    );
+  }
+}
+
+/// Pide al lado nativo (Kotlin) la lista de apps instaladas con intent de
+/// lanzamiento. Lanza una excepción si el canal falla; quien llame debe
+/// envolver esto en try/catch (requisito #19).
+Future<List<AppInfo>> fetchInstalledApps() async {
+  final result = await _appsChannel.invokeMethod<List<dynamic>>('getInstalledApps');
+  if (result == null) return [];
+  return result
+      .cast<Map<dynamic, dynamic>>()
+      .map((m) => AppInfo.fromChannelMap(m))
+      .toList();
 }
 
 /// Una sesión de bloqueo registrada en el historial (requisito #20).
@@ -1163,9 +1204,10 @@ class AppsScreen extends StatefulWidget {
 }
 
 class _AppsScreenState extends State<AppsScreen> {
-  List<Application> _allApps = [];
-  List<Application> _filtered = [];
+  List<AppInfo> _allApps = [];
+  List<AppInfo> _filtered = [];
   bool _loading = true;
+  bool _loadError = false;
   String _query = '';
 
   // Paquetes conocidos de apps que suelen distraer, para preseleccionar
@@ -1192,20 +1234,21 @@ class _AppsScreenState extends State<AppsScreen> {
 
   Future<void> _loadApps() async {
     try {
-      final apps = await DeviceApps.getInstalledApplications(
-        includeSystemApps: false,
-        onlyAppsWithLaunchIntent: true,
-      );
+      final apps = await fetchInstalledApps();
       apps.sort((a, b) =>
           a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
       setState(() {
         _allApps = apps;
         _filtered = apps;
         _loading = false;
+        _loadError = false;
       });
     } catch (e) {
       debugPrint('Error listando apps: $e');
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _loadError = true;
+      });
     }
   }
 
@@ -1268,40 +1311,66 @@ class _AppsScreenState extends State<AppsScreen> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _filtered.isEmpty
-                    ? const Center(child: Text('No se encontraron apps'))
-                    : ListView.builder(
-                        itemCount: _filtered.length,
-                        itemBuilder: (context, i) {
-                          final app = _filtered[i];
-                          final selected =
-                              appState.blockedPackages.contains(app.packageName);
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            color: selected
-                                ? Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer
-                                    .withOpacity(0.3)
-                                : Colors.transparent,
-                            child: CheckboxListTile(
-                              value: selected,
-                              onChanged: (_) => appState
-                                  .toggleBlockedPackage(app.packageName),
-                              secondary: app is ApplicationWithIcon
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.memory(app.icon,
-                                          width: 40, height: 40),
-                                    )
-                                  : const Icon(Icons.apps),
-                              title: Text(app.appName),
-                              subtitle: Text(app.packageName,
-                                  style: const TextStyle(fontSize: 11)),
-                            ),
-                          );
-                        },
-                      ),
+                : _loadError
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline, size: 48),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'No se pudo obtener la lista de apps instaladas.',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: () {
+                                  setState(() => _loading = true);
+                                  _loadApps();
+                                },
+                                child: const Text('Reintentar'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : _filtered.isEmpty
+                        ? const Center(child: Text('No se encontraron apps'))
+                        : ListView.builder(
+                            itemCount: _filtered.length,
+                            itemBuilder: (context, i) {
+                              final app = _filtered[i];
+                              final selected = appState.blockedPackages
+                                  .contains(app.packageName);
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                color: selected
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer
+                                        .withOpacity(0.3)
+                                    : Colors.transparent,
+                                child: CheckboxListTile(
+                                  value: selected,
+                                  onChanged: (_) => appState
+                                      .toggleBlockedPackage(app.packageName),
+                                  secondary: app.icon != null
+                                      ? ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          child: Image.memory(app.icon!,
+                                              width: 40, height: 40),
+                                        )
+                                      : const Icon(Icons.apps),
+                                  title: Text(app.appName),
+                                  subtitle: Text(app.packageName,
+                                      style: const TextStyle(fontSize: 11)),
+                                ),
+                              );
+                            },
+                          ),
           ),
         ],
       ),

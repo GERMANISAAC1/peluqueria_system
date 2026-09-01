@@ -30,9 +30,9 @@ dependencies:
   # boot (requisitos #5, #7, #17). Requiere configuración nativa adicional.
   flutter_foreground_task: ^8.13.0
 
-  # Lectura de UsageStatsManager para saber qué app está en primer plano
-  # (requisito #6, parte Dart).
-  usage_stats: ^1.3.0
+  # NOTA: `usage_stats` fue eliminado (mismo problema de compileSdk
+  # desactualizado que tuvo `device_apps`). El acceso a UsageStatsManager
+  # ahora se resuelve con un MethodChannel propio en MainActivity.kt.
 
   # Notificaciones puntuales (aviso de felicitación al terminar, requisito #20)
   flutter_local_notifications: ^17.2.2

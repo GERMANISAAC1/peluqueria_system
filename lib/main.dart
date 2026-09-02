@@ -150,6 +150,40 @@ Future<List<AppInfo>> fetchInstalledApps() async {
       .toList();
 }
 
+/// Pide al lado nativo el tiempo de uso reciente por app (vía
+/// UsageStatsManager, requiere el permiso "Acceso a datos de uso"). Devuelve
+/// un mapa packageName -> milisegundos en primer plano dentro de la
+/// ventana de tiempo solicitada. Si el permiso no está concedido, Android
+/// simplemente devuelve un mapa vacío o incompleto (no lanza error), así
+/// que el llamador debe manejar ese caso con un aviso, no como falla.
+Future<Map<String, int>> fetchUsageStats({int hoursBack = 24}) async {
+  final result = await _nativeEventsChannel.invokeMethod<List<dynamic>>(
+    'getUsageStats',
+    {'hoursBack': hoursBack},
+  );
+  if (result == null) return {};
+  final map = <String, int>{};
+  for (final entry in result.cast<Map<dynamic, dynamic>>()) {
+    final pkg = entry['packageName'] as String?;
+    final millis = entry['totalTimeInForegroundMs'] as int?;
+    if (pkg != null && millis != null) {
+      map[pkg] = millis;
+    }
+  }
+  return map;
+}
+
+/// Formatea milisegundos como "2h 15m" o "45m" para mostrar el tiempo de
+/// uso reciente en la lista de apps.
+String formatUsageDuration(int millis) {
+  final duration = Duration(milliseconds: millis);
+  final h = duration.inHours;
+  final m = duration.inMinutes % 60;
+  if (h > 0) return '${h}h ${m}m';
+  if (m > 0) return '${m}m';
+  return '<1m';
+}
+
 /// Una sesión de bloqueo registrada en el historial (requisito #20).
 class BlockSession {
   final DateTime start;
@@ -1210,20 +1244,36 @@ class _AppsScreenState extends State<AppsScreen> {
   bool _loadError = false;
   String _query = '';
 
+  // Modo "ordenar por uso reciente" (requisito #10 / mejora sobre la lista
+  // fija de "sugeridas"): en vez de adivinar nombres de apps distractoras,
+  // mostramos las que más tiempo se usaron en las últimas 24h, para que el
+  // usuario decida con datos reales de SU teléfono.
+  bool _sortByUsage = false;
+  bool _loadingUsage = false;
+  Map<String, int> _usageMillis = {}; // packageName -> ms en primer plano
+
   // Paquetes conocidos de apps que suelen distraer, para preseleccionar
   // sugerencias rápidas (requisito: Facebook, TikTok, Instagram, YouTube,
-  // X/Twitter, Discord, etc.).
+  // X/Twitter, Discord, etc.). Se mantiene como atajo rápido, complementario
+  // al ordenamiento por uso real.
   static const _knownDistractors = <String>{
     'com.facebook.katana',
+    'com.facebook.lite',
     'com.zhiliaoapp.musically', // TikTok
     'com.ss.android.ugc.trill', // TikTok (variante)
     'com.instagram.android',
+    'com.instagram.lite',
     'com.google.android.youtube',
+    'com.google.android.apps.youtube.music',
     'com.twitter.android', // X / Twitter
     'com.discord',
     'com.snapchat.android',
     'com.reddit.frontpage',
     'com.whatsapp',
+    'com.facebook.orca', // Messenger
+    'com.pinterest',
+    'com.spotify.music',
+    'com.netflix.mediaclient',
   };
 
   @override
@@ -1252,15 +1302,76 @@ class _AppsScreenState extends State<AppsScreen> {
     }
   }
 
+  Future<void> _toggleSortByUsage() async {
+    if (_sortByUsage) {
+      // Apagar: volvemos al orden alfabético.
+      setState(() {
+        _sortByUsage = false;
+        _applyFilterAndSort();
+      });
+      return;
+    }
+
+    final hasAccess = await PermissionsHelper.hasUsageAccess();
+    if (!hasAccess) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Activa "Acceso a datos de uso" en Ajustes para ordenar por uso reciente'),
+          action: SnackBarAction(
+            label: 'Abrir',
+            onPressed: PermissionsHelper.openUsageAccessSettings,
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _loadingUsage = true);
+    try {
+      final usage = await fetchUsageStats(hoursBack: 24);
+      setState(() {
+        _usageMillis = usage;
+        _sortByUsage = true;
+        _loadingUsage = false;
+        _applyFilterAndSort();
+      });
+    } catch (e) {
+      debugPrint('Error obteniendo estadísticas de uso: $e');
+      setState(() => _loadingUsage = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No se pudo leer el tiempo de uso reciente')),
+      );
+    }
+  }
+
   void _onSearch(String query) {
-    setState(() {
-      _query = query;
-      _filtered = _allApps
-          .where((a) =>
-              a.appName.toLowerCase().contains(query.toLowerCase()) ||
-              a.packageName.toLowerCase().contains(query.toLowerCase()))
-          .toList();
-    });
+    _query = query;
+    setState(() => _applyFilterAndSort());
+  }
+
+  void _applyFilterAndSort() {
+    var list = _allApps
+        .where((a) =>
+            a.appName.toLowerCase().contains(_query.toLowerCase()) ||
+            a.packageName.toLowerCase().contains(_query.toLowerCase()))
+        .toList();
+
+    if (_sortByUsage) {
+      list.sort((a, b) {
+        final usageA = _usageMillis[a.packageName] ?? 0;
+        final usageB = _usageMillis[b.packageName] ?? 0;
+        if (usageA != usageB) return usageB.compareTo(usageA); // desc
+        return a.appName.toLowerCase().compareTo(b.appName.toLowerCase());
+      });
+    } else {
+      list.sort((a, b) =>
+          a.appName.toLowerCase().compareTo(b.appName.toLowerCase()));
+    }
+    _filtered = list;
   }
 
   @override
@@ -1291,6 +1402,28 @@ class _AppsScreenState extends State<AppsScreen> {
                   },
                   icon: const Icon(Icons.bolt),
                   label: const Text('Sugeridas'),
+                ),
+              ],
+            ),
+          ),
+          // Toggle "ordenar por uso reciente" — más útil que la lista fija
+          // de sugerencias, porque usa datos reales del teléfono del
+          // usuario en vez de adivinar nombres de apps.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                FilterChip(
+                  avatar: _loadingUsage
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.timelapse, size: 18),
+                  label: const Text('Ordenar por uso (24h)'),
+                  selected: _sortByUsage,
+                  onSelected: (_) => _toggleSortByUsage(),
                 ),
               ],
             ),
@@ -1344,6 +1477,7 @@ class _AppsScreenState extends State<AppsScreen> {
                               final app = _filtered[i];
                               final selected = appState.blockedPackages
                                   .contains(app.packageName);
+                              final usageMs = _usageMillis[app.packageName];
                               return AnimatedContainer(
                                 duration: const Duration(milliseconds: 200),
                                 color: selected
@@ -1365,8 +1499,15 @@ class _AppsScreenState extends State<AppsScreen> {
                                         )
                                       : const Icon(Icons.apps),
                                   title: Text(app.appName),
-                                  subtitle: Text(app.packageName,
-                                      style: const TextStyle(fontSize: 11)),
+                                  subtitle: _sortByUsage
+                                      ? Text(
+                                          usageMs != null && usageMs > 0
+                                              ? '${formatUsageDuration(usageMs)} en las últimas 24h'
+                                              : 'Sin uso reciente',
+                                          style: const TextStyle(fontSize: 12),
+                                        )
+                                      : Text(app.packageName,
+                                          style: const TextStyle(fontSize: 11)),
                                 ),
                               );
                             },

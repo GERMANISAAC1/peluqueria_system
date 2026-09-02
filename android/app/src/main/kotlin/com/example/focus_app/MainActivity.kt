@@ -3,6 +3,7 @@ package com.example.focus_app
 // ruta de carpetas donde vive este archivo.
 
 import android.app.AppOpsManager
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -88,6 +89,14 @@ class MainActivity : FlutterActivity() {
                             result.error("USAGE_ERROR", e.message, null)
                         }
                     }
+                    "getUsageStats" -> {
+                        try {
+                            val hoursBack = (call.argument<Int>("hoursBack")) ?: 24
+                            result.success(getUsageStats(hoursBack))
+                        } catch (e: Exception) {
+                            result.error("USAGE_STATS_ERROR", e.message, null)
+                        }
+                    }
                     "consumePendingBlockedPackage" -> {
                         val pkg = pendingBlockedPackage
                         pendingBlockedPackage = null
@@ -171,5 +180,30 @@ class MainActivity : FlutterActivity() {
         )
         return mode == AppOpsManager.MODE_ALLOWED
     }
-}
 
+    /**
+     * Devuelve el tiempo total en primer plano por app, en las últimas
+     * "hoursBack" horas, usando UsageStatsManager. Requiere el permiso
+     * "Acceso a datos de uso" concedido manualmente por el usuario; si no
+     * está concedido, Android simplemente devuelve datos vacíos o
+     * incompletos (no lanza excepción), así que Dart debe verificar
+     * "hasUsageAccess" antes de confiar en un resultado vacío como "sin uso".
+     */
+    private fun getUsageStats(hoursBack: Int): List<Map<String, Any?>> {
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val end = System.currentTimeMillis()
+        val start = end - hoursBack.coerceAtLeast(1) * 60 * 60 * 1000L
+
+        val statsMap = usageStatsManager.queryAndAggregateUsageStats(start, end)
+
+        return statsMap.values
+            .filter { it.totalTimeInForeground > 0 && it.packageName != applicationContext.packageName }
+            .map {
+                mapOf(
+                    "packageName" to it.packageName,
+                    "totalTimeInForegroundMs" to it.totalTimeInForeground,
+                )
+            }
+            .sortedByDescending { it["totalTimeInForegroundMs"] as Long }
+    }
+}

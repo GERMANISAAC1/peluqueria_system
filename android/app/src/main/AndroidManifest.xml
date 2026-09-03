@@ -1,29 +1,31 @@
 <!-- 
-  ╔══════════════════════════════════════════════════════════════╗
-  ║  DOMÓTICA PRO — AndroidManifest.xml                         ║
-  ║                                                              ║
-  ║  UBICACIÓN: android/app/src/main/AndroidManifest.xml        ║
-  ║                                                              ║
-  ║  SIN ESTE ARCHIVO CORRECTO:                                  ║
-  ║  • Android bloquea HTTP (solo permite HTTPS por defecto)     ║
-  ║  • La app no puede conectarse a ningún dispositivo local     ║
-  ╚══════════════════════════════════════════════════════════════╝
+  AndroidManifest.xml — Requisitos #5, #6, #7, #14, #17
+  Reemplaza el AndroidManifest.xml que genera `flutter create`.
+  Ajusta el paquete "com.example.focus_app" al tuyo real en TODO el archivo
+  y en las rutas de las clases Kotlin.
  -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<!--  ═══════════════════════════════════════════════════════
-         PERMISOS — OBLIGATORIOS para que la app funcione
-         ═══════════════════════════════════════════════════════  -->
-<!--  Sin esto Android bloquea TODA conexión de red  -->
-<uses-permission android:name="android.permission.INTERNET"/>
-<!--  Para detectar si hay WiFi disponible (opcional pero útil)  -->
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-<uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-<!--  ═══════════════════════════════════════════════════════
-         APPLICATION
-         usesCleartextTraffic="true" → permite HTTP (no solo HTTPS)
-         SIN esto, las URLs http://192.168.x.x son bloqueadas
-         ═══════════════════════════════════════════════════════  -->
-<application android:label="Domótica Pro" android:name="${applicationName}" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="true">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+<!--  ==================== PERMISOS ====================  -->
+<!--  Notificaciones (Android 13+)  -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<!--  Foreground Service (requisito #5)  -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+<!--  Reinicio automático tras reiniciar el dispositivo (requisito #17)  -->
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+<!--  Ignorar optimización de batería (requisito #14)  -->
+<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+<!--  Acceso a estadísticas de uso (UsageStatsManager, requisito #6).
+         Este permiso NO se puede pedir con un diálogo estándar: el usuario
+         debe concederlo manualmente en Ajustes > Acceso especial > Acceso
+         a datos de uso. La app abre esa pantalla con un Intent.  -->
+<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
+<!--  Necesario para poder listar apps instaladas en Android 11+ (API 30+)  -->
+<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>
+<!--  Mantener el dispositivo activo mientras dura el bloqueo (opcional,
+         usar con moderación por consumo de batería - requisito #18)  -->
+<uses-permission android:name="android.permission.WAKE_LOCK"/>
+<application android:label="Enfoque" android:name="${applicationName}" android:icon="@mipmap/ic_launcher">
 <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:taskAffinity="" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
 <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
 <intent-filter>
@@ -31,9 +33,42 @@
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  Necesario para Flutter  -->
 <meta-data android:name="flutterEmbedding" android:value="2"/>
+<!--  ==================== FOREGROUND SERVICE ====================
+             Requerido por el plugin flutter_foreground_task. Sin esta
+             declaración el servicio no puede iniciarse (requisito #5).  -->
+<service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="specialUse" android:exported="false">
+<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Bloqueo temporal de apps distractoras para productividad"/>
+</service>
+<!--  ==================== BOOT RECEIVER ====================
+             Reinicia el bloqueo si estaba activo cuando el usuario
+             reinició el dispositivo (requisito #17). Implementado en
+             BootReceiver.kt (ver archivo adjunto).  -->
+<receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
+<intent-filter>
+<action android:name="android.intent.action.BOOT_COMPLETED"/>
+<action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+</intent-filter>
+</receiver>
+<!--  ==================== ACCESSIBILITY SERVICE ====================
+             Pieza NATIVA clave para el bloqueo instantáneo y confiable
+             (requisito #6). Implementado en AppBlockAccessibilityService.kt.
+             El usuario debe habilitarlo manualmente en Ajustes >
+             Accesibilidad (Android no permite auto-activar este tipo de
+             servicio por razones de seguridad, en NINGUNA versión).  -->
+<service android:name=".AppBlockAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="Enfoque - Bloqueo de apps">
+<intent-filter>
+<action android:name="android.accessibilityservice.AccessibilityService"/>
+</intent-filter>
+<meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/>
+</service>
 </application>
-<!--  Permite instalar en SD card (opcional)  -->
-<uses-feature android:name="android.hardware.wifi" android:required="false"/>
+<!--  Necesario en Android 11+ para poder consultar apps con intent de
+         lanzamiento (requisito #1)  -->
+<queries>
+<intent>
+<action android:name="android.intent.action.MAIN"/>
+<category android:name="android.intent.category.LAUNCHER"/>
+</intent>
+</queries>
 </manifest>

@@ -1,1 +1,7 @@
-
+<!-- 
+  Configuración del AccessibilityService (requisito #6).
+  Referenciado desde AndroidManifest.xml por AppBlockAccessibilityService.
+  El texto de "description" va directo aquí (en vez de referenciar
+  @string/...) para no necesitar un segundo archivo en res/values/.
+ -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android" android:accessibilityEventTypes="typeWindowStateChanged" android:accessibilityFeedbackType="feedbackGeneric" android:accessibilityFlags="flagDefault" android:canRetrieveWindowContent="false" android:description="Enfoque usa este servicio para detectar cuándo intentas abrir una app que marcaste como distractora y redirigirte de vuelta, mientras el modo productividad está activo. No lee ni recopila el contenido de otras apps." android:notificationTimeout="100

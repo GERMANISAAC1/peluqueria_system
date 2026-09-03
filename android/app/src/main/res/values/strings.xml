@@ -1,1 +1,3 @@
-
+<resources>
+<string name="accessibility_service_description">Enfoque detecta cuando abres una app bloqueada y te redirige mientras el modo productividad esta activo.</string>
+</resources>

@@ -1,1 +1,13 @@
-<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android" android:accessibilityEventTypes="typeWindowStateChanged" android:accessibilityFeedbackType="feedbackGeneric" android:accessibilityFlags="flagDefault" android:canRetrieveWindowContent="false" android:description="@string/accessibility_service_description" android:notificationTimeout="100" android:packageNames=""/>
+<!-- 
+  Configuración del AccessibilityService (requisito #6).
+
+  IMPORTANTE: "android:packageNames" se omite a propósito (no se declara
+  con valor vacío "" ni se deja sin escribir el atributo del todo). Según
+  la documentación de Android, si el atributo NO está presente, el
+  servicio recibe eventos de TODAS las apps. Si se declara con un string
+  vacío, algunos fabricantes/versiones lo interpretan como "ninguna app",
+  lo cual haría que el servicio nunca reciba el evento de apertura de
+  Facebook/TikTok/etc. — esto era el bug real de por qué nunca bloqueaba
+  nada pese a tener el servicio activado.
+ -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android" android:accessibilityEventTypes="typeWindowStateChanged" android:accessibilityFeedbackType="feedbackGeneric" android:accessibilityFlags="flagDefault" android:canRetrieveWindowContent="false" android:description="@string/accessibility_service_description" android:notificationTimeout="100"/>

@@ -4,6 +4,6 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="false"
-    android:description="Enfoque detecta cuando abres una app bloqueada y te redirige mientras el modo productividad esta activo."
+    android:description="@string/accessibility_service_description"
     android:notificationTimeout="100"
     android:packageNames="" />

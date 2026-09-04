@@ -84,6 +84,27 @@ class AppBlockAccessibilityService : AccessibilityService() {
 
         try {
             val isActive = prefs.getBoolean(KEY_IS_ACTIVE, false)
+
+            // ───────────────────────────────────────────────────────────
+            // DIAGNÓSTICO TEMPORAL: muestra un Toast cada vez que detecta
+            // un cambio de app, con el estado interno que está leyendo.
+            // Esto confirma, sin necesidad de computadora ni adb, si el
+            // servicio de Accesibilidad está funcionando y qué está
+          //   leyendo de SharedPreferences. QUITAR una vez confirmado que
+            // el bloqueo funciona (buscar "DEBUG_TOAST" para encontrarlo).
+            // ───────────────────────────────────────────────────────────
+            if (packageName != lastBlockedPackage) {
+                val blockedPreview = readStringList(KEY_BLOCKED_PACKAGES)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        applicationContext,
+                        "DEBUG: $packageName | activo=$isActive | bloqueadas=${blockedPreview.size}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            // ─────────────────────────────────────────── fin DEBUG_TOAST
+
             if (!isActive) return
 
             val endTime = prefs.getLong(KEY_END_TIME, 0L)

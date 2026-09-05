@@ -102,9 +102,42 @@ class MainActivity : FlutterActivity() {
                         pendingBlockedPackage = null
                         result.success(pkg)
                     }
+                    "getRawPrefsDump" -> {
+                        try {
+                            result.success(getRawPrefsDump())
+                        } catch (e: Exception) {
+                            result.error("DUMP_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * DIAGNÓSTICO TEMPORAL: vuelca el contenido crudo y el tipo real de las
+     * claves relevantes de SharedPreferences, sin asumir ningún formato.
+     * Se usa para identificar exactamente cómo el plugin `shared_preferences`
+     * está codificando la lista de apps bloqueadas en este proyecto. Quitar
+     * una vez resuelto el problema de bloqueo (buscar "DEBUG_DUMP").
+     */
+    private fun getRawPrefsDump(): String {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        val keysToCheck = listOf(
+            "flutter.blocked_packages",
+            "flutter.is_blocking_active",
+            "flutter.block_end_time_ms",
+            "flutter.selected_duration_minutes",
+        )
+        val sb = StringBuilder()
+        for (key in keysToCheck) {
+            val value = prefs.all[key]
+            val type = value?.javaClass?.name ?: "NULL"
+            sb.append("KEY: $key\n")
+            sb.append("TIPO: $type\n")
+            sb.append("VALOR: $value\n\n")
+        }
+        return sb.toString()
     }
 
     // ------------------------- Apps instaladas -------------------------

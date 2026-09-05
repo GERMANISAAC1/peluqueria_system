@@ -97,10 +97,15 @@ class AppBlockAccessibilityService : AccessibilityService() {
                 val blockedPreview = readStringList(KEY_BLOCKED_PACKAGES)
                 val activoTxt = if (isActive) "SI" else "NO"
                 val shortPkg = packageName.substringAfterLast(".")
+                val rawPreview = try {
+                    prefs.getString(KEY_BLOCKED_PACKAGES, "NULL")?.take(40) ?: "NULL"
+                } catch (e: Exception) {
+                    "StringSet:" + (prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet())
+                }
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     android.widget.Toast.makeText(
                         applicationContext,
-                        "$shortPkg\nact:$activoTxt blk:${blockedPreview.size}",
+                        "$shortPkg\nact:$activoTxt blk:${blockedPreview.size}\nraw:$rawPreview",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
@@ -137,11 +142,32 @@ class AppBlockAccessibilityService : AccessibilityService() {
      * el prefijo mágico LIST_PREFIX seguido de un JSON array — NO como un
      * StringSet nativo de Android, a diferencia de lo que podría asumirse.
      */
+    /**
+     * Lee una List<String> guardada por el plugin Flutter `shared_preferences`.
+     *
+     * El formato interno con el que este plugin guarda listas ha cambiado
+     * entre versiones (algunas usan un StringSet nativo de Android, otras
+     * un String con un prefijo mágico + JSON, otras JSON plano sin
+     * prefijo). En vez de apostar a un solo formato y romper cada vez que
+     * cambia la versión resuelta por pub, probamos las 3 variantes en
+     * orden y usamos la primera que funcione. Esto es justo lo que
+     * causaba que "blk:0" apareciera siempre en el diagnóstico, pese a que
+     * el usuario sí había marcado apps para bloquear.
+     */
     private fun readStringList(key: String): List<String> {
+        // 1) StringSet nativo de Android.
+        try {
+            val asSet = prefs.getStringSet(key, null)
+            if (asSet != null) return asSet.toList()
+        } catch (e: Exception) {
+            // El valor guardado no es un StringSet; seguimos probando.
+        }
+
+        // 2) String plano con JSON adentro, con o sin el prefijo mágico
+        //    legacy del plugin.
         val raw = prefs.getString(key, null) ?: return emptyList()
-        if (!raw.startsWith(LIST_PREFIX)) return emptyList()
+        val json = if (raw.startsWith(LIST_PREFIX)) raw.substring(LIST_PREFIX.length) else raw
         return try {
-            val json = raw.substring(LIST_PREFIX.length)
             val arr = JSONArray(json)
             (0 until arr.length()).map { arr.getString(it) }
         } catch (e: Exception) {

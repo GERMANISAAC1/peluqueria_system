@@ -95,11 +95,13 @@ class AppBlockAccessibilityService : AccessibilityService() {
             // ───────────────────────────────────────────────────────────
             if (packageName != lastBlockedPackage) {
                 val blockedPreview = readStringList(KEY_BLOCKED_PACKAGES)
+                val activoTxt = if (isActive) "SI" else "NO"
+                val shortPkg = packageName.substringAfterLast(".")
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     android.widget.Toast.makeText(
                         applicationContext,
-                        "DEBUG: $packageName | activo=$isActive | bloqueadas=${blockedPreview.size}",
-                        android.widget.Toast.LENGTH_SHORT
+                        "$shortPkg\nact:$activoTxt blk:${blockedPreview.size}",
+                        android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
             }

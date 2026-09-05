@@ -263,6 +263,8 @@ class PrefsKeys {
   static const streakDays = 'streak_days';
   static const lastActiveDate = 'last_active_date';
   static const history = 'history';
+  static const strictModeEnabled = 'strict_mode_enabled';
+  static const isStrictSession = 'is_strict_session';
 }
 
 // =============================================================================
@@ -283,6 +285,14 @@ class AppState extends ChangeNotifier {
   int streakDays = 0;
   DateTime? lastActiveDate;
   List<BlockSession> history = [];
+
+  // Modo estricto (requisito de monetización: función premium). Cuando
+  // está activo, "Detener bloqueo" exige un reto de confirmación en vez de
+  // cancelar directo. "isStrictSession" se congela al iniciar la sesión,
+  // para que cambiar el ajuste a mitad de un bloqueo no sea una forma de
+  // hacer trampa.
+  bool strictModeEnabled = false;
+  bool isStrictSession = false;
 
   Timer? _countdownTicker;
   Duration remaining = Duration.zero;
@@ -322,6 +332,9 @@ class AppState extends ChangeNotifier {
       final lastActiveStr = prefs.getString(PrefsKeys.lastActiveDate);
       lastActiveDate =
           lastActiveStr != null ? DateTime.tryParse(lastActiveStr) : null;
+
+      strictModeEnabled = prefs.getBool(PrefsKeys.strictModeEnabled) ?? false;
+      isStrictSession = prefs.getBool(PrefsKeys.isStrictSession) ?? false;
 
       final historyStr = prefs.getString(PrefsKeys.history);
       if (historyStr != null) {
@@ -365,6 +378,8 @@ class AppState extends ChangeNotifier {
       await prefs.setInt(PrefsKeys.blockedAttempts, blockedAttempts);
       await prefs.setInt(PrefsKeys.totalSecondsSaved, totalSecondsSaved);
       await prefs.setInt(PrefsKeys.streakDays, streakDays);
+      await prefs.setBool(PrefsKeys.strictModeEnabled, strictModeEnabled);
+      await prefs.setBool(PrefsKeys.isStrictSession, isStrictSession);
       if (lastActiveDate != null) {
         await prefs.setString(
             PrefsKeys.lastActiveDate, lastActiveDate!.toIso8601String());
@@ -398,6 +413,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ----------------------------- Modo estricto -----------------------------
+
+  void setStrictModeEnabled(bool enabled) {
+    strictModeEnabled = enabled;
+    _savePrimitive();
+    notifyListeners();
+  }
+
   // ----------------------------- Selección de apps -----------------------------
 
   void toggleBlockedPackage(String packageName) {
@@ -426,6 +449,13 @@ class AppState extends ChangeNotifier {
     blockEndTime =
         blockStartTime!.add(Duration(minutes: selectedDurationMinutes));
     blockedAttempts = 0;
+    // Congelamos el modo estricto de ESTA sesión al momento de arrancar.
+    // Así, si el usuario cambia el ajuste general a mitad de un bloqueo
+    // (por ejemplo, apagándolo para poder cancelar más fácil), la sesión
+    // ya en curso sigue siendo estricta — el cambio solo aplica a la
+    // PRÓXIMA sesión. Esto es lo que hace que el modo tenga sentido como
+    // "anti-trampa" real.
+    isStrictSession = strictModeEnabled;
 
     _updateStreak();
     await _savePrimitive();
@@ -473,6 +503,7 @@ class AppState extends ChangeNotifier {
     blockStartTime = null;
     blockEndTime = null;
     remaining = Duration.zero;
+    isStrictSession = false;
 
     await _savePrimitive();
     await FlutterForegroundTask.stopService();
@@ -1003,6 +1034,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   '${appState.blockedPackages.length} apps bloqueadas',
                                   style: theme.textTheme.bodyMedium,
                                 ),
+                                if (appState.isStrictSession) ...[
+                                  const SizedBox(height: 8),
+                                  Chip(
+                                    avatar: Icon(Icons.shield,
+                                        size: 16,
+                                        color: theme.colorScheme.onErrorContainer),
+                                    label: const Text('Modo estricto'),
+                                    backgroundColor:
+                                        theme.colorScheme.errorContainer,
+                                    labelStyle: TextStyle(
+                                        color:
+                                            theme.colorScheme.onErrorContainer),
+                                  ),
+                                ],
                               ],
                             )
                           : Column(
@@ -1039,7 +1084,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         onPressed: () async {
                           if (appState.isBlockingActive) {
-                            await appState.stopBlocking(completed: false);
+                            if (appState.isStrictSession) {
+                              // Modo estricto: no se cancela directo, hay
+                              // que pasar el reto de confirmación primero.
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (_) => const StrictModeChallengeDialog(),
+                              );
+                              if (confirmed == true) {
+                                await appState.stopBlocking(completed: false);
+                              }
+                            } else {
+                              await appState.stopBlocking(completed: false);
+                            }
                           } else {
                             if (appState.blockedPackages.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -1712,6 +1770,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const SizedBox(height: 16),
+          // ---------------- Modo estricto (premium) ----------------
+          Card(
+            child: SwitchListTile(
+              secondary: Icon(Icons.shield_outlined,
+                  color: theme.colorScheme.primary),
+              title: Row(
+                children: [
+                  const Text('Modo estricto'),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'PRO',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              subtitle: const Text(
+                  'No podrás cancelar el bloqueo antes de tiempo sin completar un reto de confirmación. Aplica desde la próxima sesión que inicies.'),
+              value: appState.strictModeEnabled,
+              onChanged: (v) => appState.setStrictModeEnabled(v),
+            ),
+          ),
+
+          const SizedBox(height: 16),
           Text('Permisos necesarios', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
 
@@ -1861,6 +1954,141 @@ class _PermissionTile extends StatelessWidget {
 // PANTALLA DE BLOQUEO — se muestra cuando se detecta un intento de abrir
 // una app bloqueada (requisito #4)
 // =============================================================================
+// =============================================================================
+// RETO DE CONFIRMACIÓN — Modo estricto (función premium / anti-trampa)
+// =============================================================================
+// Se muestra en vez de cancelar directo cuando la sesión activa se inició
+// con "Modo estricto" encendido. Combina dos tipos de fricción deliberada:
+// 1) Una espera obligatoria (no se puede saltar).
+// 2) Escribir una frase exacta, elegida al azar en cada intento (para que
+//    no sea algo que el usuario memorice y escriba en automático sin
+//    pensarlo).
+// Devuelve `true` por Navigator.pop si el usuario completó el reto y de
+// verdad quiere cancelar, o `null`/`false` si se arrepintió o cerró el
+// diálogo — en ambos casos el bloqueo sigue activo.
+class StrictModeChallengeDialog extends StatefulWidget {
+  const StrictModeChallengeDialog({super.key});
+
+  @override
+  State<StrictModeChallengeDialog> createState() =>
+      _StrictModeChallengeDialogState();
+}
+
+class _StrictModeChallengeDialogState
+    extends State<StrictModeChallengeDialog> {
+  static const _phrases = [
+    'Quiero interrumpir mi enfoque',
+    'Prefiero distraerme ahora mismo',
+    'Estoy seguro de cancelar mi sesión',
+    'Elijo romper mi racha de hoy',
+  ];
+
+  static const _waitSeconds = 8;
+
+  late final String _targetPhrase;
+  late int _secondsLeft;
+  Timer? _timer;
+  final _controller = TextEditingController();
+  bool _textMatches = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _targetPhrase = _phrases[Random().nextInt(_phrases.length)];
+    _secondsLeft = _waitSeconds;
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        _secondsLeft--;
+        if (_secondsLeft <= 0) t.cancel();
+      });
+    });
+    _controller.addListener(() {
+      final matches = _controller.text.trim() == _targetPhrase;
+      if (matches != _textMatches) {
+        setState(() => _textMatches = matches);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final waitDone = _secondsLeft <= 0;
+    final canConfirm = waitDone && _textMatches;
+
+    return AlertDialog(
+      icon: Icon(Icons.shield, color: theme.colorScheme.error, size: 32),
+      title: const Text('¿Seguro que quieres cancelar?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+              'El modo estricto está activo para esta sesión. Escribe exactamente la siguiente frase para confirmar:'),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _targetPhrase,
+              style: const TextStyle(fontStyle: FontStyle.italic),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: 'Escribe la frase aquí',
+              border: const OutlineInputBorder(),
+              errorText: _controller.text.isNotEmpty && !_textMatches
+                  ? 'No coincide exactamente'
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (!waitDone)
+            Text(
+              'Espera $_secondsLeft s antes de poder confirmar...',
+              style: TextStyle(color: theme.colorScheme.outline),
+            )
+          else
+            Text(
+              'Ya puedes confirmar si de verdad quieres cancelar.',
+              style: TextStyle(color: theme.colorScheme.primary),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Mejor sigo enfocado'),
+        ),
+        FilledButton(
+          onPressed:
+              canConfirm ? () => Navigator.of(context).pop(true) : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: theme.colorScheme.error,
+          ),
+          child: const Text('Confirmar cancelación'),
+        ),
+      ],
+    );
+  }
+}
+
 class BlockScreen extends StatelessWidget {
   final String? packageName;
   const BlockScreen({super.key, this.packageName});

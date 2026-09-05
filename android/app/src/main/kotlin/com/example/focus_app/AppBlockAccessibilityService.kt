@@ -100,7 +100,7 @@ class AppBlockAccessibilityService : AccessibilityService() {
                 val rawPreview = try {
                     prefs.getString(KEY_BLOCKED_PACKAGES, "NULL")?.take(40) ?: "NULL"
                 } catch (e: Exception) {
-                    "StringSet:" + (prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet())
+                    "StringSet:" + (prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet<String>()) ?: emptySet<String>())
                 }
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     android.widget.Toast.makeText(

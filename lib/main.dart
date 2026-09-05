@@ -1757,6 +1757,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           Card(
             child: ListTile(
+              leading: const Icon(Icons.bug_report_outlined),
+              title: const Text('Diagnóstico (temporal)'),
+              subtitle: const Text(
+                  'Muestra el valor crudo guardado para las apps bloqueadas'),
+              trailing: FilledButton.tonal(
+                onPressed: () async {
+                  try {
+                    final result = await _nativeEventsChannel
+                        .invokeMethod<String>('getRawPrefsDump');
+                    if (!context.mounted) return;
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Valor crudo guardado'),
+                        content: SelectableText(result ?? 'null'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cerrar'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Error'),
+                        content: SelectableText('$e'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cerrar'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Ver'),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('Acerca de Enfoque'),
               subtitle: const Text(

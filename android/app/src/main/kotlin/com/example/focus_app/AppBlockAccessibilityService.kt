@@ -50,11 +50,6 @@ class AppBlockAccessibilityService : AccessibilityService() {
         private const val KEY_BLOCKED_PACKAGES = "flutter.blocked_packages"
         private const val KEY_IS_ACTIVE = "flutter.is_blocking_active"
         private const val KEY_END_TIME = "flutter.block_end_time_ms"
-
-        // Prefijo legacy que ALGUNAS versiones del plugin `shared_preferences`
-        // usan al codificar List<String> como un String plano + JSON. Lo
-        // seguimos contemplando como una posibilidad más, no como la única.
-        private const val LIST_PREFIX = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBMaXN0Lg=="
     }
 
     override fun onServiceConnected() {
@@ -78,30 +73,6 @@ class AppBlockAccessibilityService : AccessibilityService() {
         try {
             val isActive = prefs.getBoolean(KEY_IS_ACTIVE, false)
             val blockedList = readStringList(KEY_BLOCKED_PACKAGES)
-
-            // ───────────────────────────────────────────────────────────
-            // DIAGNÓSTICO TEMPORAL (buscar "DEBUG_TOAST" para quitarlo
-            // luego): en vez de adivinar el tipo con getString/getStringSet
-            // (que lanzan excepción si el tipo real no coincide), usamos
-            // prefs.all, que SIEMPRE devuelve el valor crudo real sin
-            // lanzar excepción, sea cual sea su tipo interno. Esto nos da
-            // la verdad exacta de qué hay guardado, sin conjeturas.
-            // ───────────────────────────────────────────────────────────
-            if (packageName != lastBlockedPackage) {
-                val rawValue = prefs.all[KEY_BLOCKED_PACKAGES]
-                val rawType = rawValue?.javaClass?.simpleName ?: "NULL"
-                val rawText = rawValue?.toString()?.take(50) ?: "NULL"
-                val activoTxt = if (isActive) "SI" else "NO"
-                val shortPkg = packageName.substringAfterLast(".")
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        applicationContext,
-                        "$shortPkg act:$activoTxt n:${blockedList.size}\ntipo:$rawType\n$rawText",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-            // ─────────────────────────────────────────── fin DEBUG_TOAST
 
             if (!isActive) return
 
@@ -141,9 +112,16 @@ class AppBlockAccessibilityService : AccessibilityService() {
             is Set<*> -> raw.filterIsInstance<String>()
             is List<*> -> raw.filterIsInstance<String>()
             is String -> {
-                val json = if (raw.startsWith(LIST_PREFIX)) raw.substring(LIST_PREFIX.length) else raw
+                // En vez de depender de adivinar el prefijo mágico exacto
+                // (ya nos equivocamos una vez por un solo carácter: "=="
+                // vs "!"), buscamos directamente dónde empieza el arreglo
+                // JSON real (el primer '[') y parseamos desde ahí. Esto
+                // funciona sin importar qué prefijo use la versión del
+                // plugin, actual o futura.
+                val jsonStart = raw.indexOf('[')
+                if (jsonStart == -1) return emptyList()
                 try {
-                    val arr = JSONArray(json)
+                    val arr = JSONArray(raw.substring(jsonStart))
                     (0 until arr.length()).map { arr.getString(it) }
                 } catch (e: Exception) {
                     e.printStackTrace()

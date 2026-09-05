@@ -51,14 +51,9 @@ class AppBlockAccessibilityService : AccessibilityService() {
         private const val KEY_IS_ACTIVE = "flutter.is_blocking_active"
         private const val KEY_END_TIME = "flutter.block_end_time_ms"
 
-        // El plugin oficial `shared_preferences` de Flutter NO guarda
-        // List<String> como un StringSet nativo de Android. Lo codifica
-        // como un String normal: este prefijo mágico (constante fija en el
-        // propio código fuente del plugin) + un JSON array. Sin decodificar
-        // esto correctamente, prefs.getStringSet() lanza ClassCastException
-        // (silenciada por nuestro try/catch) y SIEMPRE devuelve una lista
-        // vacía — este era el bug real por el que ninguna app se bloqueaba
-        // pese a tener todos los permisos bien configurados.
+        // Prefijo legacy que ALGUNAS versiones del plugin `shared_preferences`
+        // usan al codificar List<String> como un String plano + JSON. Lo
+        // seguimos contemplando como una posibilidad más, no como la única.
         private const val LIST_PREFIX = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBMaXN0Lg=="
     }
 
@@ -66,8 +61,6 @@ class AppBlockAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         prefs = applicationContext.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
-        // Configuración fina del servicio: solo nos interesan los cambios
-        // de ventana, para minimizar el consumo de batería/CPU (requisito #18).
         val info = AccessibilityServiceInfo()
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
@@ -84,28 +77,26 @@ class AppBlockAccessibilityService : AccessibilityService() {
 
         try {
             val isActive = prefs.getBoolean(KEY_IS_ACTIVE, false)
+            val blockedList = readStringList(KEY_BLOCKED_PACKAGES)
 
             // ───────────────────────────────────────────────────────────
-            // DIAGNÓSTICO TEMPORAL: muestra un Toast cada vez que detecta
-            // un cambio de app, con el estado interno que está leyendo.
-            // Esto confirma, sin necesidad de computadora ni adb, si el
-            // servicio de Accesibilidad está funcionando y qué está
-          //   leyendo de SharedPreferences. QUITAR una vez confirmado que
-            // el bloqueo funciona (buscar "DEBUG_TOAST" para encontrarlo).
+            // DIAGNÓSTICO TEMPORAL (buscar "DEBUG_TOAST" para quitarlo
+            // luego): en vez de adivinar el tipo con getString/getStringSet
+            // (que lanzan excepción si el tipo real no coincide), usamos
+            // prefs.all, que SIEMPRE devuelve el valor crudo real sin
+            // lanzar excepción, sea cual sea su tipo interno. Esto nos da
+            // la verdad exacta de qué hay guardado, sin conjeturas.
             // ───────────────────────────────────────────────────────────
             if (packageName != lastBlockedPackage) {
-                val blockedPreview = readStringList(KEY_BLOCKED_PACKAGES)
+                val rawValue = prefs.all[KEY_BLOCKED_PACKAGES]
+                val rawType = rawValue?.javaClass?.simpleName ?: "NULL"
+                val rawText = rawValue?.toString()?.take(50) ?: "NULL"
                 val activoTxt = if (isActive) "SI" else "NO"
                 val shortPkg = packageName.substringAfterLast(".")
-                val rawPreview = try {
-                    prefs.getString(KEY_BLOCKED_PACKAGES, "NULL")?.take(40) ?: "NULL"
-                } catch (e: Exception) {
-                    "StringSet:" + (prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet<String>()) ?: emptySet<String>())
-                }
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     android.widget.Toast.makeText(
                         applicationContext,
-                        "$shortPkg\nact:$activoTxt blk:${blockedPreview.size}\nraw:$rawPreview",
+                        "$shortPkg act:$activoTxt n:${blockedList.size}\ntipo:$rawType\n$rawText",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
@@ -117,9 +108,7 @@ class AppBlockAccessibilityService : AccessibilityService() {
             val endTime = prefs.getLong(KEY_END_TIME, 0L)
             if (endTime != 0L && System.currentTimeMillis() > endTime) return // bloqueo vencido
 
-            // Decodificamos correctamente la lista guardada por
-            // shared_preferences (ver comentario de LIST_PREFIX arriba).
-            val blockedSet: Set<String> = readStringList(KEY_BLOCKED_PACKAGES).toSet()
+            val blockedSet: Set<String> = blockedList.toSet()
 
             if (blockedSet.contains(packageName)) {
                 if (packageName != lastBlockedPackage) {
@@ -137,42 +126,31 @@ class AppBlockAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Lee y decodifica una List<String> guardada por el plugin Flutter
-     * `shared_preferences`. Ese plugin la almacena como un String plano con
-     * el prefijo mágico LIST_PREFIX seguido de un JSON array — NO como un
-     * StringSet nativo de Android, a diferencia de lo que podría asumirse.
-     */
-    /**
-     * Lee una List<String> guardada por el plugin Flutter `shared_preferences`.
-     *
-     * El formato interno con el que este plugin guarda listas ha cambiado
-     * entre versiones (algunas usan un StringSet nativo de Android, otras
-     * un String con un prefijo mágico + JSON, otras JSON plano sin
-     * prefijo). En vez de apostar a un solo formato y romper cada vez que
-     * cambia la versión resuelta por pub, probamos las 3 variantes en
-     * orden y usamos la primera que funcione. Esto es justo lo que
-     * causaba que "blk:0" apareciera siempre en el diagnóstico, pese a que
-     * el usuario sí había marcado apps para bloquear.
+     * Lee una List<String> guardada por el plugin Flutter `shared_preferences`,
+     * usando prefs.all para obtener el objeto crudo tal cual está guardado
+     * (SharedPreferences.all nunca lanza ClassCastException, a diferencia de
+     * getString()/getStringSet(), que sí lo hacen si adivinas mal el tipo).
+     * Luego decidimos cómo interpretarlo según su tipo real en tiempo de
+     * ejecución: StringSet nativo, List, o String con JSON (con o sin el
+     * prefijo mágico legacy del plugin).
      */
     private fun readStringList(key: String): List<String> {
-        // 1) StringSet nativo de Android.
-        try {
-            val asSet = prefs.getStringSet(key, null)
-            if (asSet != null) return asSet.toList()
-        } catch (e: Exception) {
-            // El valor guardado no es un StringSet; seguimos probando.
-        }
+        val raw = prefs.all[key] ?: return emptyList()
 
-        // 2) String plano con JSON adentro, con o sin el prefijo mágico
-        //    legacy del plugin.
-        val raw = prefs.getString(key, null) ?: return emptyList()
-        val json = if (raw.startsWith(LIST_PREFIX)) raw.substring(LIST_PREFIX.length) else raw
-        return try {
-            val arr = JSONArray(json)
-            (0 until arr.length()).map { arr.getString(it) }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList()
+        return when (raw) {
+            is Set<*> -> raw.filterIsInstance<String>()
+            is List<*> -> raw.filterIsInstance<String>()
+            is String -> {
+                val json = if (raw.startsWith(LIST_PREFIX)) raw.substring(LIST_PREFIX.length) else raw
+                try {
+                    val arr = JSONArray(json)
+                    (0 until arr.length()).map { arr.getString(it) }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    emptyList()
+                }
+            }
+            else -> emptyList()
         }
     }
 
@@ -182,9 +160,6 @@ class AppBlockAccessibilityService : AccessibilityService() {
 
         // 2) Registramos el intento directamente en SharedPreferences, en
         //    la misma clave que usa Dart (requisito #10 - estadísticas).
-        //    Flutter recarga este valor con AppState.load() cuando la app
-        //    vuelve a primer plano (ver "consumePendingBlockedPackage" en
-        //    MainActivity.kt y didChangeAppLifecycleState en main.dart).
         try {
             val current = prefs.getInt("flutter.blocked_attempts", 0)
             prefs.edit().putInt("flutter.blocked_attempts", current + 1).apply()
